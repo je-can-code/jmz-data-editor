@@ -1,5 +1,5 @@
 import type { MapCell } from '../core/renderer/camera.ts';
-import { NO_OVERLAY_STATE, type CellRect, type GhostTile, type OverlayState, type WorldRect } from '../core/renderer/MapRenderer.ts';
+import { NO_OVERLAY_STATE, type CellRect, type GhostEvent, type GhostTile, type OverlayState, type WorldRect } from '../core/renderer/MapRenderer.ts';
 
 /**
  * Where a composed overlay goes: the renderer.
@@ -14,16 +14,31 @@ type OverlaySink = {
 type OverlayOwner = 'events' | 'tools';
 
 /**
- * The fields each owner decides, besides the hover, which both hand over. The event tools show the selected events,
- * the box being drawn around them, the ghosts of events being dragged and the tiles a drop is refused on; the painting
- * tools show the words beside the cursor, the ghost tiles a click would lay and the area the select tool holds.
- * Whatever else an owner hands over is not its to decide and is left out, so the event tools' empty ghost tiles never
- * wipe the painting tools' preview.
+ * The fields each owner decides alone. The event tools show the selected events and the box being drawn around them;
+ * the painting tools show the words beside the cursor, the ghost tiles a click would lay and the area the select tool
+ * holds. Whatever else an owner hands over is not its to decide and is left out, so the event tools' empty ghost tiles
+ * never wipe the painting tools' preview.
+ *
+ * Three fields both hand over (see {@link OverlayComposer}): the hover; the ghost events, which the event tools show
+ * while events are dragged and the stamp while it is in hand; and the tiles those ghosts are refused on.
  */
 const OWNED_FIELDS: Readonly<Record<OverlayOwner, readonly (keyof OverlayState)[]>> = {
-  events: [ 'selectedEvents', 'selectionBox', 'ghostEvents', 'blockedCells' ],
+  events: [ 'selectedEvents', 'selectionBox' ],
   tools: [ 'hoverLabel', 'ghostTiles', 'selectedCells' ],
 };
+
+/**
+ * What each owner shows of the ghost events: the events themselves, and the tiles they are refused on.
+ */
+type GhostEventsPart = {
+  readonly ghostEvents: readonly GhostEvent[];
+  readonly blockedCells: readonly MapCell[];
+};
+
+/**
+ * No ghost events and no blocked tiles.
+ */
+const NO_GHOST_EVENTS: GhostEventsPart = { ghostEvents: [], blockedCells: [] };
 
 /**
  * Compares two rectangles by value.
@@ -94,9 +109,10 @@ const sameOverlay = (a: OverlayState, b: OverlayState): boolean =>
 
 /**
  * Puts together the overlay a map view shows from the parts its two owners hand it: the event tools' selection, box
- * and dragged ghosts, and the painting tools' cursor, words, ghost tiles and selected area. Each owner decides only its
- * own fields (see {@link OWNED_FIELDS}). Both hand over a hover, and only one of them is in hand at a time, the other
- * handing over none, so the painting tools' hover shows when they have one and the event tools' otherwise. The renderer
+ * and dragged ghosts, and the painting tools' cursor, words, ghost tiles, selected area and the stamp's ghost events.
+ * Each owner decides only its own fields (see {@link OWNED_FIELDS}). Both hand over a hover and ghost events, and only
+ * one of them is in hand at a time, the other handing over none, so the painting tools' hover shows when they have one
+ * and the event tools' otherwise, and the same for the ghost events with the tiles they are refused on. The renderer
  * hears only when the whole actually changes, so a pointer moving inside one cell redraws nothing.
  */
 class OverlayComposer
@@ -106,6 +122,8 @@ class OverlayComposer
   #state: OverlayState = NO_OVERLAY_STATE;
 
   #hovers: Record<OverlayOwner, CellRect | null> = { events: null, tools: null };
+
+  #ghostEvents: Record<OverlayOwner, GhostEventsPart> = { events: NO_GHOST_EVENTS, tools: NO_GHOST_EVENTS };
 
   #told = false;
 
@@ -148,9 +166,19 @@ class OverlayComposer
       this.#hovers = { ...this.#hovers, [owner]: part.hover };
     }
 
-    // the painting tools' hover when they show one, the event tools' otherwise.
+    if (part.ghostEvents !== undefined || part.blockedCells !== undefined)
+    {
+      const current = this.#ghostEvents[owner];
+      const ghostEvents = part.ghostEvents ?? current.ghostEvents;
+      const blockedCells = part.blockedCells ?? current.blockedCells;
+      this.#ghostEvents = { ...this.#ghostEvents, [owner]: { ghostEvents, blockedCells } };
+    }
+
+    // the painting tools' hover and ghost events when they show any, the event tools' otherwise.
     const hover = this.#hovers.tools ?? this.#hovers.events;
-    const next: OverlayState = { ...this.#state, ...(owned as Partial<OverlayState>), hover };
+    const { tools } = this.#ghostEvents;
+    const shown = tools.ghostEvents.length > 0 || tools.blockedCells.length > 0 ? tools : this.#ghostEvents.events;
+    const next: OverlayState = { ...this.#state, ...(owned as Partial<OverlayState>), hover, ...shown };
     if (this.#told && sameOverlay(this.#state, next))
     {
       return;

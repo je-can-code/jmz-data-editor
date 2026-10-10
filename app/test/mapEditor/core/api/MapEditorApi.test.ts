@@ -10,7 +10,9 @@ import { envelope, stubFetch } from '../../support/standIns.ts';
  * that is not an envelope is an error, never a quiet undefined: a route that changed shape must fail on its first
  * call. Saves are PUTs of the raw RMMZ shape (no envelope, nothing extra, since the server decodes strictly), each
  * carrying this window's id in X-Jmz-Client so the window can recognise its own save when the change stream echoes
- * it. Missing files answer null where the contract says 404 means "absent", and throw where it means "broken".
+ * it. Missing files answer null where the contract says 404 means "absent", and throw where it means "broken". An
+ * error carries the server's own words apart from the route, such as which file it could not read and why: the error
+ * its envelope gave, or its answer's text, never the envelope whole.
  */
 describe('HttpMapEditorApi', () =>
 {
@@ -78,6 +80,46 @@ describe('HttpMapEditorApi', () =>
         ]);
     });
 
+    it('reads the game\'s settings from the database route the data editor uses', async () =>
+    {
+      // Arrange: settings naming one switch and one variable.
+      const { api, requests } = buildApi(() => envelope({ gameTitle: 'Chef', switches: [ '', 'Door' ], variables: [ '', 'Gold' ] }));
+
+      // Act.
+      const system = await api.loadSystem();
+
+      // Assert.
+      expect([ system, requests.map(request => `${request.method} ${request.url}`) ])
+        .toStrictEqual([ { gameTitle: 'Chef', switches: [ '', 'Door' ], variables: [ '', 'Gold' ] }, [ `GET ${BASE}/api/system` ] ]);
+    });
+
+    it('reads where the project lives from the health route, and nothing for a server started without one', async () =>
+    {
+      // Arrange: a server serving Chef Adventure, and one serving no project, which leaves the root out.
+      const served = buildApi(() => envelope({ ok: true, projectRoot: '/games/chef-adventure', projectRootOk: true }));
+      const unserved = buildApi(() => envelope({ ok: true, projectRootOk: false }));
+
+      // Act.
+      const roots = [ await served.api.loadProjectRoot(), await unserved.api.loadProjectRoot() ];
+
+      // Assert.
+      expect([ roots, served.requests.map(request => `${request.method} ${request.url}`) ])
+        .toStrictEqual([ [ '/games/chef-adventure', '' ], [ `GET ${BASE}/api/health` ] ]);
+    });
+
+    it('reads what a new game starts with from its route', async () =>
+    {
+      // Arrange: a new game seating Jerald and Rupert.
+      const { api, requests } = buildApi(() => envelope({ party: [ 1, 2 ] }));
+
+      // Act.
+      const newGame = await api.loadNewGame();
+
+      // Assert.
+      expect([ newGame, requests.map(request => `${request.method} ${request.url}`) ])
+        .toStrictEqual([ { party: [ 1, 2 ] }, [ `GET ${BASE}/api/new-game` ] ]);
+    });
+
     it('reads the transfers landing on a map from its route, unwrapped from the answer about that map', async () =>
     {
       // Arrange.
@@ -90,6 +132,20 @@ describe('HttpMapEditorApi', () =>
       // Assert.
       expect([ arrivals, requests.map(request => `${request.method} ${request.url}`) ])
         .toStrictEqual([ [ door ], [ `GET ${BASE}/api/maps/12/arrivals` ] ]);
+    });
+
+    it('reads every event note holding anything from its route, unwrapped from the answer', async () =>
+    {
+      // Arrange.
+      const notes = [ { mapId: 3, eventId: 2, note: '<blueprint:[k3x9q2mf, 1]>' }, { mapId: 5, eventId: 1, note: 'Guard' } ];
+      const { api, requests } = buildApi(() => envelope({ notes }));
+
+      // Act.
+      const read = await api.loadEventNotes();
+
+      // Assert.
+      expect([ read, requests.map(request => `${request.method} ${request.url}`) ])
+        .toStrictEqual([ notes, [ `GET ${BASE}/api/event-notes` ] ]);
     });
 
     it('refuses an answer about another map\'s transfers rather than take it for this one\'s', async () =>
@@ -155,8 +211,49 @@ describe('HttpMapEditorApi', () =>
       const error = await api.loadMap(99).catch((caught: unknown) => caught);
 
       // Assert.
-      expect([ error instanceof MapEditorApiError, (error as MapEditorApiError).status, (error as Error).message ])
-        .toStrictEqual([ true, 404, 'GET /api/maps/99 answered 404: data/Map099.json does not exist' ]);
+      expect([ error instanceof MapEditorApiError, (error as MapEditorApiError).status, (error as Error).message, (error as MapEditorApiError).detail ])
+        .toStrictEqual([ true, 404, 'GET /api/maps/99 answered 404: data/Map099.json does not exist', 'data/Map099.json does not exist' ]);
+    });
+
+    it('raises a failed status answered in the envelope with the error the envelope carries, not the envelope whole', async () =>
+    {
+      // Arrange: a config the server's strict read refused.
+      const words = 'decoding /game/data/config.lighting.json: json: unknown field "tint"';
+      const { api } = buildApi(() => new Response(`${JSON.stringify({ path: '/game', error: words })}\n`, { status: 500 }));
+
+      // Act.
+      const error = await api.loadPluginConfig('lighting').catch((caught: unknown) => caught) as MapEditorApiError;
+
+      // Assert.
+      expect([ error.message, error.detail ])
+        .toStrictEqual([ `GET /api/config/lighting answered 500: ${words}`, words ]);
+    });
+
+    it('keeps a failed answer\'s JSON as it stands when it is no envelope carrying an error', async () =>
+    {
+      // Arrange: an envelope with an empty error, one with no path, and a list.
+      const bodies = [ '{"path":"/game","error":""}', '{"error":"boom"}', '[1]' ];
+      const { api } = buildApi(url => new Response(bodies[Number(url.slice(-1)) - 1], { status: 500 }));
+
+      // Act.
+      const errors = await Promise.all([ 1, 2, 3 ].map(mapId => api.loadMap(mapId).catch((caught: unknown) => caught)));
+
+      // Assert.
+      expect(errors.map(error => (error as MapEditorApiError).detail))
+        .toStrictEqual(bodies);
+    });
+
+    it('carries the error an envelope gives on success as the server\'s words', async () =>
+    {
+      // Arrange.
+      const { api } = buildApi(() => new Response(JSON.stringify({ path: '/p', error: 'decoding data/Map012.json: unknown field "x"' })));
+
+      // Act.
+      const error = await api.loadMap(12).catch((caught: unknown) => caught) as MapEditorApiError;
+
+      // Assert.
+      expect(error.detail)
+        .toBe('decoding data/Map012.json: unknown field "x"');
     });
 
     it('refuses a map id no map can have, before asking the server', async () =>
@@ -241,6 +338,54 @@ describe('HttpMapEditorApi', () =>
         ]);
     });
 
+    it('puts a merge of blueprint placements to the record\'s own route, with this window\'s id, never to the whole record\'s', async () =>
+    {
+      // Arrange: one map's placements, and a placement forgotten on another.
+      const { api, requests } = buildApi(() => new Response(null, { status: 204 }));
+      const merge = { schemaVersion: 2, maps: { 16: { aa22: [ { x: 1, y: 3 } ] } }, remove: [ { map: 3, blueprint: 'aa22', x: -1, y: 0 } ] };
+
+      // Act.
+      await api.mergeBlueprintUses(merge);
+
+      // Assert.
+      const [ request ] = requests;
+      expect([ request.method, request.url, request.headers['x-jmz-client'], JSON.parse(request.body as string) ])
+        .toStrictEqual([ 'PUT', `${BASE}/api/editor-data/blueprint-uses/maps`, 'window-7', merge ]);
+    });
+
+    it('puts a change to several maps to its own route, with this window\'s id, never to the blueprints\' route', async () =>
+    {
+      // Arrange: an event placed past the end of each of two maps' events.
+      const { api, requests } = buildApi(() => new Response(null, { status: 204 }));
+      const write = {
+        maps: [
+          { map: 20, patches: [ { kind: 'splice' as const, path: [ 'events' ], index: 4, removed: [], inserted: [ { id: 4 } ] } ] },
+          { map: 28, patches: [ { kind: 'splice' as const, path: [ 'events' ], index: 9, removed: [], inserted: [ { id: 9 } ] } ] },
+        ],
+      };
+
+      // Act.
+      await api.writeMapChanges(write);
+
+      // Assert.
+      const [ request ] = requests;
+      expect([ request.method, request.url, request.headers['x-jmz-client'], JSON.parse(request.body as string) ])
+        .toStrictEqual([ 'PUT', `${BASE}/api/map-changes`, 'window-7', write ]);
+    });
+
+    it('raises a change to several maps the server refused, in the server\'s words', async () =>
+    {
+      // Arrange.
+      const { api } = buildApi(() => new Response('Map 028 no longer holds what the change replaced: its events changed', { status: 409 }));
+
+      // Act.
+      const write = api.writeMapChanges({ maps: [ { map: 28, patches: [] } ] });
+
+      // Assert.
+      await expect(write)
+        .rejects.toMatchObject({ status: 409, detail: 'Map 028 no longer holds what the change replaced: its events changed' });
+    });
+
     it('puts the common events with this window\'s id, as its other saves, so the change comes back as its own', async () =>
     {
       // Arrange.
@@ -254,6 +399,21 @@ describe('HttpMapEditorApi', () =>
       const [ request ] = requests;
       expect([ request.method, request.url, request.headers['x-jmz-client'], request.headers['content-type'], JSON.parse(request.body as string) ])
         .toStrictEqual([ 'PUT', `${BASE}/api/common-events`, 'window-7', 'application/json', rows ]);
+    });
+
+    it('puts the game\'s settings whole, with this window\'s id, so a rename comes back as its own', async () =>
+    {
+      // Arrange: settings with switch 1 renamed.
+      const { api, requests } = buildApi(() => new Response(null, { status: 204 }));
+      const system = { gameTitle: 'Chef', switches: [ '', 'Door shut' ], variables: [ '' ] };
+
+      // Act.
+      await api.saveSystem(system);
+
+      // Assert.
+      const [ request ] = requests;
+      expect([ request.method, request.url, request.headers['x-jmz-client'], request.headers['content-type'], JSON.parse(request.body as string) ])
+        .toStrictEqual([ 'PUT', `${BASE}/api/system`, 'window-7', 'application/json', system ]);
     });
 
     it('raises a refused common events save, naming the route', async () =>
@@ -433,6 +593,37 @@ describe('HttpMapEditorApi', () =>
         .toStrictEqual([ [ 'Actor1', 'face_je' ], [], [ `${BASE}/api/img/faces`, `${BASE}/api/img/parallaxes` ] ]);
     });
 
+    it('lists a folder\'s sounds, and nothing when the server leaves an empty list out of its envelope', async () =>
+    {
+      // Arrange.
+      const { api, requests } = buildApi(url => envelope(url.endsWith('/se') ? [ 'Move1', 'Open1' ] : undefined));
+
+      // Act.
+      const sounds = await api.listAudio('se');
+      const none = await api.listAudio('me');
+
+      // Assert.
+      expect([ sounds, none, requests.map(request => request.url) ])
+        .toStrictEqual([ [ 'Move1', 'Open1' ], [], [ `${BASE}/api/audio/se`, `${BASE}/api/audio/me` ] ]);
+    });
+
+    it('reads the pictures the project\'s doors are drawn with, the most used first, as the server lists them', async () =>
+    {
+      // Arrange.
+      const sprites = [
+        { characterName: '!EX_Dungeon_Doors', characterIndex: 4, direction: 2, pattern: 2, doors: 6 },
+        { characterName: '!doors', characterIndex: 2, direction: 2, pattern: 1, doors: 5 },
+      ];
+      const { api, requests } = buildApi(() => envelope({ sprites }));
+
+      // Act.
+      const read = await api.loadDoorSprites();
+
+      // Assert.
+      expect([ read, requests.map(request => `${request.method} ${request.url}`) ])
+        .toStrictEqual([ sprites, [ `GET ${BASE}/api/door-sprites` ] ]);
+    });
+
     it('raises a server failure on an image rather than calling it missing', async () =>
     {
       // Arrange.
@@ -490,6 +681,40 @@ describe('HttpMapEditorApi', () =>
       // Assert.
       expect([ text, requests[0].url ])
         .toStrictEqual([ 'var $plugins = [];', `${BASE}/api/plugin-metadata` ]);
+    });
+  });
+
+  describe('plugin configs', () =>
+  {
+    it('reads a plugin config from its route and unwraps the envelope', async () =>
+    {
+      // Arrange.
+      const config = { light: { color: '#ffbb73' }, ambient: { color: '#000000' } };
+      const { api, requests } = buildApi(() => envelope(config));
+
+      // Act.
+      const loaded = await api.loadPluginConfig('lighting');
+
+      // Assert.
+      expect([ loaded, requests.map(request => `${request.method} ${request.url}`) ])
+        .toStrictEqual([ config, [ `GET ${BASE}/api/config/lighting` ] ]);
+    });
+
+    it('refuses a config name no route could have, before asking the server', async () =>
+    {
+      // Arrange.
+      const { api, requests } = buildApi(() => envelope({}));
+
+      // Act.
+      const attempts = [ api.loadPluginConfig('Lighting'), api.loadPluginConfig('../System') ];
+
+      // Assert.
+      await expect(attempts[0])
+        .rejects.toThrow('a config\'s name is lowercase letters, digits and hyphens, not "Lighting"');
+      await expect(attempts[1])
+        .rejects.toThrow('a config\'s name is lowercase letters, digits and hyphens, not "../System"');
+      expect(requests)
+        .toHaveLength(0);
     });
   });
 

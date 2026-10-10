@@ -1,13 +1,34 @@
-import React, { useEffect, useState } from 'react';
-import { Autocomplete, Box, MenuItem, Stack, TextField } from '@mui/material';
+import React, { useEffect, useRef, useState } from 'react';
+import {
+  Autocomplete,
+  Box,
+  Button,
+  ButtonBase,
+  Checkbox,
+  FormControlLabel,
+  InputAdornment,
+  MenuItem,
+  Slider,
+  Stack,
+  TextField,
+  Typography,
+} from '@mui/material';
 import type { MapEditorApi } from '../../core/api/MapEditorApi.ts';
 import { namedRows, type NamedRow } from '../../core/commandList/databaseNames.ts';
 import { mapLabel, mapOptions, type MapOption } from '../../core/commands/editors/mapOptions.ts';
-import type { GraphicValue, QuickOption, SharedField } from '../../core/eventKinds/quickFields.ts';
+import type {
+  ColorControl as ColorSpec,
+  GraphicValue,
+  QuickOption,
+  SharedField,
+  SliderControl as SliderSpec,
+} from '../../core/eventKinds/quickFields.ts';
+import type { MapLocation } from '../../core/locations/LocationPicks.ts';
 import type { JsonValue } from '../../core/model/json.ts';
 import type { RmmzEventImage } from '../../core/model/rmmzTypes.ts';
-import { parseWholeNumber, type NumberLimits } from '../../core/properties/propertyInputs.ts';
+import { parseDecimal, parseWholeNumber, type NumberLimits } from '../../core/properties/propertyInputs.ts';
 import { eventFrame, sheetKind } from '../../render/engine/characterFrames.ts';
+import { PickOnMapButton } from '../locationPicker/PickOnMapButton.tsx';
 import type { QuickResources } from './quickResources.ts';
 
 /**
@@ -26,12 +47,24 @@ const PREVIEW_SIZE = 56;
 const TILE_SIZE = 48;
 
 /**
- * What every control is handed: its shared field, what it reads besides, and what to do with a new value.
+ * Where the colour picker starts for events holding different colours, which have no one colour to start from.
+ */
+const MIXED_COLOR_START = '#808080';
+
+/**
+ * What every control is handed: its shared field, what it reads besides, what to do with a new value, and what to do
+ * with a value still being chosen.
  */
 type ControlProps = {
   readonly field: SharedField;
   readonly resources: QuickResources;
   readonly onChange: (value: JsonValue) => void;
+
+  /**
+   * Shows a value while it is still being chosen, such as a slider mid-drag, without making it a change of its own:
+   * the next call to {@link onChange} ends it, with the value chosen.
+   */
+  readonly onPreview: (value: JsonValue) => void;
 };
 
 /**
@@ -183,7 +216,9 @@ const NumberControl = (props: ControlProps & { limits: NumberLimits }) =>
 };
 
 /**
- * A drop-down committed as soon as a choice is made. A value none of the choices names is still shown, as itself.
+ * A drop-down committed as soon as a choice is made, handing on the choice's own value, a number or a name. A value none
+ * of the choices names is still shown, as itself, and the field's hint, such as what the choice does, sits under it.
+ * It always shows words, a choice named by nothing included, so its label always sits raised above them.
  * @param {ControlProps & { options: readonly QuickOption[] }} props The field and its choices.
  * @returns {React.JSX.Element} The drop-down.
  */
@@ -191,19 +226,31 @@ const SelectControl = (props: ControlProps & { options: readonly QuickOption[] }
 {
   const { field, onChange, options } = props;
   const known = field.mixed || options.some(option => option.value === field.value);
-  const shown = known ? options : [ ...options, { value: field.value as number, label: String(field.value) } ];
+  const shown = known ? options : [ ...options, { value: field.value as number | string, label: String(field.value) } ];
 
   /**
-   * Says what a stored choice reads as, or that the events differ.
+   * Says what a stored choice reads as, or that the events differ, whatever the choices hold: a choice named by an empty
+   * value must never read as events that differ, nor they as it.
    * @param {unknown} selected The choice's value, as the drop-down holds it.
    * @returns {string} The words.
    */
   const renderValue = (selected: unknown): string =>
   {
     const picked = shown.find(option => String(option.value) === selected);
-    return picked === undefined
+    return field.mixed || picked === undefined
       ? MIXED
       : picked.label;
+  };
+
+  /**
+   * Finds the choice the drop-down hands back by its text, so a name stays a name and a number a number.
+   * @param {string} selected The choice's value, as the drop-down holds it.
+   * @returns {number | string} The choice's own value.
+   */
+  const valueOf = (selected: string): number | string =>
+  {
+    // every item the drop-down offers is one of the choices shown, so the one picked is always among them.
+    return (shown.find(option => String(option.value) === selected) as QuickOption).value;
   };
 
   return (
@@ -213,8 +260,9 @@ const SelectControl = (props: ControlProps & { options: readonly QuickOption[] }
       value={field.mixed ? '' : String(field.value)}
       size={'small'}
       sx={{ minWidth: 150 }}
-      slotProps={{ ...raisedWhenMixed(field.mixed), select: { displayEmpty: true, renderValue } }}
-      onChange={event => onChange(Number(event.target.value))}
+      helperText={field.hint}
+      slotProps={{ inputLabel: { shrink: true }, select: { displayEmpty: true, renderValue } }}
+      onChange={event => onChange(valueOf(event.target.value))}
     >
       {shown.map(option => (
         <MenuItem key={option.value} value={String(option.value)}>
@@ -222,6 +270,254 @@ const SelectControl = (props: ControlProps & { options: readonly QuickOption[] }
         </MenuItem>
       ))}
     </TextField>
+  );
+};
+
+/**
+ * Shows a line of small print under a control, such as what a setting is or that its value is a default.
+ * @param {{ line: string | undefined }} props The line, or undefined for none.
+ * @returns {React.JSX.Element | null} The line, or nothing.
+ */
+const SmallPrint = (props: { line: string | undefined }) =>
+{
+  if (props.line === undefined)
+  {
+    return null;
+  }
+
+  return (
+    <Typography variant={'caption'} color={'text.secondary'} component={'div'}>
+      {props.line}
+    </Typography>
+  );
+};
+
+/**
+ * A number dragged along a track or typed into the box beside it. Dragging shows each value on the map as it goes, and
+ * hands on the value it is let go at, as one change; a press that moves nothing hands on nothing. The box commits like
+ * {@link NumberControl}, taking fractions to the places the field allows and refusing a number outside its limits. A
+ * value past either end of the track still shows in the box, with the track's thumb held at that end. Events holding
+ * different values show the box empty, reading "Mixed", and the thumb at the track's start.
+ * @param {ControlProps & { control: SliderSpec }} props The field and how it is dragged and typed.
+ * @returns {React.JSX.Element} The control.
+ */
+const SliderControl = (props: ControlProps & { control: SliderSpec }) =>
+{
+  const { field, onChange, onPreview, control } = props;
+  const { min, max, places, track, step, unit, ends, about } = control;
+  const [ from, to ] = track;
+  const shown = field.mixed ? '' : String(field.value);
+  const [ draft, setDraft ] = useState(shown);
+  const moved = useRef(false);
+  const parsed = parseDecimal(draft, { min, max, places });
+  const refused = draft !== shown && parsed === null;
+
+  useEffect(() =>
+  {
+    setDraft(shown);
+  }, [ shown ]);
+
+  /**
+   * Hands on an allowed number that differs from the value, and puts back the value otherwise.
+   */
+  const commit = () =>
+  {
+    if (draft === shown)
+    {
+      return;
+    }
+
+    if (parsed === null)
+    {
+      setDraft(shown);
+      return;
+    }
+
+    onChange(parsed);
+  };
+
+  const thumb = field.mixed
+    ? from
+    : Math.min(Math.max(field.value as number, from), to);
+  const adornment = unit === ''
+    ? undefined
+    : { endAdornment: <InputAdornment position={'end'}>{unit}</InputAdornment> };
+
+  return (
+    <Box sx={{ width: '100%' }}>
+      <Stack direction={'row'} spacing={2} alignItems={'flex-start'}>
+        <TextField
+          label={field.label}
+          value={draft}
+          size={'small'}
+          placeholder={field.mixed ? MIXED : undefined}
+          error={refused}
+          helperText={refused ? `${min} to ${max}` : undefined}
+          slotProps={{ ...raisedWhenMixed(field.mixed), htmlInput: { inputMode: 'decimal' }, input: adornment }}
+          onChange={event => setDraft(event.target.value)}
+          onBlur={commit}
+          onKeyDown={event =>
+          {
+            if (event.key === 'Escape')
+            {
+              setDraft(shown);
+              return;
+            }
+
+            if (event.key === 'Enter')
+            {
+              commit();
+            }
+          }}
+          sx={{ width: 130, flexShrink: 0 }}
+        />
+        <Box sx={{ flex: 1, minWidth: 0, pr: 1 }}>
+          <Slider
+            size={'small'}
+            value={thumb}
+            min={from}
+            max={to}
+            step={step}
+            aria-label={field.label}
+            onChange={(_event, value) =>
+            {
+              moved.current = true;
+              onPreview(value as number);
+            }}
+            onChangeCommitted={(_event, value) =>
+            {
+              // a press that moved nothing hands on nothing, whatever value the slider last moved to before it.
+              if (moved.current)
+              {
+                moved.current = false;
+                onChange(value as number);
+              }
+            }}
+          />
+          {ends !== undefined && (
+            <Stack direction={'row'} justifyContent={'space-between'} sx={{ mt: -1 }}>
+              <Typography variant={'caption'} color={'text.secondary'}>
+                {ends[0]}
+              </Typography>
+              <Typography variant={'caption'} color={'text.secondary'}>
+                {ends[1]}
+              </Typography>
+            </Stack>
+          )}
+        </Box>
+      </Stack>
+      <SmallPrint line={about}/>
+      <SmallPrint line={field.hint}/>
+    </Box>
+  );
+};
+
+/**
+ * Hands on the colour a picker settled on, once, when it was picking: what ends its choosing, whether it closes on a
+ * colour or is left, hands on whatever it shows, and a picker that showed nothing new hands on nothing.
+ * @param {HTMLInputElement} picker The colour picker.
+ * @param {React.RefObject<boolean>} picking Whether it has shown a colour since it last handed one on.
+ * @param {(value: JsonValue) => void} onChange What to hand the colour to.
+ */
+const settlePicked = (picker: HTMLInputElement, picking: React.RefObject<boolean>, onChange: (value: JsonValue) => void): void =>
+{
+  if (picking.current)
+  {
+    picking.current = false;
+    onChange(picker.value);
+  }
+};
+
+/**
+ * Picks a colour: the system's colour picker behind a swatch of the colour as it is, its digits beside it, then the
+ * swatches the kind offers. The picker shows each colour on the map as it is chosen, and hands on the colour it settles
+ * on as one change, when it closes on a new one or is left; a picker opened and closed untouched hands on nothing. A
+ * swatch hands on its colour at once, and the swatch of the colour the events hold is ringed. Events holding different
+ * colours read "Mixed". A colour that may be unset has a button that hands on an empty value at once.
+ * @param {ControlProps & { control: ColorSpec }} props The field, and whether its colour may be unset.
+ * @returns {React.JSX.Element} The control.
+ */
+const ColorControl = (props: ControlProps & { control: ColorSpec }) =>
+{
+  const { field, resources, onChange, onPreview, control } = props;
+  const pickerRef = useRef<HTMLInputElement | null>(null);
+  const picking = useRef(false);
+  const value = field.mixed ? null : field.value as string;
+
+  // the listener below outlives a render, so it hands on through whichever handler the latest render was given.
+  const latest = useRef(onChange);
+  latest.current = onChange;
+
+  // React hears a colour input change with each colour it passes through; the colour it closes on comes as the input's
+  // own change event, which only a listener on the input itself hears.
+  useEffect(() =>
+  {
+    const picker = pickerRef.current as HTMLInputElement;
+    const closed = () => settlePicked(picker, picking, latest.current);
+    picker.addEventListener('change', closed);
+    return () => picker.removeEventListener('change', closed);
+  }, []);
+
+  return (
+    <Box>
+      <Typography variant={'caption'} color={'text.secondary'} component={'div'}>
+        {field.label}
+      </Typography>
+      <Stack direction={'row'} spacing={1} alignItems={'center'} sx={{ flexWrap: 'wrap', rowGap: 0.5 }}>
+        <Box
+          component={'input'}
+          type={'color'}
+          ref={pickerRef}
+          aria-label={field.label}
+          value={value ?? MIXED_COLOR_START}
+          onChange={(event: React.ChangeEvent<HTMLInputElement>) =>
+          {
+            picking.current = true;
+            onPreview(event.target.value);
+          }}
+          onBlur={(event: React.FocusEvent<HTMLInputElement>) => settlePicked(event.currentTarget, picking, onChange)}
+          sx={{ width: 44, height: 30, p: 0, border: 1, borderColor: 'divider', borderRadius: 1, bgcolor: 'transparent', cursor: 'pointer' }}
+        />
+        <Typography variant={'body2'} sx={{ fontFamily: 'monospace', minWidth: 64 }}>
+          {value ?? MIXED}
+        </Typography>
+        {resources.swatches.map(swatch => (
+          <ButtonBase
+            key={swatch}
+            title={swatch}
+            aria-label={swatch}
+            onClick={() => onChange(swatch)}
+            sx={{ width: 20, height: 20, borderRadius: 0.5, bgcolor: swatch, border: 2, borderColor: swatch === value ? 'text.primary' : 'divider' }}
+          />
+        ))}
+        {control.clear !== undefined && (
+          <Button size={'small'} onClick={() => onChange('')}>
+            {control.clear}
+          </Button>
+        )}
+      </Stack>
+      <SmallPrint line={field.hint}/>
+    </Box>
+  );
+};
+
+/**
+ * A tick box, committed as soon as it is clicked, with the field's hint under it. Events holding it differently show it
+ * half ticked, and a click ticks it for all of them.
+ * @param {ControlProps} props The field.
+ * @returns {React.JSX.Element} The tick box.
+ */
+const CheckControl = (props: ControlProps) =>
+{
+  const { field, onChange } = props;
+  return (
+    <Box>
+      <FormControlLabel
+        control={<Checkbox size={'small'} checked={field.value === true} indeterminate={field.mixed} onChange={event => onChange(event.target.checked)}/>}
+        label={<Typography variant={'body2'}>{field.label}</Typography>}
+      />
+      <SmallPrint line={field.hint}/>
+    </Box>
   );
 };
 
@@ -237,7 +533,7 @@ const RowControl = (props: ControlProps & { list: 'item' | 'weapon' | 'armor' })
   const rows = namedRows(resources.names, list);
   if (rows.length === 0)
   {
-    return <NumberControl field={field} resources={resources} onChange={onChange} limits={{ min: 1, max: 9999 }}/>;
+    return <NumberControl {...props} limits={{ min: 1, max: 9999 }}/>;
   }
 
   const value = field.mixed
@@ -272,7 +568,7 @@ const MapControl = (props: ControlProps) =>
   const maps = resources.mapRows === null ? [] : mapOptions(resources.mapRows);
   if (maps.length === 0)
   {
-    return <NumberControl field={field} resources={resources} onChange={onChange} limits={{ min: 1, max: 9999 }}/>;
+    return <NumberControl {...props} limits={{ min: 1, max: 9999 }}/>;
   }
 
   const value = field.mixed
@@ -301,6 +597,34 @@ const MapControl = (props: ControlProps) =>
       onChange={(_event, picked) => onChange(picked.id)}
       renderInput={params => <TextField {...params} label={field.label} placeholder={field.mixed ? MIXED : undefined} slotProps={raisedWhenMixed(field.mixed)}/>}
     />
+  );
+};
+
+/**
+ * Picks a map and a tile together by clicking the tile on the map, starting from the place the field holds. Several
+ * events going to different places have no one place to start from, so the button waits until they agree; without a
+ * server there are no maps to pick from, so there is no button at all. A place where the player lands has the picker
+ * refuse the tiles the player cannot stand on.
+ * @param {ControlProps & { landing: boolean }} props The field, and whether the player lands on the place.
+ * @returns {React.JSX.Element | null} The button, or nothing without a server.
+ */
+const PlaceControl = (props: ControlProps & { readonly landing: boolean }) =>
+{
+  const { field, resources, landing, onChange } = props;
+  if (resources.api === null)
+  {
+    return null;
+  }
+
+  // a field the selected events hold differently holds no place, which leaves the button waiting.
+  return (
+    <Box sx={{ minHeight: 40, display: 'flex', alignItems: 'center' }}>
+      <PickOnMapButton
+        start={field.value as unknown as MapLocation | null}
+        landing={landing}
+        onPick={location => onChange(location as unknown as JsonValue)}
+      />
+    </Box>
   );
 };
 
@@ -454,17 +778,26 @@ const QuickControl = (props: ControlProps) =>
       return <MapControl {...props}/>;
     case 'graphic':
       return <GraphicControl {...props}/>;
+    case 'place':
+      return <PlaceControl {...props} landing={control.landing}/>;
+    case 'slider':
+      return <SliderControl {...props} control={control}/>;
+    case 'color':
+      return <ColorControl {...props} control={control}/>;
+    case 'check':
+      return <CheckControl {...props}/>;
   }
 };
 
 /**
  * Reports whether a field's control takes a whole row to itself.
  * @param {SharedField} field The field.
- * @returns {boolean} True for text over several lines and pictures.
+ * @returns {boolean} True for text over several lines, pictures, sliders and colours.
  */
 const takesWholeRow = (field: SharedField): boolean =>
 {
-  return field.control.kind === 'graphic' || (field.control.kind === 'text' && field.control.multiline);
+  const { control } = field;
+  return [ 'graphic', 'slider', 'color' ].includes(control.kind) || (control.kind === 'text' && control.multiline);
 };
 
 export { GraphicPreview, MIXED, QuickControl, takesWholeRow };

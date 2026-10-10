@@ -3,14 +3,16 @@ import type { Brush } from './brush.ts';
 import { isPaintingTool, type PaintState } from './PaintState.ts';
 
 /**
- * Takes up the pen for a brush just picked in the palette, when the events are in hand: a tile is picked to be
- * painted, so the next click on the map paints it rather than selecting an event. Any painting tool already in hand
- * stays, as a picked colour leaves a paint program's tool alone.
+ * Takes up the pen for a brush just picked in the palette, when the events or the stamp are in hand: a tile is picked to
+ * be painted, so the next click on the map paints it rather than selecting an event or placing the stamp, neither of
+ * which reads the brush. Any other painting tool already in hand stays, as a picked colour leaves a paint program's tool
+ * alone.
  * @param {PaintState} painting The window's painting settings.
  */
 const takeUpPenForPick = (painting: PaintState): void =>
 {
-  if (isPaintingTool(painting.settings.tool) === false)
+  const { tool } = painting.settings;
+  if (isPaintingTool(tool) === false || tool === 'stamp')
   {
     painting.setTool('pen');
   }

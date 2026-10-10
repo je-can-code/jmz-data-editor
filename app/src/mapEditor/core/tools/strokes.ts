@@ -219,9 +219,17 @@ class PaintStroke
  * @param {MapDocument} map The map.
  * @param {string} label What the history panel calls the step.
  * @param {readonly CellChange[]} changes The cells to change.
+ * @param {(transaction: Transaction) => void} alongside Anything else the same step changes with the tiles, such as the
+ * record of the placements a moved piece of the map carries; nothing, left out.
  * @returns {HistoryStep | null} The step, or null when nothing changes.
  */
-const applyTileEdit = (hub: DocumentHub, map: MapDocument, label: string, changes: readonly CellChange[]): HistoryStep | null =>
+const applyTileEdit = (
+  hub: DocumentHub,
+  map: MapDocument,
+  label: string,
+  changes: readonly CellChange[],
+  alongside: (transaction: Transaction) => void = () => undefined,
+): HistoryStep | null =>
 {
   if (changes.length === 0)
   {
@@ -231,6 +239,7 @@ const applyTileEdit = (hub: DocumentHub, map: MapDocument, label: string, change
   return hub.edit(label, [ mapHistoryKey(map.mapId) ], transaction =>
   {
     transaction.tiles(map.key, changes);
+    alongside(transaction);
   });
 };
 

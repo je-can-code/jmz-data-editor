@@ -1,5 +1,5 @@
 import { isJsonObject } from '../../model/json.ts';
-import type { CommandCatalogEntry, SentenceParts } from '../catalogTypes.ts';
+import type { CommandCatalogEntry, CommandPlace, SentenceParts } from '../catalogTypes.ts';
 import { field, withNotes } from './fieldHelpers.ts';
 import { moveRouteLines, moveStepPhrase } from './moveRoute.ts';
 import { DIRECT_VARIABLES, DIRECTIONS, DIRECTIONS_OR_RETAIN, FADES, options, SPEEDS, VEHICLES } from './options.ts';
@@ -50,6 +50,17 @@ const routeStepsPhrase = (parts: SentenceParts): string =>
 };
 
 /**
+ * The place {@link placeFields} names directly, which can be picked by clicking it on the map.
+ */
+const DIRECT_PLACE: CommandPlace = { map: 'map', x: 'x', y: 'y' };
+
+/**
+ * The place a transfer sends the player, named directly: picked like any other, but only on a tile the player can stand
+ * on.
+ */
+const LANDING_PLACE: CommandPlace = { ...DIRECT_PLACE, landing: true };
+
+/**
  * The fields of a place given directly or by variables, starting at a parameter.
  * @param {number} at The parameter holding the designation; the map, x and y follow it.
  * @returns {ReturnType<typeof field>[]} The fields.
@@ -84,6 +95,7 @@ const MOVEMENT_ENTRIES: readonly CommandCatalogEntry[] = [
       field('direction', 'Direction', 4, 'select', { options: DIRECTIONS_OR_RETAIN, default: 0 }),
       field('fade', 'Fade', 5, 'select', { options: FADES, default: 0 }),
     ],
+    places: [ LANDING_PLACE ],
     sentence: parts => withNotes(`Transfer to ${placePhrase(parts)}`, [
       parts.value('direction') !== 0 && `facing ${parts.text('direction')}`,
       parts.value('fade') === 1 && 'white fade',
@@ -101,6 +113,7 @@ const MOVEMENT_ENTRIES: readonly CommandCatalogEntry[] = [
       field('vehicle', 'Vehicle', 0, 'select', { options: VEHICLES, default: 0 }),
       ...placeFields(1),
     ],
+    places: [ DIRECT_PLACE ],
     sentence: parts => `Place the ${parts.text('vehicle')} at ${placePhrase(parts)}`,
     defaultParameters: [ 0, 0, 1, 0, 0 ],
   },

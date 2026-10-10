@@ -32,6 +32,12 @@ type HeadlessGameOptions = {
 
   /** How long to wait for the probe, in milliseconds. */
   timeoutMs: number;
+
+  /**
+   * Changes the copy's own files before the game starts, such as holding its lights steady; the real game is never
+   * touched. Left out, the copy runs as copied.
+   */
+  prepare?: (copy: string) => void;
 };
 
 /**
@@ -142,6 +148,7 @@ const runHeadlessGame = async (options: HeadlessGameOptions, config: ProbeConfig
   rmSync(`${config.outDir}/PROBE_READY`, { force: true });
   rmSync(`${config.outDir}/PROBE_REPORT.json`, { force: true });
   prepareGameCopy(options.projectRoot, copy, config);
+  options.prepare?.(copy);
 
   const stopDisplay = await ensureVirtualDisplay(options.display);
   const log = Bun.file(`${options.scratch}/nw.log`);

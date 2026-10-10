@@ -87,13 +87,18 @@ const operationFor = (event: HubEvent, origin: string): RemoteOperation | null =
     case 'committed':
       return { type: 'commit', origin, opId: event.opId, step: event.step, bases: event.bases };
     case 'undone':
-      return { type: 'undo', origin, opId: event.opId, stepId: event.step.id, bases: event.bases };
     case 'redone':
-      return { type: 'redo', origin, opId: event.opId, stepId: event.step.id, bases: event.bases };
+    {
+      // a move that left parts of its step carries the part that moved, so every window moves and leaves the same.
+      const split = event.split === undefined ? {} : { split: { step: event.step, left: event.split.left } };
+      return { type: event.type === 'undone' ? 'undo' : 'redo', origin, opId: event.opId, stepId: event.step.id, bases: event.bases, ...split };
+    }
     case 'forgotten':
       return { type: 'forget', origin, opId: event.opId, stepId: event.step.id, bases: event.bases };
     case 'saved':
-      return { type: 'saved', origin, document: event.document, marker: event.marker };
+      return { type: 'saved', origin, document: event.document, marker: event.marker, content: event.content };
+    case 'written':
+      return { type: 'written', origin, document: event.document, content: event.content };
     default:
       return null;
   }
@@ -110,8 +115,8 @@ const HEAD_EVENTS: ReadonlySet<HubEvent['type']> = new Set([
  * Keeps one window's documents in step with every other map editor window holding them, so a map and its event
  * windows share one live document and every torn-out panel stays current.
  *
- * Everything that happens to the hub here (a step, an undo, a redo, a forget, a save) is posted on the channel,
- * and every such operation posted by another window is repeated here through {@link DocumentHub.applyRemote},
+ * Everything that happens to the hub here (a step, an undo, a redo, a forget, a save, a file written otherwise) is posted
+ * on the channel, and every such operation posted by another window is repeated here through {@link DocumentHub.applyRemote},
  * which checks it against the head of this window's lineage for each document. A file changed outside the editor is
  * read once, by the window reading the change stream, which hands that very version to every window here
  * ({@link postOutside}); each takes it as the same step, so no two windows ever record different versions of one
@@ -121,7 +126,9 @@ const HEAD_EVENTS: ReadonlySet<HubEvent['type']> = new Set([
  * away. A copy that is only behind (its lineage a prefix of the other's) takes the other copy, which holds
  * everything it did. A copy that is ahead hands itself to the other window. Two copies that went different ways
  * are both kept: each window flags the document with the other's copy beside it, and the person chooses which
- * to keep ({@link resolveConflict}).
+ * to keep ({@link resolveConflict}). A document kept alongside others, such as the record of where blueprints are
+ * placed, is never flagged: the hub takes another window's edits to it whenever they fit, part by part, and its
+ * keeper settles the rest, so no choice over it ever stands to throw a step away.
  *
  * It also answers the questions the rest of the editor asks of other windows: whether a client id belongs to
  * the session (so the echo of its saves on the file-change stream can be ignored), which windows hold a
@@ -151,6 +158,8 @@ class SyncPeer
   #pending = new Map<string, PendingRequest>();
 
   #holderWaits = new Set<HolderWait>();
+
+  #holdingListeners = new Set<(key: DocumentKey) => void>();
 
   #requestCounter = 0;
 
@@ -303,6 +312,23 @@ class SyncPeer
     return this.#livePeers()
       .filter(([ , peer ]) => peer.holding.has(key))
       .map(([ clientId ]) => clientId);
+  }
+
+  /**
+   * Listens for what the other windows hold changing, as each window's presence says it: a window taking a document up,
+   * letting it go, or moving it on to another head, as an edit, an undo or a redo there does, and a window going, which
+   * lets go of everything it held. A window that only does not hold a document can follow it this way, looking at it
+   * afresh whenever its holder moves it on, without ever holding it.
+   * @param {(key: DocumentKey) => void} listener Called once for each document whose holding changed.
+   * @returns {() => void} Stops listening.
+   */
+  onHoldingChange(listener: (key: DocumentKey) => void): () => void
+  {
+    this.#holdingListeners.add(listener);
+    return () =>
+    {
+      this.#holdingListeners.delete(listener);
+    };
   }
 
   /**
@@ -539,7 +565,7 @@ class SyncPeer
         this.#notePeer(message.from, message.holding);
         break;
       case 'goodbye':
-        this.#peers.delete(message.from);
+        this.#forgetPeer(message.from);
         break;
       case 'snapshot-request':
         this.#answerSnapshotRequest(message);
@@ -566,12 +592,44 @@ class SyncPeer
    */
   #notePeer(from: string, holding: readonly HeldDocument[]): void
   {
-    this.#peers.set(from, { holding: new Map(holding.map(({ document, head }) => [ document, head ])), lastSeen: this.#now() });
+    const before = this.#peers.get(from)?.holding ?? new Map<DocumentKey, string>();
+    const after = new Map(holding.map(({ document, head }) => [ document, head ]));
+    this.#peers.set(from, { holding: after, lastSeen: this.#now() });
 
     // whoever was waiting to hear from a window holding one of these documents has now.
     [ ...this.#holderWaits ]
       .filter(wait => holding.some(({ document }) => document === wait.key))
       .forEach(wait => this.#settleWait(wait));
+    this.#announceHoldingChanges(before, after);
+  }
+
+  /**
+   * Forgets a window that said goodbye, and everything it held with it.
+   * @param {string} from The window.
+   */
+  #forgetPeer(from: string): void
+  {
+    const before = this.#peers.get(from)?.holding ?? new Map<DocumentKey, string>();
+    this.#peers.delete(from);
+    this.#announceHoldingChanges(before, new Map());
+  }
+
+  /**
+   * Tells whoever listens which documents one window holds otherwise than before: taken up, let go of, or at another
+   * head. A heartbeat repeating what it held says nothing.
+   * @param {ReadonlyMap<DocumentKey, string>} before What it held, at which heads.
+   * @param {ReadonlyMap<DocumentKey, string>} after What it holds now.
+   */
+  #announceHoldingChanges(before: ReadonlyMap<DocumentKey, string>, after: ReadonlyMap<DocumentKey, string>): void
+  {
+    const keys = new Set([ ...before.keys(), ...after.keys() ]);
+    keys.forEach(key =>
+    {
+      if (before.get(key) !== after.get(key))
+      {
+        [ ...this.#holdingListeners ].forEach(listener => listener(key));
+      }
+    });
   }
 
   /**

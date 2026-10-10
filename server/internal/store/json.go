@@ -29,14 +29,21 @@ func Load[T any](path string) (T, error) {
 // So the trade is deliberate: a model that has fallen behind the data refuses to load, loudly and
 // immediately, instead of erasing the part it did not understand. The fix is to declare the field.
 func load[T any](path string) (T, error) {
-	// declare the config to be returned.
-	var data T
-
 	// read the file.
 	fileBytes, err := os.ReadFile(path)
 	if err != nil {
+		var data T
 		return data, err
 	}
+
+	return decodeStrictly[T](fileBytes, path)
+}
+
+// decodeStrictly parses a file's bytes into T, refusing anything the model cannot account for, for
+// the reason load gives. path only names the file in the error.
+func decodeStrictly[T any](fileBytes []byte, path string) (T, error) {
+	// declare the config to be returned.
+	var data T
 
 	// parse the bytes into data, refusing anything the model cannot account for.
 	decoder := json.NewDecoder(bytes.NewReader(fileBytes))

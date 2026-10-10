@@ -7,9 +7,11 @@ import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import type { DockviewApi } from 'dockview-react';
 import type { MapEditorApi } from '../../../../src/mapEditor/core/api/MapEditorApi.ts';
+import { holdBlueprintMap } from '../../../../src/mapEditor/core/blueprints/blueprintMaps.ts';
+import { BLUEPRINTS_DOCUMENT } from '../../../../src/mapEditor/core/blueprints/blueprints.ts';
 import { CommandCatalog } from '../../../../src/mapEditor/core/commands/CommandCatalog.ts';
 import { mapHistoryKey } from '../../../../src/mapEditor/core/history/historyKeys.ts';
-import { MAP_INFOS_KEY, type DocumentKey } from '../../../../src/mapEditor/core/model/documentKeys.ts';
+import { blueprintMapId, MAP_INFOS_KEY, type DocumentKey } from '../../../../src/mapEditor/core/model/documentKeys.ts';
 import type { JsonValue } from '../../../../src/mapEditor/core/model/json.ts';
 import type { RmmzMapEvent } from '../../../../src/mapEditor/core/model/rmmzTypes.ts';
 import { PluginModuleRegistry } from '../../../../src/mapEditor/core/modules/PluginModuleRegistry.ts';
@@ -19,7 +21,9 @@ import { MapEditorServicesProvider } from '../../../../src/mapEditor/services/Ma
 import { EventsPanel } from '../../../../src/mapEditor/workspace/panels/EventsPanel.tsx';
 import { WorkspaceController } from '../../../../src/mapEditor/workspace/WorkspaceController.ts';
 import { WorkspaceProvider } from '../../../../src/mapEditor/workspace/workspaceHooks.tsx';
+import { storedBlueprints } from '../../support/blueprintFixtures.ts';
 import { command, event, hubWith, oreChest, page, transferPage } from '../../support/eventKindFixtures.ts';
+import { stampOf } from '../../support/stampFixtures.ts';
 import { buildTreeRows } from '../../support/treeFixtures.ts';
 
 /*
@@ -282,6 +286,49 @@ describe('EventsPanel', () =>
     // Assert.
     expect(opened)
       .toStrictEqual([ { path: '/map.html?view=event&map=1&event=3', name: 'jmz-event-1-3', width: 1240, height: 820 } ]);
+  });
+
+  it('lists a blueprint\'s events under its name once its panel has focus, and opens one\'s window by the blueprint', async () =>
+  {
+    // Arrange: the camp, holding the ore chest alone, open as a map beside map 1, the blueprints as the window read them.
+    const { controller, hub, opened } = await renderPanel();
+    act(() =>
+    {
+      hub.reload(BLUEPRINTS_DOCUMENT, storedBlueprints({ k3x9q2mf: { name: 'Goblin camp', stamp: stampOf({ width: 2, height: 2, events: [ { ...oreChest(3), x: 1, y: 1 } ] }) } }) as JsonValue);
+      holdBlueprintMap(hub, 'k3x9q2mf');
+    });
+    const mapId = blueprintMapId('k3x9q2mf');
+
+    // Act.
+    act(() => controller.panelActivated({ api: { component: 'map', location: { type: 'grid' } }, params: { mapId } } as never));
+    const rows = shownRows();
+    fireEvent.doubleClick(rowOf(3));
+
+    // Assert.
+    expect([ screen.getByText('Goblin camp') !== null, rows, opened ])
+      .toStrictEqual([
+        true,
+        [ [ '3', 'chest-ore', '1, 1', 'Chest', 'Action button', '2' ] ],
+        [ { path: '/map.html?view=event&blueprint=k3x9q2mf&event=3', name: 'jmz-blueprint-event-k3x9q2mf-3', width: 1240, height: 820 } ],
+      ]);
+  });
+
+  it('says a blueprint of tiles alone has no events', async () =>
+  {
+    // Arrange: the camp, a blueprint with no events, open as a map, the blueprints as the window read them.
+    const { controller, hub } = await renderPanel();
+    act(() =>
+    {
+      hub.reload(BLUEPRINTS_DOCUMENT, storedBlueprints({ k3x9q2mf: { name: 'Goblin camp', stamp: stampOf({ events: [], tiles: { layers: [ 0 ], values: [ 1536 ], calledFor: [ -1 ] } }) } }) as JsonValue);
+      holdBlueprintMap(hub, 'k3x9q2mf');
+    });
+
+    // Act.
+    act(() => controller.panelActivated({ api: { component: 'map', location: { type: 'grid' } }, params: { mapId: blueprintMapId('k3x9q2mf') } } as never));
+
+    // Assert.
+    expect(screen.queryByText('This blueprint has no events.') !== null)
+      .toBe(true);
   });
 
   it('steps through the rows with the arrow keys, centring on each, and opens the event picked last with Enter', async () =>

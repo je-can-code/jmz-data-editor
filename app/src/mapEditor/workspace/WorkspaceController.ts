@@ -1,6 +1,15 @@
 import type { DockviewApi, DockviewGroupPanel, IDockviewPanel } from 'dockview-react';
+import { nameInSteps } from '../core/blueprints/blueprintEdits.ts';
+import { blueprintsKeptGuard } from '../core/blueprints/blueprintMoves.ts';
+import { BLUEPRINTS_DOCUMENT, blueprintIn } from '../core/blueprints/blueprints.ts';
+import { BLUEPRINT_USES_DOCUMENT, usedCopiesOf } from '../core/blueprints/blueprintUses.ts';
+import { BlueprintUsesKeeper } from '../core/blueprints/blueprintUsesKeeper.ts';
+import { copiesLeftWords } from '../core/blueprints/copiesLeft.ts';
+import { installCloseGuard, type CloseTarget } from '../core/closeGuard.ts';
 import { EventSelection } from '../core/events/EventSelection.ts';
-import { mapHistoryKey, TREE_HISTORY_KEY, type HistoryKey } from '../core/history/historyKeys.ts';
+import { isFileGone } from '../core/history/DocumentHub.ts';
+import { blueprintHistoryKey, mapHistoryKey, TREE_HISTORY_KEY, type HistoryKey } from '../core/history/historyKeys.ts';
+import type { MapCell } from '../core/renderer/camera.ts';
 import { MapTreeService, type TreeOutcome } from '../core/tree/MapTreeService.ts';
 import { TREE_ROOT } from '../core/tree/MapTreeModel.ts';
 import type { CopiedMap, TreePlace } from '../core/tree/treePlans.ts';
@@ -13,11 +22,18 @@ import {
   PANEL_COMPONENTS,
   type PanelDirection,
 } from '../core/workspace/panels.ts';
-import { MAP_INFOS_KEY, mapDocumentKey } from '../core/model/documentKeys.ts';
+import {
+  blueprintIdOfMap,
+  blueprintMapId,
+  isMappableBlueprintId,
+  MAP_INFOS_KEY,
+  mapDocumentKey,
+  parseDocumentKey,
+} from '../core/model/documentKeys.ts';
 import type { RmmzMapInfo } from '../core/model/rmmzTypes.ts';
 import type { MapEditorServices } from '../services/MapEditorServices.ts';
 import { isStartPanel } from '../core/workspace/centre.ts';
-import { documentLabel } from '../views/documentLabels.ts';
+import { documentLabel, documentName } from '../views/documentLabels.ts';
 import { openEventWindow } from '../views/mapEditorViews.ts';
 import { CentreKeeper, centreOf } from './CentreKeeper.ts';
 import { POPOUT_URL } from './defaultLayout.ts';
@@ -93,6 +109,12 @@ type WorkspaceState = {
    * this.
    */
   readonly eventFocus: Readonly<Record<number, EventFocus>>;
+
+  /**
+   * The cell each map's views should centre on, by map id: what a click on a placement of a blueprint in the Blueprints
+   * section asks for.
+   */
+  readonly cellFocus: Readonly<Record<number, CellFocus>>;
 };
 
 /**
@@ -102,6 +124,15 @@ type WorkspaceState = {
  */
 type EventFocus = {
   readonly eventId: number;
+  readonly request: number;
+};
+
+/**
+ * One ask to centre on a cell: the cell, and the ask's own number, new every time, so asking for the same cell again
+ * after panning away centres on it again.
+ */
+type CellFocus = {
+  readonly cell: MapCell;
   readonly request: number;
 };
 
@@ -128,6 +159,11 @@ type OpenMapOptions = {
    * The event to select once it shows.
    */
   readonly focusEventId?: number | null;
+
+  /**
+   * The cell to centre on once it shows.
+   */
+  readonly focusCell?: MapCell | null;
 };
 
 /**
@@ -139,6 +175,12 @@ type OpenMapOptions = {
 class WorkspaceController
 {
   readonly services: MapEditorServices;
+
+  /**
+   * Keeps the record of where blueprints are placed on disk in step with the maps, a map's placements written with its
+   * file (see BlueprintUsesKeeper); none in a window with no server.
+   */
+  readonly placements: BlueprintUsesKeeper | null;
 
   readonly tree: MapTreeService | null;
 
@@ -192,6 +234,7 @@ class WorkspaceController
     clipboard: null,
     notice: null,
     eventFocus: {},
+    cellFocus: {},
   };
 
   #listeners = new Set<() => void>();
@@ -199,9 +242,14 @@ class WorkspaceController
   #noticeCount = 0;
 
   /**
-   * Counts the asks to pick out an event, for each ask's own number.
+   * Counts the asks to pick out an event or centre on a cell, for each ask's own number.
    */
   #focusRequests = 0;
+
+  /**
+   * Settles once the window has tried to hold the blueprints and the record of where they are placed, opened or not.
+   */
+  #placementsOpened: Promise<void>;
 
   /**
    * @param {MapEditorServices} services The window's services.
@@ -209,14 +257,46 @@ class WorkspaceController
   constructor(services: MapEditorServices)
   {
     this.services = services;
-    this.tree = services.api === null
+
+    // the placements are kept from the moment the workspace opens, before the record is held, so the keeper learns what
+    // its file holds from the very read that brings it in.
+    const { api } = services;
+    this.placements = api === null
       ? null
-      : new MapTreeService({ hub: services.hub, api: services.api, openDocument: key => services.openDocument(key) });
-    this.router = new HistoryRouter(services.hub, this.tree);
+      : new BlueprintUsesKeeper({
+        hub: services.hub,
+        api,
+        holders: key => services.sync.holders(key),
+        onProblem: message => this.notify(message, 'error'),
+      });
+    this.tree = api === null
+      ? null
+      : new MapTreeService({ hub: services.hub, api, openDocument: key => services.openDocument(key), placements: this.placements });
+
+    // no undo, redo or jump takes away a blueprint whose copies still name it, its placed tiles among them, nor moves a
+    // change to a blueprint whose files no longer hold what it would take back or put back; a refusal names a map as the
+    // map tree shows it.
+    const { hub, blueprintCopies, blueprintWriter, pairWriter } = services;
+    const usedCopies = { start: () => blueprintCopies.start(), countOf: (blueprintId: string) => usedCopiesOf(blueprintCopies, hub, blueprintId) };
+    const blueprintsKept = blueprintsKeptGuard(hub, usedCopies, mapId => this.mapName(mapId));
+    const leftWords = copiesLeftWords({ hub, mapName: mapId => this.mapName(mapId) });
+    this.router = new HistoryRouter(
+      hub,
+      this.tree,
+      (step, direction, mapName) => blueprintsKept(step, direction) ?? blueprintWriter?.guard(step, direction, mapName) ?? pairWriter?.guard(step, direction, mapName) ?? null,
+      leftWords,
+      mapId => this.mapName(mapId),
+    );
+
+    // a change to a blueprint, or a transfer pair, that could not be written says why, as anything refused does.
+    blueprintWriter?.onProblem((message, alarm) => this.notify(message, alarm ? 'alarm' : 'error'));
+    pairWriter?.onProblem((message, alarm) => this.notify(message, alarm ? 'alarm' : 'error'));
     this.layouts = new LayoutStore({ api: services.api });
+    this.#placementsOpened = this.#holdPlacements();
 
     // a map the window lets go of, such as one deleted from the tree, takes its selected events with it, so the
-    // selection only ever names a map this window holds.
+    // selection only ever names a map this window holds; and an edit the window's checks refused, such as one taking an
+    // event out of a blueprint, says why, whichever tool made it.
     services.hub.subscribe(event =>
     {
       const { mapId } = this.selection.get();
@@ -224,7 +304,44 @@ class WorkspaceController
       {
         this.selection.clear();
       }
+
+      if (event.type === 'refused')
+      {
+        this.notify(event.message, 'error');
+      }
     });
+  }
+
+  /**
+   * Holds the blueprints and the record of where they are placed from the moment the workspace opens; the record's file
+   * is kept in step with the maps from then on (see {@link placements}). Every edit that moves a placement with its tiles
+   * changes the record only while the window holds it, and reads how far each placement reaches from the blueprints, so
+   * both are held before the first such edit. One that cannot be read says why in the Blueprints section, which asks for
+   * both too. A window with no server holds neither.
+   * @returns {Promise<void>} Settles once both have been asked for, held or not; never rejects.
+   */
+  #holdPlacements(): Promise<void>
+  {
+    const { api } = this.services;
+    if (api === null)
+    {
+      return Promise.resolve();
+    }
+
+    const asked = [ BLUEPRINTS_DOCUMENT, BLUEPRINT_USES_DOCUMENT ].map(key => Promise.resolve()
+      .then(() => this.services.openDocument(key))
+      .then(() => undefined, () => undefined));
+    return Promise.all(asked).then(() => undefined);
+  }
+
+  /**
+   * Waits until the window has asked for the blueprints and the record of where they are placed, as whatever moves a
+   * placement does before it edits: the edit then finds them held, unless one could not be read.
+   * @returns {Promise<void>} Settles once both have been asked for; never rejects.
+   */
+  whenPlacementsHeld(): Promise<void>
+  {
+    return this.#placementsOpened;
   }
 
   //region state
@@ -336,6 +453,14 @@ class WorkspaceController
       this.#update({ eventFocus: { ...this.#state.eventFocus, [mapId]: focus } });
     }
 
+    // a cell asked for again is centred on again, however far the view was panned away from it.
+    if (options.focusCell !== undefined && options.focusCell !== null)
+    {
+      this.#focusRequests += 1;
+      const focus: CellFocus = { cell: options.focusCell, request: this.#focusRequests };
+      this.#update({ cellFocus: { ...this.#state.cellFocus, [mapId]: focus } });
+    }
+
     const open = api.panels.find(panel => panel.api.component === PANEL_COMPONENTS.map && isMapPanelParams(panel.params) && panel.params.mapId === mapId);
     if (open !== undefined && options.newView !== true && options.beside !== true && options.at === undefined)
     {
@@ -357,6 +482,48 @@ class WorkspaceController
       params: { mapId },
       position: this.#placeForMap(api, options),
     });
+  }
+
+  /**
+   * Opens a blueprint as a small map in a tab of its own, or brings forward the one already open, as the Blueprints
+   * section's Open asks: its tiles painted and its events edited as a map's are, its own history beside its save and
+   * renames. It opens wherever a map would. A blueprint whose id no map id can spell, which only a hand-edited blueprints
+   * file holds, is said rather than opened.
+   * @param {string} blueprintId The blueprint.
+   * @param {OpenMapOptions} options Where and how.
+   * @returns {IDockviewPanel | null} The panel showing it, or null before the dock is ready or for a blueprint that cannot
+   * open.
+   */
+  openBlueprint(blueprintId: string, options: OpenMapOptions = {}): IDockviewPanel | null
+  {
+    if (isMappableBlueprintId(blueprintId) === false)
+    {
+      this.notify(`"${this.blueprintName(blueprintId)}" can't be opened: its id in the blueprints file is too long.`, 'error');
+      return null;
+    }
+
+    return this.openMap(blueprintMapId(blueprintId), options);
+  }
+
+  /**
+   * Closes every tab of a blueprint deleted on disk, lets go of the blueprint opened as a map, and says why when a tab was
+   * open: nothing is left to show, and an undo here cannot bring back what the disk took away. What the workspace does
+   * when the window's blueprint tabs hand one over (see BlueprintMapFollower's onDeletedOnDisk).
+   * @param {string} blueprintId The blueprint.
+   * @param {string} name Its last name, or nothing when it was never known.
+   */
+  closeBlueprintDeletedOnDisk(blueprintId: string, name: string): void
+  {
+    const mapId = blueprintMapId(blueprintId);
+    const tabs = this.#dockview === null
+      ? []
+      : this.#dockview.panels.filter(panel => panel.api.component === PANEL_COMPONENTS.map && isMapPanelParams(panel.params) && panel.params.mapId === mapId);
+    tabs.forEach(tab => tab.api.close());
+    this.services.hub.release(mapDocumentKey(mapId));
+    if (tabs.length > 0)
+    {
+      this.notify(name === '' ? 'A blueprint was deleted on disk, so its tab was closed.' : `"${name}" was deleted on disk, so its tab was closed.`);
+    }
   }
 
   /**
@@ -435,12 +602,18 @@ class WorkspaceController
   }
 
   /**
-   * Reads a map's name from the tree, for titles.
-   * @param {number} mapId The map.
+   * Reads a map's name from the tree, for titles; for a blueprint opened as a map, the blueprint's own.
+   * @param {number} mapId The map, or the id a blueprint opened as a map takes.
    * @returns {string} Its name, or "Map N" while the tree is not held or lacks it.
    */
   mapName(mapId: number): string
   {
+    const blueprintId = blueprintIdOfMap(mapId);
+    if (blueprintId !== null)
+    {
+      return this.blueprintName(blueprintId);
+    }
+
     const { hub } = this.services;
     const row = hub.has(MAP_INFOS_KEY)
       ? (hub.document(MAP_INFOS_KEY).valueAt([ mapId ]) as RmmzMapInfo | null | undefined)
@@ -448,6 +621,30 @@ class WorkspaceController
     return row === null || row === undefined
       ? documentLabel(`map:${mapId}`)
       : row.name;
+  }
+
+  /**
+   * Reads a blueprint's name, for titles: as the blueprints hold it, or, for one they no longer hold, deleted or its save
+   * undone, the name its own history last gave it, so its history keeps the name it was known by.
+   * @param {string} blueprintId The blueprint.
+   * @returns {string} Its name, or its id when neither the blueprints nor its history name it.
+   */
+  blueprintName(blueprintId: string): string
+  {
+    const { hub } = this.services;
+    const blueprint = hub.has(BLUEPRINTS_DOCUMENT)
+      ? blueprintIn(hub.document(BLUEPRINTS_DOCUMENT), blueprintId)
+      : null;
+    if (blueprint !== null)
+    {
+      return blueprint.name;
+    }
+
+    // the steps done, newest first, hold the name it last had; failing those, the next to redo, as an undone save does.
+    const { rows } = hub.history(blueprintHistoryKey(blueprintId));
+    const ordered = [ ...rows.filter(row => row.done).reverse(), ...rows.filter(row => row.done === false) ];
+    const steps = ordered.flatMap(row => hub.knownStep(row.id) ?? []);
+    return nameInSteps(steps, blueprintId) ?? blueprintId;
   }
 
   //endregion dock
@@ -507,14 +704,49 @@ class WorkspaceController
   }
 
   /**
-   * Saves every document holding unsaved edits, leaving any in conflict for the person to settle first.
-   * @returns {Promise<void>} Settles once every save has finished.
+   * Makes the window ask before it closes while placements of blueprints would be lost with it, as unsaved edits are
+   * asked about by the window's own guard: a write on its way, or one the server refused, waiting to be tried again with
+   * the next save; or a map's unsaved placements that no other window keeping the record holds, though a window without
+   * the record may share the map, as an event window does, and save its file after this one has gone. No document's
+   * unsaved mark shows either, since the record is never unsaved itself, and the window's own guard lets a map shared
+   * with an event window go without asking.
+   * @param {CloseTarget} target The window.
+   * @returns {() => void} Removes the guard.
+   */
+  guardClose(target: CloseTarget): () => void
+  {
+    const { placements } = this;
+    return installCloseGuard(target, () => placements !== null
+      && (placements.hasUnwritten() || placements.placementsUnsavedOnlyHere().length > 0));
+  }
+
+  /**
+   * Saves every document holding unsaved edits, leaving any in conflict for the person to settle first, but for a map
+   * whose file was deleted, which the save writes back (see DocumentHub's isFileGone). A map that could not be saved is
+   * named as the map tree shows it. What was saved is told in maps: the blueprints are saved along with them but are not
+   * maps, and are not counted as any. The record of
+   * where blueprints are placed never holds unsaved edits of its own: each map's placements go to disk with that map.
+   * Placements a refused write left waiting are tried again too, and nothing is called saved until they land; when they
+   * cannot, the author has already heard why.
+   *
+   * A blueprint is never saved by hand: every change to one is written at once, with every copy it reached, a moment after
+   * it is made (see BlueprintWriter), and so is every transfer pair (see PairWriter). Saving waits for whatever of those
+   * is still on its way first, so a map holding a copy or an end of a pair is saved over what was written to it, never
+   * under it. A blueprint opened as a map that still holds changes after that is one whose change could not be written,
+   * which the author has heard about already; it is not called saved.
+   * @returns {Promise<void>} Settles once every save has finished, the placements' and the blueprints' writes included.
    */
   async saveAll(): Promise<void>
   {
-    const { hub } = this.services;
-    const dirty = hub.dirtyKeys();
-    const ready = dirty.filter(key => hub.isConflicted(key) === false);
+    const { hub, blueprintWriter, pairWriter } = this.services;
+    await blueprintWriter?.whenWritten();
+    await pairWriter?.whenWritten();
+    const unsaved = hub.dirtyKeys();
+    const blueprints = unsaved.filter(key => parseDocumentKey(key).kind === 'blueprint-map').length;
+    const dirty = unsaved.filter(key => parseDocumentKey(key).kind !== 'blueprint-map');
+
+    // a map whose file was deleted waits for nothing but this save, which puts the file back.
+    const ready = dirty.filter(key => hub.isConflicted(key) === false || isFileGone(hub.conflict(key)));
     const failed: string[] = [];
     for (const key of ready)
     {
@@ -524,14 +756,25 @@ class WorkspaceController
       }
       catch
       {
-        failed.push(documentLabel(key));
+        failed.push(documentName(key, mapId => this.mapName(mapId)));
       }
     }
+
+    // a save is when placements a refused write left waiting are tried again, with nothing dirty to carry them.
+    this.placements?.retry();
+    await this.placements?.whenWritten();
+    const unwritten = this.placements?.hasUnwritten() === true;
 
     const held = dirty.length - ready.length;
     if (failed.length > 0)
     {
       this.notify(`Could not save ${failed.join(', ')}.`, 'error');
+      return;
+    }
+
+    // the write that failed already said why, which "Everything is saved." would only cover up.
+    if (unwritten)
+    {
       return;
     }
 
@@ -541,15 +784,30 @@ class WorkspaceController
       return;
     }
 
-    this.notify(ready.length === 0 ? 'Everything is saved.' : `Saved ${ready.length === 1 ? '1 map' : `${ready.length} maps`}.`);
+    const maps = ready.filter(key => parseDocumentKey(key).kind === 'map').length;
+    const saved = maps === 1 ? 'Saved 1 map' : `Saved ${maps} maps`;
+    if (blueprints > 0)
+    {
+      this.notify(maps === 0 ? 'A change to a blueprint is not written yet; everything else is saved.' : `${saved}; a change to a blueprint is not written yet.`);
+      return;
+    }
+
+    this.notify(maps === 0 ? 'Everything is saved.' : `${saved}.`);
   }
 
   /**
-   * Shows why a history could not move, unless it merely had nothing to move.
+   * Shows why a history could not move, unless it merely had nothing to move, and what a move left as it stands, when it
+   * left copies of a blueprint changed since.
    * @param {HistoryOutcome} outcome What an undo, redo or jump came to.
    */
   #report(outcome: HistoryOutcome): void
   {
+    if (outcome.ok && outcome.message !== undefined)
+    {
+      this.notify(outcome.message);
+      return;
+    }
+
     if (outcome.ok === false && outcome.nothing === false)
     {
       this.notify(outcome.message, outcome.alarm === true ? 'alarm' : 'error');
@@ -632,7 +890,8 @@ class WorkspaceController
   }
 
   /**
-   * Copies maps to the clipboard, each with its file as it stands.
+   * Copies maps to the clipboard, each with its file as it stands, and the placements of blueprints on it, once the
+   * record of them is held.
    * @param {readonly number[]} mapIds The maps.
    * @returns {Promise<void>} Settles once copied.
    */
@@ -643,6 +902,7 @@ class WorkspaceController
       return;
     }
 
+    await this.#placementsOpened;
     const outcome = await this.tree.copy(mapIds);
     if (outcome.ok === false)
     {
@@ -713,7 +973,9 @@ class WorkspaceController
   }
 
   /**
-   * Runs a tree operation, selecting what it hands back and showing why when it refuses.
+   * Runs a tree operation, selecting what it hands back and showing why when it refuses. It waits, first, for the
+   * window to hold the record of where blueprints are placed, which a map deleted, duplicated or pasted changes in the
+   * same step.
    * @param {(tree: MapTreeService) => Promise<TreeOutcome>} call The operation.
    * @returns {Promise<TreeOutcome | null>} What it came to, or null without a tree service.
    */
@@ -725,6 +987,7 @@ class WorkspaceController
       return null;
     }
 
+    await this.#placementsOpened;
     const outcome = await call(this.tree);
     if (outcome.ok === false)
     {
@@ -773,4 +1036,4 @@ class WorkspaceController
 }
 
 export { TREE_ROOT, WorkspaceController };
-export type { EventFocus, MapClipboard, Notice, NoticeSeverity, OpenMapOptions, WorkspaceState };
+export type { CellFocus, EventFocus, MapClipboard, Notice, NoticeSeverity, OpenMapOptions, WorkspaceState };

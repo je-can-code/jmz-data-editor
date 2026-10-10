@@ -40,6 +40,32 @@ func SaveInMzLayout[T any](data T, path string, layout mzjson.Layout, beforeWrit
 	return renderInMzLayout(data, path, template, layout, beforeWrite)
 }
 
+// UpdateInFileLayout changes the document in the file at path, as one step under the lock every write in MZ's layout
+// takes: the file is read and decoded strictly into T, update makes the document to write from it, and that is
+// written back atomically in the file's own key order, laid out the way the file already is (see mzjson.LayoutLike)
+// rather than in one fixed layout. So whatever update carries over from the file is written back exactly as the file
+// held it at that very moment, however old the caller's own copy of it is, and a file MZ keeps on one line stays on one
+// line while one the data editor keeps indented stays indented: a save by either app never rewrites the whole file.
+//
+// A file that is not there, or that does not decode strictly, is an error, and nothing is written: what cannot be read
+// cannot be carried over. beforeWrite is handed the exact bytes just before the write, as SaveInMzLayout hands them.
+func UpdateInFileLayout[T any](path string, update func(current T) T, beforeWrite func(content []byte)) error {
+	mzWriteLock.Lock()
+	defer mzWriteLock.Unlock()
+
+	// the file lends what update carries over, its layout and its key order.
+	template, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	current, err := decodeStrictly[T](template, path)
+	if err != nil {
+		return err
+	}
+
+	return renderInMzLayout(update(current), path, template, mzjson.LayoutLike(template), beforeWrite)
+}
+
 // CreateInMzLayout writes data to path in MZ's layout, as SaveInMzLayout writes a new file, but only where no file
 // exists, answering fs.ErrExist otherwise with nothing written. It takes the lock every write in MZ's layout takes,
 // so no save or restore of the same file can land between the check and the write: a new map never lands on a file

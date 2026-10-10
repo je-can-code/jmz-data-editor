@@ -1,16 +1,24 @@
+import type { SliderControl } from '../core/eventKinds/quickFields.ts';
 import { deleteEvents } from '../core/events/eventEdits.ts';
 import type { EventSelection } from '../core/events/EventSelection.ts';
 import type { DocumentHub } from '../core/history/DocumentHub.ts';
 import { mapHistoryKey } from '../core/history/historyKeys.ts';
 import { mapDocumentKey } from '../core/model/documentKeys.ts';
 import type { MapDocument } from '../core/model/MapDocument.ts';
+import type { MapPropertiesSection } from '../core/modules/PluginModule.ts';
+import { ModulePropertyDrag, type MapPropertiesSource } from '../core/properties/moduleProperties.ts';
 import type { MapEventTools } from '../events/MapEventTools.ts';
 import { TILE_SIZE, type Camera } from '../core/renderer/camera.ts';
+import type { LightingLayerDefinition } from '../core/renderer/lightingLayer.ts';
+import type { WeatherLayerDefinition } from '../core/renderer/weatherLayer.ts';
+import { onTheClock, timeOfDayAt } from '../core/time/timeOfDay.ts';
+import type { SkyPick, WindowClock } from '../core/time/WindowClock.ts';
 import {
   GAME_LOOK,
   NO_OVERLAY_STATE,
   type CoreOverlayId,
   type GhostTile,
+  type LayerVisibility,
   type MapContextMenu,
   type OverlayDefinition,
   type OverlayState,
@@ -25,10 +33,42 @@ import type { PaintController } from './tools/PaintController.ts';
 
 /**
  * The camera paths the speed script records, each driven from the renderer's own frame clock so every run draws the
- * same frames: a pan at zoom 1, a zoom sweep from 2x out to the whole map and back, and the whole map held on screen
- * and drifting, so every frame is a real redraw.
+ * same frames: a pan at zoom 1, a zoom sweep from 2x out to the whole map and back, the whole map held on screen and
+ * drifting, so every frame is a real redraw, the whole map held still while the window's clock sweeps the day
+ * ({@link clockOnPath}), so the sky is drawn again at every hour it passes, and the map held still at the game's scale
+ * while a slider in Map Properties is dragged up and down its track ({@link sliderOnPath}), as an author drags a map's
+ * darkness.
  */
-type CameraPath = 'pan' | 'zoom' | 'zoomedout';
+type CameraPath = 'pan' | 'zoom' | 'zoomedout' | 'clock' | 'slider';
+
+/**
+ * How many minutes of the day a clock sweep passes in each second: a whole day every eight seconds, three minutes a
+ * frame, so the hour turns every twentieth frame and every phase of the day goes by.
+ */
+const CLOCK_SWEEP_MINUTES_PER_SECOND = 180;
+
+/**
+ * How many of a slider's steps a slider sweep passes in each second: one a frame, as a hand dragging the thumb across
+ * the track moves it.
+ */
+const SLIDER_SWEEP_STEPS_PER_SECOND = 60;
+
+/**
+ * How far down its track a slider sweep reaches, as a share of the track from its low end: it stays in the upper
+ * reaches, so a map's darkness sweeps between deep and pitch black and never lets the map go undark, which would take
+ * its mask away and build it afresh, a different cost from the one a drag through the darkness has.
+ */
+const SLIDER_SWEEP_LOW = 0.3;
+
+/**
+ * The first slider a module adds to Map Properties for a map, which a slider sweep drags: the section offering it, the
+ * setting's key and its control.
+ */
+type SweptSlider = {
+  readonly source: MapPropertiesSource;
+  readonly key: string;
+  readonly control: SliderControl;
+};
 
 /**
  * What the speed script's stroke paints with: a square brush of one tile, painted by the real pen through automatic
@@ -107,13 +147,73 @@ const ringsOverlay = (): OverlayDefinition =>
 };
 
 /**
+ * Builds what the parity check draws: the game look, still, with events or without, never the shadows, the lighting only
+ * when the game it is held against draws its lighting too (its light mask over its base layer, and the sky's tone over
+ * the base layer itself), and the weather only when the game's is drawn too. Nothing animates: the check holds the
+ * water and the parallax at the game's moment, the game copy's lights are held steady, so every light draws at its full
+ * strength, as it does with no effect running, and the weather holds where it is.
+ * @param {boolean} events Whether the events show.
+ * @param {boolean | undefined} lighting Whether the lighting shows; left out, it does not.
+ * @param {boolean | undefined} weather Whether the weather shows; left out, it does not.
+ * @returns {LayerVisibility} The visibility.
+ */
+const parityLook = (events: boolean, lighting?: boolean, weather?: boolean): LayerVisibility =>
+{
+  return {
+    ...GAME_LOOK,
+    animate: false,
+    layers: { ...GAME_LOOK.layers, events, shadows: false, lighting: lighting === true, weather: weather === true },
+  };
+};
+
+/**
+ * Picks what the parity check lets draw into the lighting layer: only what the game itself shows, such as a map's
+ * darkness, and never an aid like the ring marking a light's reach, which the game never draws.
+ * @param {readonly LightingLayerDefinition[]} layers What the plugin modules draw there.
+ * @returns {LightingLayerDefinition[]} What the game shows of it.
+ */
+const parityLightingLayers = (layers: readonly LightingLayerDefinition[]): LightingLayerDefinition[] =>
+{
+  return layers.filter(layer => layer.shownInGame === true);
+};
+
+/**
  * Timings of opening a map, in milliseconds on the page's clock (from navigation start).
  */
 type OpenTimings = Record<string, number>;
 
 /**
+ * How the parity check asks a map to be drawn: with its events or without, at an animation step and engine frame, with
+ * the lighting and the weather the game shows, if it shows them, at the hour, in the season and under the sky the game's
+ * clock and forecast were set to, any of them left as they stand when it says nothing of them.
+ */
+type ParityOptions = {
+  readonly events: boolean;
+  readonly step: number;
+  readonly frames: number;
+  readonly lighting?: boolean;
+  readonly weather?: boolean;
+
+  /**
+   * The time of day, in minutes past midnight.
+   */
+  readonly time?: number;
+
+  /**
+   * The season, as the module offering the clock numbers it.
+   */
+  readonly season?: number;
+
+  /**
+   * The sky, or null for none, as on a new game whose sky is held off.
+   */
+  readonly sky?: SkyPick | null;
+};
+
+/**
  * What the hooks need from the map view: its renderer, the window's hub, its painting tools and their settings, its
- * event tools and selection, the map on show, a way to open another, and the page's open timings.
+ * event tools and selection, the map on show, a way to open another, the page's open timings, what the plugin modules
+ * draw into the lighting and weather layers, and the sections they add to Map Properties.
  */
 type SpeedHooksContext = {
   readonly renderer: PixiMapRenderer;
@@ -125,6 +225,14 @@ type SpeedHooksContext = {
   readonly map: () => MapDocument | null;
   readonly openMap: (mapId: number) => Promise<void>;
   readonly timings: OpenTimings;
+  readonly lightingLayers: () => readonly LightingLayerDefinition[];
+  readonly weatherLayers: () => readonly WeatherLayerDefinition[];
+  readonly mapProperties: () => readonly MapPropertiesSection[];
+
+  /**
+   * The window's clock, which the page is set to, and which a clock sweep moves.
+   */
+  readonly clock: WindowClock;
 };
 
 /**
@@ -198,7 +306,115 @@ const cameraOnPath = (
     return centerCamera(width / 2 + swingX * 0.2, height / 2 + swingY * 0.2, zoom, view);
   }
 
+  // the clock's sweep holds the whole map still, so the sky is all that moves.
+  if (path === 'clock')
+  {
+    return centerCamera(width / 2, height / 2, whole, view);
+  }
+
+  // a slider's holds the map still at the game's scale, about its middle, as an author working on a map looks at it.
+  if (path === 'slider')
+  {
+    return centerCamera(width / 2, height / 2, 1, view);
+  }
+
   return centerCamera(width / 2 + Math.sin(seconds * 2) * 96, height / 2 + Math.cos(seconds * 2) * 96, whole, view);
+};
+
+/**
+ * Picks the time of day a clock sweep shows a moment in: a whole day every eight seconds from midnight, round and round.
+ * @param {number} seconds Seconds since the sweep started.
+ * @returns {number} The time of day, in minutes past midnight.
+ */
+const clockOnPath = (seconds: number): number =>
+{
+  return onTheClock(Math.floor(seconds * CLOCK_SWEEP_MINUTES_PER_SECOND));
+};
+
+/**
+ * Picks the value a slider sweep shows a slider at a moment: from the top of its track down to {@link SLIDER_SWEEP_LOW}
+ * of the way along it and back up, a step a frame, round and round.
+ * @param {number} seconds Seconds since the sweep started.
+ * @param {SliderControl} control The slider.
+ * @returns {number} The value.
+ */
+const sliderOnPath = (seconds: number, control: SliderControl): number =>
+{
+  const [ low, high ] = control.track;
+  const span = Math.round(((high - low) * (1 - SLIDER_SWEEP_LOW)) / control.step);
+
+  // a step a frame down the span and back up it, so the turn at either end is a single frame.
+  const stepsIn = Math.floor(seconds * SLIDER_SWEEP_STEPS_PER_SECOND) % (span * 2);
+  const stepsDown = stepsIn <= span ? stepsIn : (span * 2) - stepsIn;
+  return high - (stepsDown * control.step);
+};
+
+/**
+ * Finds the first slider the plugin modules add to Map Properties for a map, in the order they add their sections.
+ * @param {readonly MapPropertiesSection[]} sections The sections the modules add.
+ * @param {MapDocument} map The map.
+ * @returns {SweptSlider | null} The slider, or null when no section offers one for the map.
+ */
+const firstSlider = (sections: readonly MapPropertiesSection[], map: MapDocument): SweptSlider | null =>
+{
+  for (const section of sections)
+  {
+    const field = section.source(map).fields.find(each => each.control.kind === 'slider');
+    if (field !== undefined)
+    {
+      return { source: section.source, key: field.key, control: field.control as SliderControl };
+    }
+  }
+
+  return null;
+};
+
+/**
+ * Where a renderer draws its weather, for the parity check to hold against where the game draws its own: the world's
+ * layers and the game container's, each by its slot's name (the event groups, which have none, as events), how many
+ * filters the game container carries, which is the tone's while one is cast, the weather's place in the game container,
+ * and the game container's and the lighting's places in the world.
+ * @param {PixiMapRenderer} renderer The renderer.
+ * @returns {{ world: string[], game: string[], gameFilters: number, weatherIndex: number, gameIndex: number, lightingIndex: number }}
+ * Where the weather sits.
+ */
+const weatherDepthOf = (renderer: PixiMapRenderer) =>
+{
+  const { slots } = renderer;
+  const named = new Map<unknown, string>(Object.entries(slots).map(([ name, slot ]) => [ slot, name ]));
+  const world = slots.game.parent?.children ?? [];
+  return {
+    world: world.map(child => named.get(child) ?? 'events'),
+    game: slots.game.children.map(child => named.get(child) ?? 'events'),
+    gameFilters: slots.game.filters === null || slots.game.filters === undefined ? 0 : [ slots.game.filters ].flat().length,
+    weatherIndex: slots.game.children.indexOf(slots.weather),
+    gameIndex: world.indexOf(slots.game),
+    lightingIndex: world.indexOf(slots.lighting),
+  };
+};
+
+/**
+ * The time of day a page is asked to show, as the speed script and the parity check write it in the address: hours and
+ * minutes on a 24-hour clock, such as {@code time=22:00}.
+ */
+const TIME_QUERY = /^([01]?\d|2[0-3]):([0-5]\d)$/u;
+
+/**
+ * Reads the time of day a page opened for measuring is asked to show, so a map can be measured at night from its very
+ * first frame.
+ * @param {string} search The page's query string.
+ * @returns {number | null} The time of day, in minutes past midnight, or null when none is asked for.
+ */
+const timeFromQuery = (search: string): number | null =>
+{
+  const match = TIME_QUERY.exec(new URLSearchParams(search).get('time') ?? '');
+  if (match === null)
+  {
+    return null;
+  }
+
+  const [ , hours, minutes ] = match;
+  return timeOfDayAt(Number(hours), Number(minutes));
 };
 
 /**
@@ -210,15 +426,27 @@ const cameraOnPath = (
  */
 const installSpeedHooks = (target: Window, context: SpeedHooksContext): (() => void) =>
 {
-  const { renderer, hub, tools, selection } = context;
+  const { renderer, hub, tools, selection, clock } = context;
   const stops: (() => void)[] = [];
   let path: CameraPath | null = null;
   let pathStart = 0;
+  let timeBeforeSweep = clock.time();
   let overlayState: OverlayState = NO_OVERLAY_STATE;
   let hoverFollows = false;
 
+  // the slider a slider sweep drags, and the drag showing each value it passes, let go once the sweep stops.
+  let swept: { slider: SweptSlider; drag: ModulePropertyDrag } | null = null;
+
+  // a page asked for an hour shows it from its first frame, as an author's chosen hour holds, whatever the game's start.
+  const asked = timeFromQuery(target.location.search);
+  if (asked !== null)
+  {
+    clock.set(asked);
+  }
+
   // camera paths move the camera at the start of each frame, so the frame that draws the move is the one timed; with
-  // every overlay on, the hover follows the view's centre, as it follows a pointer held still while the map moves.
+  // every overlay on, the hover follows the view's centre, as it follows a pointer held still while the map moves. A
+  // clock sweep moves the window's clock there too, and a slider sweep the slider.
   stops.push(renderer.onBeforeFrame(time =>
   {
     const map = context.map();
@@ -227,7 +455,18 @@ const installSpeedHooks = (target: Window, context: SpeedHooksContext): (() => v
       return;
     }
 
-    const camera = cameraOnPath(path, (time - pathStart) / 1000, map, renderer.viewSize);
+    const seconds = (time - pathStart) / 1000;
+    if (path === 'clock')
+    {
+      clock.set(clockOnPath(seconds));
+    }
+
+    if (swept !== null)
+    {
+      swept.drag.move(sliderOnPath(seconds, swept.slider.control));
+    }
+
+    const camera = cameraOnPath(path, seconds, map, renderer.viewSize);
     renderer.setCamera(camera);
     if (hoverFollows)
     {
@@ -278,21 +517,48 @@ const installSpeedHooks = (target: Window, context: SpeedHooksContext): (() => v
     drawState: () => renderer.drawState,
     contextMenus: () => [ ...contextMenus ],
     lookAt: (x: number, y: number, zoom: number) => renderer.lookAt({ x, y }, zoom),
+    // puts the view's top-left corner on a world pixel at a zoom, as the parity check lines the view up with the game's
+    // screen.
+    setCamera: (x: number, y: number, zoom: number) => renderer.setCamera({ x, y, zoom }),
     zoomToFit: () => renderer.zoomToFit(),
     screenOfCell: (x: number, y: number) =>
     {
       const { x: cameraX, y: cameraY, zoom } = renderer.camera;
       return { x: (x * TILE_SIZE + TILE_SIZE / 2 - cameraX) * zoom, y: (y * TILE_SIZE + TILE_SIZE / 2 - cameraY) * zoom };
     },
+    // a clock sweep puts the clock back where it found it once it stops, so what is measured after it is measured at
+    // the hour the run asked for; a slider sweep lets its drag go, so the map is left as it found it, with nothing in
+    // its history. A slider sweep on a map no module offers a slider for only holds the map still.
     startPath: (kind: CameraPath) =>
     {
       path = kind;
       pathStart = performance.now();
+      timeBeforeSweep = clock.time();
+      swept = null;
+      const map = context.map();
+      if (kind !== 'slider' || map === null)
+      {
+        return;
+      }
+
+      const slider = firstSlider(context.mapProperties(), map);
+      if (slider !== null)
+      {
+        swept = { slider, drag: new ModulePropertyDrag(hub, map.mapId, slider.source, slider.key) };
+      }
     },
     stopPath: () =>
     {
+      if (path === 'clock')
+      {
+        clock.set(timeBeforeSweep);
+      }
+
+      swept?.drag.cancel();
+      swept = null;
       path = null;
     },
+    time: () => clock.time(),
     // picks up the pen with a square brush of one tile, remembering what was in hand to put it back afterwards; the pen
     // owns the left button while it is in hand, so the event tools stand down until the tool in hand goes back.
     enablePaint: (next: Partial<StrokeSettings>) =>
@@ -344,15 +610,46 @@ const installSpeedHooks = (target: Window, context: SpeedHooksContext): (() => v
       renderer.setOverlayState(overlayState);
       hoverFollows = true;
     },
-    // the parity check draws the map as the game would, still, with nothing of the editor's on top.
-    prepareParity: (options: { events: boolean; step: number; frames: number }) =>
+    // the parity check draws the map as the game would, still, with nothing of the editor's on top: of the lighting,
+    // only what the game itself shows, such as a map's darkness and the sky's colour, and never an aid like a light's
+    // ring; the weather only when asked; at the hour the game's clock was set to, when it says one, in the season whose
+    // date the game's clock was set to, when it says one, and under the sky the game's forecast was set to, or none.
+    prepareParity: (options: ParityOptions) =>
     {
       hoverFollows = false;
       overlayState = NO_OVERLAY_STATE;
+      if (options.time !== undefined)
+      {
+        clock.set(options.time);
+      }
+
+      if (options.season !== undefined)
+      {
+        clock.chooseSeason(options.season);
+      }
+
+      if (options.sky !== undefined)
+      {
+        clock.chooseSky(options.sky);
+      }
+
       renderer.setOverlayState(overlayState);
       renderer.setOverlays({ enabled: new Set(), definitions: [] });
-      renderer.setLayerVisibility({ ...GAME_LOOK, layers: { ...GAME_LOOK.layers, events: options.events, shadows: false } });
+      renderer.setLightingLayers(parityLightingLayers(context.lightingLayers()));
+      renderer.setWeatherLayers(context.weatherLayers());
+      renderer.setLayerVisibility(parityLook(options.events, options.lighting, options.weather));
       renderer.holdAnimation({ step: options.step, frames: options.frames });
+    },
+    // what the weather shows and what the sky is doing, for the parity check to hold against the game's, and for the
+    // speed script to put a look on a map that names none: the sky picked on the window's clock, as an author picks it,
+    // which the view follows to tell the renderer the sky an outdoor map's weather follows. Starting the weather over
+    // settles it afresh for the part of the map the view shows.
+    weather: {
+      describe: () => renderer.weatherDescriptions(),
+      sky: () => renderer.weatherSky,
+      pick: (pick: SkyPick | null) => clock.chooseSky(pick),
+      reset: () => renderer.resetWeather(),
+      depth: () => weatherDepthOf(renderer),
     },
     extract: (rect: { x: number; y: number; width: number; height: number }) => renderer.extract(rect),
     paintState: () => ({ steps: painter.paintedInputs, redrawnFrames, painting: painter.session.isActive }),
@@ -426,6 +723,8 @@ const installSpeedHooks = (target: Window, context: SpeedHooksContext): (() => v
   (target as unknown as Record<string, unknown>)[HOOKS_GLOBAL] = hooks;
   return () =>
   {
+    // a slider sweep still running lets its drag go, so the map is not left holding the value it last showed.
+    swept?.drag.cancel();
     hooks.disablePaint();
     stops.forEach(stop => stop());
     delete (target as unknown as Record<string, unknown>)[HOOKS_GLOBAL];
@@ -442,5 +741,22 @@ const wantsSpeedHooks = (search: string): boolean =>
   return new URLSearchParams(search).get('speed') === '1';
 };
 
-export { cameraOnPath, HOOKS_GLOBAL, installSpeedHooks, ringsOverlay, unusedGroundKind, wantsSpeedHooks };
-export type { CameraPath, SpeedHooksContext, StrokeSettings };
+export {
+  cameraOnPath,
+  CLOCK_SWEEP_MINUTES_PER_SECOND,
+  clockOnPath,
+  firstSlider,
+  HOOKS_GLOBAL,
+  installSpeedHooks,
+  parityLightingLayers,
+  parityLook,
+  ringsOverlay,
+  SLIDER_SWEEP_LOW,
+  SLIDER_SWEEP_STEPS_PER_SECOND,
+  sliderOnPath,
+  timeFromQuery,
+  unusedGroundKind,
+  wantsSpeedHooks,
+  weatherDepthOf,
+};
+export type { CameraPath, ParityOptions, SpeedHooksContext, StrokeSettings, SweptSlider };

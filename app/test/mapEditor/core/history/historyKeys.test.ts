@@ -7,8 +7,10 @@ import {
   homeDocumentOf,
   mapHistoryKey,
   outsideChangeHistories,
+  SYSTEM_HISTORY_KEY,
   TREE_HISTORY_KEY,
 } from '../../../../src/mapEditor/core/history/historyKeys.ts';
+import { blueprintMapId } from '../../../../src/mapEditor/core/model/documentKeys.ts';
 import type { Patch } from '../../../../src/mapEditor/core/model/patches.ts';
 
 /*
@@ -58,6 +60,36 @@ describe('historyKeys', () =>
       .toStrictEqual([ 'map:12', 'map:12', 'map:1', 'editor-data:blueprints', 'mapinfos', 'editor-data:layouts' ]);
   });
 
+  it('records what is painted or moved in a blueprint opened as a map in the blueprint\'s own history, homed on the blueprints', () =>
+  {
+    // Arrange: the camp opened as a map, beside a map.
+    const camp = blueprintMapId('k3x9q2mf');
+
+    // Act.
+    const keys = [ mapHistoryKey(camp), mapHistoryKey(12) ];
+
+    // Assert: the camp's history is the one its save and renames are in.
+    expect([ keys, keys.map(homeDocumentOf) ])
+      .toStrictEqual([ [ blueprintHistoryKey('k3x9q2mf'), 'map:12' ], [ 'editor-data:blueprints', 'map:12' ] ]);
+  });
+
+  it('homes the history of an event of a blueprint opened as a map on that map, as any event\'s lives on its own', () =>
+  {
+    // Arrange: an event of the camp opened as a map, beside the same event of another blueprint.
+    const camp = blueprintMapId('k3x9q2mf');
+    const other = blueprintMapId('k3x9q2mg');
+
+    // Act.
+    const keys = [ eventHistoryKey(camp, 5), eventHistoryKey(other, 5) ];
+
+    // Assert.
+    expect([ keys, keys.map(homeDocumentOf) ])
+      .toStrictEqual([
+        [ `event:${camp}:5`, `event:${other}:5` ],
+        [ 'blueprint-map:k3x9q2mf', 'blueprint-map:k3x9q2mg' ],
+      ]);
+  });
+
   it('names each common event\'s history apart, and homes it on the common events', () =>
   {
     // Arrange: two common events, and the common events document's own history beside them.
@@ -69,6 +101,19 @@ describe('historyKeys', () =>
     // Assert.
     expect([ keys, homes ])
       .toStrictEqual([ [ 'common-event:3', 'common-event:31', 'common-events' ], [ 'common-events', 'common-events', 'common-events' ] ]);
+  });
+
+  it('keeps one history for the switch and variable names, homed on the system document, where outside changes go too', () =>
+  {
+    // Arrange: a switch renamed on disk, as MZ would.
+    const change = [ { kind: 'set', path: [ 'switches', 74 ], before: 'suspicious castle', after: 'castle' } as const ];
+
+    // Act.
+    const read = [ SYSTEM_HISTORY_KEY, homeDocumentOf(SYSTEM_HISTORY_KEY), outsideChangeHistories('system', change) ];
+
+    // Assert.
+    expect(read)
+      .toStrictEqual([ 'system', 'system', [ 'system' ] ]);
   });
 
   it('refuses a common event id no common event can have', () =>
@@ -83,12 +128,12 @@ describe('historyKeys', () =>
       .toThrow(/positive integer/u));
   });
 
-  it('refuses an event id no event can have, and a blueprint without an id', () =>
+  it('refuses an event id no event can have, a map id no map can have, and a blueprint without an id', () =>
   {
-    // Arrange: slot 0 is never an event.
+    // Arrange: slot 0 is never an event, and -3 spells no blueprint.
 
     // Act.
-    const attempts = [ () => eventHistoryKey(3, 0), () => eventHistoryKey(3, 1.5), () => blueprintHistoryKey('') ];
+    const attempts = [ () => eventHistoryKey(3, 0), () => eventHistoryKey(3, 1.5), () => blueprintHistoryKey(''), () => eventHistoryKey(-3, 2) ];
 
     // Assert.
     expect(attempts[0])
@@ -97,6 +142,8 @@ describe('historyKeys', () =>
       .toThrow(/positive integer/u);
     expect(attempts[2])
       .toThrow(/needs an id/u);
+    expect(attempts[3])
+      .toThrow(/a map id is a positive integer, not -3/u);
   });
 
   describe('outsideChangeHistories', () =>

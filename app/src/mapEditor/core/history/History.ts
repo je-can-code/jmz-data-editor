@@ -137,6 +137,17 @@ class History
   }
 
   /**
+   * Puts a step in the place of the one with its id, wherever that sits, as the part of a step that moved takes the whole
+   * step's place once a move left the rest (see DocumentHub's HistoryCheck). A history without that step is left as it is.
+   * @param {HistoryStep} step The step.
+   */
+  replace(step: HistoryStep): void
+  {
+    this.#done = this.#done.map(each => (each.id === step.id ? step : each));
+    this.#undone = this.#undone.map(each => (each.id === step.id ? step : each));
+  }
+
+  /**
    * Drops a step from wherever it sits.
    * @param {string} stepId The step's id.
    * @returns {boolean} True when the step was here.

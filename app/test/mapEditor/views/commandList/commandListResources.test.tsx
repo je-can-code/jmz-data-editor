@@ -4,13 +4,14 @@
 import { describe, expect, it, vi } from 'vitest';
 import { act, renderHook } from '@testing-library/react';
 import type { MapEditorApi } from '../../../../src/mapEditor/core/api/MapEditorApi.ts';
-import { createSoundPlayer, useCommandListResources } from '../../../../src/mapEditor/views/commandList/commandListResources.ts';
+import { createSoundPlayer, projectNamesOf, useCommandListResources } from '../../../../src/mapEditor/views/commandList/commandListResources.ts';
 
 /*
  * Every command list reads with the project's names and ranks its search by the project's usage, both asked of the
  * server once per window, and neither needed for the list to work: a failure leaves ids as numbers and the search in
- * name order. Sounds preview one at a time at the command's volume and pitch. None of these tests plays a sound:
- * the audio element is a silent stand-in.
+ * name order. The names are one live set per window, so a switch renamed anywhere reads by its new name in every list
+ * at once. Sounds preview one at a time at the command's volume and pitch. None of these tests plays a sound: the audio
+ * element is a silent stand-in.
  */
 describe('commandListResources', () =>
 {
@@ -137,6 +138,30 @@ describe('commandListResources', () =>
       // Assert.
       expect([ failing.result.current.names, failing.result.current.usage.size, serverless.result.current.names, serverless.result.current.usage.size ])
         .toStrictEqual([ null, 0, null, 0 ]);
+    });
+
+    it('reads the names again as they change, a switch renamed in another window included', async () =>
+    {
+      // Arrange: names read for a list.
+      const api = {
+        loadDatabaseNames: vi.fn(async () => ({ switches: [ '', 'Door' ], variables: [ '' ] })),
+        loadCommandUsage: vi.fn(async () => ({ events: 0, codes: {}, pluginCommands: [] })),
+      } as unknown as MapEditorApi;
+      const hook = renderHook(() => useCommandListResources(api));
+      await act(async () =>
+      {
+        await projectNamesOf(api).read();
+      });
+
+      // Act: switch 1 renamed where System.json is being edited.
+      act(() =>
+      {
+        projectNamesOf(api).followSystem({ switches: [ '', 'Trapdoor' ], variables: [ '' ] });
+      });
+
+      // Assert.
+      expect([ hook.result.current.names?.switches, projectNamesOf(api) === projectNamesOf(api) ])
+        .toStrictEqual([ [ '', 'Trapdoor' ], true ]);
     });
 
     it('drops answers that arrive after the list has gone', async () =>

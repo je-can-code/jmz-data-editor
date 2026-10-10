@@ -1,4 +1,4 @@
-import type { RmmzMapEvent } from '../model/rmmzTypes.ts';
+import type { RmmzEventPage, RmmzMapEvent } from '../model/rmmzTypes.ts';
 
 /**
  * The symbols a marker shows. An event whose page draws no picture (a story sequence running on autorun, a parallel
@@ -94,20 +94,23 @@ const triggerMarker = (trigger: number): EventMarkerSymbol =>
 
 /**
  * Picks the symbol an event's marker shows: the symbol its kind names when a kind claims it and names one, and
- * otherwise the trigger of the page the editor shows, its first, as the map shows its picture. An event with no pages
- * at all starts like a fresh page, on the action button.
+ * otherwise the trigger of the page the editor shows, its first unless the page shown is given, as a map shows the page
+ * the game shows at the clock's time. An event with no pages at all starts like a fresh page, on the action button.
  * @param {RmmzMapEvent} event The event.
  * @param {MarkedKind | null} kind The kind that claims it, or null when none does.
+ * @param {RmmzEventPage | undefined} page The page shown; left out, the event's first.
  * @returns {EventMarkerSymbol} The symbol.
  */
-const markerSymbolFor = (event: RmmzMapEvent, kind: MarkedKind | null): EventMarkerSymbol =>
+const markerSymbolFor = (
+  event: RmmzMapEvent,
+  kind: MarkedKind | null,
+  page: RmmzEventPage | undefined = event.pages[0]): EventMarkerSymbol =>
 {
   if (kind !== null && kind.marker !== undefined)
   {
     return kind.marker;
   }
 
-  const [ page ] = event.pages;
   return triggerMarker(page === undefined ? 0 : page.trigger);
 };
 

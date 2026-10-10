@@ -172,5 +172,37 @@ const differencePicture = (left: Picture, right: Picture, tolerance: number): Pi
   return { width: left.width, height: left.height, pixels };
 };
 
-export { comparePictures, decodePng, differencePicture, writePng };
+/**
+ * Lays two pictures side by side on a black ground, left then right with a gap between, for an eye to compare.
+ * @param {Picture} left The left picture.
+ * @param {Picture} right The right picture.
+ * @param {number} gap The black gap between them, in pixels.
+ * @returns {Picture} The two together.
+ */
+const sideBySide = (left: Picture, right: Picture, gap: number): Picture =>
+{
+  const width = left.width + gap + right.width;
+  const height = Math.max(left.height, right.height);
+  const pixels = new Uint8Array(width * height * 4);
+
+  // the ground is opaque black, so the gap and any shortfall in height show as black.
+  for (let index = 3; index < pixels.length; index += 4)
+  {
+    pixels[index] = 255;
+  }
+
+  const paste = (picture: Picture, offset: number): void =>
+  {
+    for (let row = 0; row < picture.height; row++)
+    {
+      const from = row * picture.width * 4;
+      pixels.set(picture.pixels.subarray(from, from + (picture.width * 4)), ((row * width) + offset) * 4);
+    }
+  };
+  paste(left, 0);
+  paste(right, left.width + gap);
+  return { width, height, pixels };
+};
+
+export { comparePictures, decodePng, differencePicture, sideBySide, writePng };
 export type { CellDifference, Comparison, Picture, PixelRect };

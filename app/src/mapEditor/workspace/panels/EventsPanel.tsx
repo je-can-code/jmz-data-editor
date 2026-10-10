@@ -18,6 +18,7 @@ import {
 } from '../../core/eventList/eventRows.ts';
 import { rowWindow, scrollToShow } from '../../core/eventList/rowWindow.ts';
 import { NO_EVENTS, type SelectedEvents } from '../../core/events/EventSelection.ts';
+import { isBlueprintMapId } from '../../core/model/documentKeys.ts';
 import type { MapDocument } from '../../core/model/MapDocument.ts';
 import { SINGLE_PANEL_IDS } from '../../core/workspace/panels.ts';
 import { MarkerIcon } from '../../views/MarkerIcon.tsx';
@@ -387,8 +388,9 @@ const EventList = (props: EventListProps) =>
   };
 
   const span = rowWindow(viewport.scrollTop, viewport.height - HEADING_HEIGHT, ROW_HEIGHT, shown.length);
+  const empty = isBlueprintMapId(map.mapId) ? 'This blueprint has no events.' : 'This map has no events yet.';
   const quiet = rows.length === 0
-    ? 'This map has no events yet.'
+    ? empty
     : 'No events match this search.';
 
   return (
@@ -477,7 +479,7 @@ const EventsPanel = () =>
 
   if (mapId === null || held.map === null)
   {
-    const waiting = mapId !== null && held.row !== null && held.failure === null;
+    const waiting = mapId !== null && held.gone === false && held.failure === null;
     return (
       <Box sx={{ height: '100%', display: 'grid', placeItems: 'center', p: 2, color: 'text.secondary', bgcolor: 'background.default' }}>
         {waiting
@@ -492,7 +494,7 @@ const EventsPanel = () =>
     <EventList
       key={mapId}
       map={held.map}
-      mapName={held.row?.name ?? ''}
+      mapName={held.name ?? ''}
       query={query}
       onQuery={setQuery}
       sort={sort}

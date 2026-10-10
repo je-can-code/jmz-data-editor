@@ -2,7 +2,7 @@ import { editorDataDefinition, emptyEditorData, requireReadable } from '../edito
 import type { DocumentStore } from '../history/DocumentHub.ts';
 import { parseDocumentKey, type DocumentKey } from '../model/documentKeys.ts';
 import type { JsonValue } from '../model/json.ts';
-import type { RmmzCommonEvent, RmmzMap, RmmzMapInfo, RmmzTileset } from '../model/rmmzTypes.ts';
+import type { RmmzCommonEvent, RmmzMap, RmmzMapInfo, RmmzSystem, RmmzTileset } from '../model/rmmzTypes.ts';
 import type { MapEditorApi } from './MapEditorApi.ts';
 
 /**
@@ -22,8 +22,15 @@ const requireDefinition = (name: string) =>
 };
 
 /**
+ * Why the store refuses a blueprint opened as a map: no file of its own backs it. It is built from the blueprint the
+ * blueprints document holds, and what becomes of its changes is the blueprints' to say, never a file's.
+ */
+const NO_BLUEPRINT_FILE = 'a blueprint opened as a map is built from the blueprints and has no file of its own';
+
+/**
  * Loads and saves documents through the server, routing each key to its route. Editor-only documents are held
- * in their stored form ({@code {schemaVersion, data}}), so saving one is a straight copy.
+ * in their stored form ({@code {schemaVersion, data}}), so saving one is a straight copy. A blueprint opened as a map is
+ * refused both ways, since no file backs it (see {@link NO_BLUEPRINT_FILE}).
  * @param {MapEditorApi} api The server client.
  * @returns {DocumentStore} The store the document hub loads and saves with.
  */
@@ -37,12 +44,16 @@ const apiDocumentStore = (api: MapEditorApi): DocumentStore =>
       {
         case 'map':
           return await api.loadMap(parsed.mapId) as unknown as JsonValue;
+        case 'blueprint-map':
+          throw new Error(NO_BLUEPRINT_FILE);
         case 'mapinfos':
           return await api.loadMapInfos() as unknown as JsonValue;
         case 'tilesets':
           return await api.loadTilesets() as unknown as JsonValue;
         case 'common-events':
           return await api.loadCommonEvents() as unknown as JsonValue;
+        case 'system':
+          return await api.loadSystem() as unknown as JsonValue;
         case 'editor-data':
         {
           const definition = requireDefinition(parsed.name);
@@ -61,12 +72,16 @@ const apiDocumentStore = (api: MapEditorApi): DocumentStore =>
       {
         case 'map':
           return api.saveMap(parsed.mapId, content as unknown as RmmzMap);
+        case 'blueprint-map':
+          throw new Error(NO_BLUEPRINT_FILE);
         case 'mapinfos':
           return api.saveMapInfos(content as unknown as (RmmzMapInfo | null)[]);
         case 'tilesets':
           return api.saveTilesets(content as unknown as (RmmzTileset | null)[]);
         case 'common-events':
           return api.saveCommonEvents(content as unknown as (RmmzCommonEvent | null)[]);
+        case 'system':
+          return api.saveSystem(content as unknown as RmmzSystem);
         case 'editor-data':
           requireDefinition(parsed.name);
           return api.saveEditorData(parsed.name, content);

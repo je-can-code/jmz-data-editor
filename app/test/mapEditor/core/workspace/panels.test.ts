@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { blueprintMapId } from '../../../../src/mapEditor/core/model/documentKeys.ts';
 import {
   decodeDraggedMaps,
   directionForDrop,
@@ -24,17 +25,17 @@ import {
  */
 describe('panels', () =>
 {
-  it('accepts map panel parameters naming a real map id, and nothing else', () =>
+  it('accepts map panel parameters naming a real map id or a blueprint opened as a map, and nothing else', () =>
   {
-    // Arrange.
-    const candidates: unknown[] = [ { mapId: 12 }, { mapId: 0 }, { mapId: 1.5 }, { mapId: '12' }, {}, null, 12 ];
+    // Arrange: below zero, the camp's map id beside -3, which spells no blueprint.
+    const candidates: unknown[] = [ { mapId: 12 }, { mapId: blueprintMapId('k3x9q2mf') }, { mapId: -3 }, { mapId: 0 }, { mapId: 1.5 }, { mapId: '12' }, {}, null, 12 ];
 
     // Act.
     const accepted = candidates.map(isMapPanelParams);
 
     // Assert.
     expect(accepted)
-      .toStrictEqual([ true, false, false, false, false, false, false ]);
+      .toStrictEqual([ true, true, false, false, false, false, false, false, false ]);
   });
 
   it('names the first view of a map after it, and numbers every further view', () =>
@@ -48,6 +49,19 @@ describe('panels', () =>
     // Assert.
     expect(ids)
       .toStrictEqual([ 'map-12-3', 'map-120', 'map-5' ]);
+  });
+
+  it('names the first view of a blueprint opened as a map after the blueprint, and numbers every further view', () =>
+  {
+    // Arrange.
+    const camp = blueprintMapId('k3x9q2mf');
+
+    // Act.
+    const ids = [ mapPanelId(camp, [ 'map-12' ]), mapPanelId(camp, [ 'blueprint-k3x9q2mf' ]) ];
+
+    // Assert.
+    expect(ids)
+      .toStrictEqual([ 'blueprint-k3x9q2mf', 'blueprint-k3x9q2mf-2' ]);
   });
 
   it('stacks a map dropped on a group\'s middle, and splits the group from an edge', () =>
@@ -95,6 +109,19 @@ describe('panels', () =>
         .toStrictEqual([ 'map:12', 'tree', 'map:7', 'map:7', 'map:7' ]);
     });
 
+    it('hands undo to the blueprint\'s own history from its panel, and from the panels showing it', () =>
+    {
+      // Arrange: the camp opened as a map is the one the properties, quick settings and events list show.
+      const camp = blueprintMapId('k3x9q2mf');
+
+      // Act.
+      const owners = [ historyOwnedBy(PANEL_COMPONENTS.map, { mapId: camp }, 7), historyOwnedBy(PANEL_COMPONENTS.events, {}, camp) ];
+
+      // Assert.
+      expect(owners)
+        .toStrictEqual([ 'blueprint:k3x9q2mf', 'blueprint:k3x9q2mf' ]);
+    });
+
     it('owns no history for the panels following a map while none is in focus, and keeps the last one for panels that own none', () =>
     {
       // Arrange: nothing beyond the panels below.
@@ -133,6 +160,7 @@ describe('panels', () =>
           'history': 240,
           'map-properties': 300,
           'palette': 240,
+          'stamps': 240,
           'layers': 240,
           'quick-settings': 300,
           'events': 300,
@@ -198,6 +226,7 @@ describe('panels', () =>
           'history': true,
           'map-properties': true,
           'palette': true,
+          'stamps': true,
           'layers': true,
           'quick-settings': true,
           'events': true,

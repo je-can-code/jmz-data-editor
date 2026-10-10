@@ -2630,7 +2630,7 @@ const StatesBoard = () =>
   {
   });
 
-  const { updateUrl } = useUrlSelection(
+  const { updateUrl, linkedIndex } = useUrlSelection(
     'stateId',
     states,
     (s) => s.id,
@@ -2682,6 +2682,12 @@ const StatesBoard = () =>
       return;
     }
 
+    // a link to a state picks it; nothing is bound until it has.
+    if (selectedState === null && linkedIndex !== -1)
+    {
+      return;
+    }
+
     const idx = Math.min(Math.max(0, selectedStateIndex), states.length - 1);
     let next: RPG_StateDomainModel = states[idx];
     const priorId = selectedState?.id;
@@ -2699,7 +2705,7 @@ const StatesBoard = () =>
       setSelectedState(next);
       updateUrlRef.current(next);
     }
-  }, [ states, selectedStateIndex, selectedState ]);
+  }, [ states, selectedStateIndex, selectedState, linkedIndex ]);
 
   useEffect(() =>
   {
@@ -2708,8 +2714,7 @@ const StatesBoard = () =>
       return;
     }
 
-    const params = new URLSearchParams(window.location.search);
-    if (params.get('stateId'))
+    if (linkedIndex !== -1)
     {
       return;
     }

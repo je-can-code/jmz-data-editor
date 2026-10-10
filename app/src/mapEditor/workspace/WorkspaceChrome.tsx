@@ -1,10 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { Alert, AppBar, Button, IconButton, ListItemIcon, ListItemText, Menu, MenuItem, Snackbar, Toolbar, Tooltip, Typography } from '@mui/material';
-import { Check, KeyboardDoubleArrowLeft, KeyboardDoubleArrowRight, ListAlt, Save, Storage } from '@mui/icons-material';
+import { Check, KeyboardDoubleArrowLeft, KeyboardDoubleArrowRight, ListAlt, Save, Storage, ToggleOn } from '@mui/icons-material';
 import type { DockviewApi } from 'dockview-react';
 import { openDataEditor } from '../../core/infrastructure/shell/WindowShell.ts';
 import type { Side } from '../core/workspace/sideCollapse.ts';
-import { APP_TITLE, openCommonEventsWindow } from '../views/mapEditorViews.ts';
+import { APP_TITLE, openCommonEventsWindow, openSwitchesVariablesWindow } from '../views/mapEditorViews.ts';
 import { openSidePanel, SIDE_PANEL_SPECS } from './defaultLayout.ts';
 import type { SideCollapseKeeper } from './SideCollapseKeeper.ts';
 import type { NoticeSeverity } from './WorkspaceController.ts';
@@ -156,9 +156,9 @@ const PanelsMenu = () =>
 
 /**
  * The strip across the top of the workspace: the left side's own fold button, the app's name, saving (with how many
- * documents have unsaved edits), the layout reset, the Panels menu, the way to the common events and the data editor,
- * and the right side's own fold button. The two fold buttons sit at the bar's own edges, each under the column it
- * folds, the same side a browser's own minimized side panels sit on.
+ * documents have unsaved edits), the layout reset, the Panels menu, the way to the common events, the switches and
+ * variables and the data editor, and the right side's own fold button. The two fold buttons sit at the bar's own edges,
+ * each under the column it folds, the same side a browser's own minimized side panels sit on.
  * @param {{ onResetLayout: () => void }} props What resetting the layout does.
  * @returns {React.JSX.Element} The bar.
  */
@@ -192,6 +192,9 @@ const WorkspaceBar = (props: { onResetLayout: () => void }) =>
         <PanelsMenu/>
         <Button color={'inherit'} onClick={() => openCommonEventsWindow(shell)} size={'small'} startIcon={<ListAlt/>} variant={'outlined'}>
           Common events
+        </Button>
+        <Button color={'inherit'} onClick={() => openSwitchesVariablesWindow(shell)} size={'small'} startIcon={<ToggleOn/>} variant={'outlined'}>
+          Switches &amp; Variables
         </Button>
         <Button color={'inherit'} onClick={() => openDataEditor(shell)} size={'small'} startIcon={<Storage/>} variant={'outlined'}>
           Data editor

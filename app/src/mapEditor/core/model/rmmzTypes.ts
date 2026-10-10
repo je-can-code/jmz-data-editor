@@ -1,4 +1,4 @@
-import type { JsonValue } from './json.ts';
+import type { JsonObject, JsonValue } from './json.ts';
 
 /**
  * A sound as RMMZ stores it: a map's music and ambience, and every audio parameter of an event command.
@@ -195,6 +195,23 @@ type RmmzTileset = {
   tilesetNames: string[];
 };
 
+/**
+ * {@code data/System.json}: the game's settings, one object. The map editor reads and renames only the names of its
+ * switches and variables, each list indexed by id with an empty name at 0 and wherever an id is unnamed, and its length
+ * is the maximum MZ's own list offers, plus that first empty slot. Every other field is carried through as it came,
+ * which is why it is held as plain JSON.
+ */
+type RmmzSystem = JsonObject & {
+  switches: string[];
+  variables: string[];
+};
+
+/**
+ * The two lists of names {@code data/System.json} keeps by id that the map editor edits: the switches' and the
+ * variables'.
+ */
+type RmmzNameList = 'switches' | 'variables';
+
 export type {
   RmmzAudio,
   RmmzCommonEvent,
@@ -209,5 +226,7 @@ export type {
   RmmzMapProperties,
   RmmzMoveCommand,
   RmmzMoveRoute,
+  RmmzNameList,
+  RmmzSystem,
   RmmzTileset,
 };

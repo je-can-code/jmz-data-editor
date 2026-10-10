@@ -1,0 +1,1030 @@
+import { Container, type Renderer } from 'pixi.js';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { MapDocument } from '../../../../src/mapEditor/core/model/MapDocument.ts';
+import type { RmmzMapEvent } from '../../../../src/mapEditor/core/model/rmmzTypes.ts';
+import type { LightingClock, WorldStretch } from '../../../../src/mapEditor/core/renderer/lightingLayer.ts';
+import { mapAmbient, type AmbientSource } from '../../../../src/mapEditor/modules/lighting/ambientTags.ts';
+import type { LightStrength } from '../../../../src/mapEditor/modules/lighting/darkScene.ts';
+import { pictureKey } from '../../../../src/mapEditor/modules/lighting/lightFalloff.ts';
+import { LightMask } from '../../../../src/mapEditor/modules/lighting/lightMask.ts';
+import type { ActivePages } from '../../../../src/mapEditor/core/pageRule/ShownPages.ts';
+import type { LightPictures } from '../../../../src/mapEditor/modules/lighting/lightPictures.ts';
+import { command, event, page } from '../../support/eventKindFixtures.ts';
+import { buildMapJson } from '../../support/fixtures.ts';
+import { ENGINE_PAGES } from '../../support/pageFixtures.ts';
+import { WHOLE_VIEW } from '../../support/viewFixtures.ts';
+
+/**
+ * Every stand-in render texture made, in order, and how many stand-in sprites were made.
+ */
+const stand = vi.hoisted(() => ({
+  textures: [] as { width: number; height: number; destroyed: boolean; source: object }[],
+  sprites: 0,
+}));
+
+// the mask draws through pixi, which needs a GPU to draw anything; stand-ins write down what each piece holds and what
+// each render pass was handed instead.
+vi.mock('pixi.js', () =>
+{
+  /**
+   * Stands in for pixi's containers: children in the order added, and whether it was let go.
+   */
+  class StandInContainer
+  {
+    children: unknown[] = [];
+
+    destroyed = false;
+
+    addChild<T>(child: T): T
+    {
+      this.children.push(child);
+      return child;
+    }
+
+    removeChild<T>(child: T): T
+    {
+      this.children = this.children.filter(each => each !== child);
+      return child;
+    }
+
+    destroy(options?: { children?: boolean }): void
+    {
+      this.destroyed = true;
+      if (options?.children === true)
+      {
+        this.children.forEach(child => (child as { destroy: () => void }).destroy());
+      }
+    }
+  }
+
+  /**
+   * Stands in for pixi's sprites, keeping what the mask sets on them.
+   */
+  class Sprite
+  {
+    texture: unknown;
+
+    position = {
+      x: 0,
+      y: 0,
+      set(x: number, y: number)
+      {
+        this.x = x;
+        this.y = y;
+      },
+    };
+
+    anchor = {
+      x: 0,
+      set(value: number)
+      {
+        this.x = value;
+      },
+    };
+
+    blendMode = 'normal';
+
+    alpha = 1;
+
+    tint = 0xffffff;
+
+    width = 0;
+
+    height = 0;
+
+    visible = true;
+
+    destroyed = false;
+
+    constructor(texture: unknown)
+    {
+      this.texture = texture;
+      stand.sprites += 1;
+    }
+
+    setSize(width: number, height: number): void
+    {
+      this.width = width;
+      this.height = height;
+    }
+
+    destroy(): void
+    {
+      this.destroyed = true;
+    }
+  }
+
+  /**
+   * Stands in for pixi's textures: the plain white one is all the mask asks of it.
+   */
+  class Texture
+  {
+    static WHITE = { white: true };
+  }
+
+  /**
+   * Stands in for pixi's render textures, written down as they are made, each with a source of its own.
+   */
+  class RenderTexture
+  {
+    width = 0;
+
+    height = 0;
+
+    destroyed = false;
+
+    source = {};
+
+    static create(options: { width: number; height: number }): RenderTexture
+    {
+      const texture = new RenderTexture();
+      texture.width = options.width;
+      texture.height = options.height;
+      stand.textures.push(texture);
+      return texture;
+    }
+
+    destroy(): void
+    {
+      this.destroyed = true;
+    }
+  }
+
+  /**
+   * Stands in for pixi's GL programs: the sources it is made from.
+   */
+  class GlProgram
+  {
+    static from(options: unknown): unknown
+    {
+      return options;
+    }
+  }
+
+  /**
+   * Stands in for pixi's uniform groups: the uniforms, as given.
+   */
+  class UniformGroup
+  {
+    uniforms: Record<string, unknown>;
+
+    constructor(structures: Record<string, { value: unknown }>)
+    {
+      this.uniforms = Object.fromEntries(Object.entries(structures).map(([ name, structure ]) => [ name, structure.value ]));
+    }
+  }
+
+  /**
+   * Stands in for what a lit piece's quad is built from, a shader and a geometry: what each is made with, and whether
+   * it was let go.
+   */
+  class Built
+  {
+    options: unknown;
+
+    destroyed = false;
+
+    constructor(options: unknown)
+    {
+      this.options = options;
+    }
+
+    destroy(): void
+    {
+      this.destroyed = true;
+    }
+  }
+
+  /**
+   * Stands in for pixi's meshes, the quads lit pieces show through: what each is made with, and what the mask sets.
+   */
+  class Mesh extends Built
+  {
+    quad = true;
+
+    blendMode = 'normal';
+
+    position = {
+      x: 0,
+      y: 0,
+      set(x: number, y: number)
+      {
+        this.x = x;
+        this.y = y;
+      },
+    };
+  }
+
+  /**
+   * Stands in for the pixi classes the rest of the lighting module names, which the mask never makes.
+   */
+  class Graphics
+  {
+  }
+
+  /**
+   * Stands in for pixi's image sources, which the mask never makes either.
+   */
+  class ImageSource
+  {
+  }
+
+  return {
+    Container: StandInContainer,
+    GlProgram,
+    Graphics,
+    ImageSource,
+    Mesh,
+    MeshGeometry: Built,
+    RenderTexture,
+    Shader: Built,
+    Sprite,
+    Texture,
+    UniformGroup,
+  };
+});
+
+/*
+ * A dark map's darkness is drawn as J-Lighting draws its light mask: a sheet in the dark's fill with every light's
+ * picture added into it, multiplied into the map beneath. The editor draws a whole map, so the sheet comes in pieces: a
+ * piece no light reaches is a plain sprite of the fill, multiplied in, holding no texture; a piece a light reaches gets
+ * a render texture of its own, cleared to black, with each light reaching it added in, its picture centred on it at its
+ * strength at the view's clock, in the order the game adds them, and shows it through a quad over the piece that adds the
+ * dark's fill as it shows, multiplied in, its plain sprite hidden. A map nobody calls dark has no mask, and holds nothing
+ * for one.
+ *
+ * Asked to draw again, the mask builds again only the pieces whose lights changed: nothing at all when nothing did, and
+ * the pieces a moved light left and entered when one moves; a piece whose lights only burn at another strength is drawn
+ * again with the sprites it has, and a dark that only deepened or lifted repaints every piece, the plain ones' tint and
+ * the lit ones' fill, drawing none of them again. A piece the last light leaves goes back to a plain fill and lets its
+ * quad and texture go. A context the graphics card gave back holds no texture's pixels, so every lit piece is drawn again
+ * on it, in the texture it already has. A map of another size gets pieces of its own, and the old ones go. Pictures no
+ * light draws any more are let go after each draw, and destroying the mask lets go of everything.
+ *
+ * Between draws the clock moves on. Only the pieces a light whose effect runs reaches have anything to do: each works
+ * out how brightly its lights burn now and is drawn again, as it stands, only when one burns otherwise than it was drawn.
+ * A piece reached by steady lights alone is never touched, and a map with no dark, or no light whose effect runs, costs
+ * a tick nothing, its strength never even asked. Nor is a piece the view does not show: it is left as it was drawn, and
+ * the tick that brings it into view draws it as its lights burn then. A draw leaves it so too, repainting it all the same
+ * when the dark changed.
+ *
+ * The window's clock moves too, and the sky at its hour is one of the sources darkening a map. A tick finding the clock
+ * moved works out the dark at the new hour: the same dark draws nothing; a deeper or lighter one repaints every piece; a
+ * map the hour darkens for the first time gets its mask, every light cut through it at its strength now; and an hour
+ * lifting the dark takes the mask away.
+ */
+
+/**
+ * One render pass as the stand-in renderer saw it: the texture it drew into, how it cleared it, and each picture it
+ * added in, with where, how and how brightly.
+ */
+type Pass = {
+  target: unknown;
+  clear: boolean;
+  clearColor: number;
+  added: { picture: string; x: number; y: number; blendMode: string; anchor: number; alpha: number }[];
+};
+
+/**
+ * A plain sprite the mask made, as the stand-in keeps it.
+ */
+type DrawnSprite = {
+  texture: unknown;
+  position: { x: number; y: number };
+  blendMode: string;
+  tint: number;
+  width: number;
+  height: number;
+  visible: boolean;
+  destroyed: boolean;
+};
+
+/**
+ * A lit piece's quad, as the stand-in keeps it: what its shader shows, and the fill it adds, as shares of full.
+ */
+type DrawnQuad = {
+  quad: true;
+  options: { shader: { options: { resources: { uTexture: unknown; fillUniforms: { uniforms: { uFill: Float32Array } } } } } };
+  position: { x: number; y: number };
+  blendMode: string;
+  destroyed: boolean;
+};
+
+/**
+ * Reads the fill a lit piece's quad adds, back as the colour it was given.
+ * @param {DrawnQuad} quad The quad.
+ * @returns {number} The fill, as {@code 0xRRGGBB}.
+ */
+const fillOf = (quad: DrawnQuad): number =>
+{
+  const [ red, green, blue ] = [ ...quad.options.shader.options.resources.fillUniforms.uniforms.uFill ].map(share => Math.round(share * 255));
+  return (red << 16) + (green << 8) + blue;
+};
+
+/**
+ * A stand-in renderer writing down every render pass, and the container each pass drew.
+ * @returns {{ renderer: Renderer, passes: Pass[], containers: Container[] }} The renderer, its passes and their containers.
+ */
+const recordingRenderer = () =>
+{
+  const passes: Pass[] = [];
+  const containers: Container[] = [];
+  const renderer = {
+    render: (options: { container: Container; target: unknown; clear: boolean; clearColor: number }) =>
+    {
+      containers.push(options.container);
+      const added = (options.container.children as unknown as {
+        texture: { key: string };
+        position: { x: number; y: number };
+        blendMode: string;
+        anchor: { x: number };
+        alpha: number;
+      }[]).map(sprite => ({
+        picture: sprite.texture.key,
+        x: sprite.position.x,
+        y: sprite.position.y,
+        blendMode: sprite.blendMode,
+        anchor: sprite.anchor.x,
+        alpha: sprite.alpha,
+      }));
+      passes.push({ target: options.target, clear: options.clear, clearColor: options.clearColor, added });
+    },
+  };
+  return { renderer: renderer as unknown as Renderer, passes, containers };
+};
+
+/**
+ * A stand-in picture cache: each picture is its name, and what the mask keeps and lets go of is written down.
+ * @returns {{ pictures: LightPictures, kept: string[][], destroyed: () => boolean }} The cache and what it was told.
+ */
+const namedPictures = () =>
+{
+  const kept: string[][] = [];
+  let destroyed = false;
+  const pictures = {
+    pictureFor: (spec: { radius: number; color: string; intensity: number }) => ({ key: pictureKey(spec.radius, spec.color, spec.intensity) }),
+    keepOnly: (keys: ReadonlySet<string>) => kept.push([ ...keys ]),
+    destroy: () =>
+    {
+      destroyed = true;
+    },
+  };
+  return { pictures: pictures as unknown as LightPictures, kept, destroyed: () => destroyed };
+};
+
+/**
+ * A torch reaching one tile, standing at a cell, its pool centred at the cell's middle, 6 pixels above its foot.
+ * @param {number} id The event id.
+ * @param {number} x The column.
+ * @param {number} y The row.
+ * @param {string} effect What the torch does over time, written into its tag; by default, nothing.
+ * @returns {RmmzMapEvent} The torch.
+ */
+const torchAt = (id: number, x: number, y: number, effect = ''): RmmzMapEvent =>
+{
+  const tag = effect === '' ? '<light:[1, #ffbb73, 40]>' : `<light:[1, #ffbb73, 40, ${effect}]>`;
+  return { ...event(id, [ page([ command(108, [ tag ]) ]) ]), x, y };
+};
+
+/**
+ * Every light at full strength, as it burns with no effect running.
+ * @returns {number} 1.
+ */
+const steady: LightStrength = () => 1;
+
+/**
+ * A strength under which every light whose effect runs dims by a hundredth each frame of the clock, and every steady
+ * light burns at full strength.
+ * @param {{ effect: string }} light The light.
+ * @param {LightingClock} clock The view's clock.
+ * @returns {number} The strength.
+ */
+const dimming: LightStrength = (light, clock) => (light.effect === 'steady' ? 1 : 1 - (clock.frames / 100));
+
+/**
+ * The view's clock at a frame, animating, at the time of day given, 14:00 unless another is.
+ * @param {number} frames The frame.
+ * @param {number} timeOfDay The time of day, in minutes past midnight.
+ * @returns {LightingClock} The clock.
+ */
+const at = (frames: number, timeOfDay = 840): LightingClock => ({ frames, animating: true, timeOfDay });
+
+/**
+ * A sky darkening the map by the hour of the clock, naming no colour, under the time source.
+ * @param {(hour: number) => number} darknessAt The darkness at each hour.
+ * @returns {AmbientSource} The source.
+ */
+const skyOf = (darknessAt: (hour: number) => number): AmbientSource =>
+{
+  return (_document, clock) => ({ darkness: darknessAt(Math.floor(clock.timeOfDay / 60)), color: [ 0, 0, 0 ], declaresColor: false, source: 'time' });
+};
+
+/**
+ * A sky clear by day and half dark from 20:00, three quarters from 22:00.
+ */
+const NIGHTFALL = skyOf(hour =>
+{
+  if (hour >= 22)
+  {
+    return 0.75;
+  }
+
+  return hour >= 20 ? 0.5 : 0;
+});
+
+/**
+ * A map of the given size, note and events.
+ * @param {number} size How many tiles across and down.
+ * @param {string} note The note.
+ * @param {(RmmzMapEvent | null)[]} events The events, slot 0 empty.
+ * @returns {MapDocument} The map.
+ */
+const mapOf = (size: number, note: string, events: (RmmzMapEvent | null)[]): MapDocument =>
+{
+  return MapDocument.fromJson('map:6', { ...buildMapJson(), width: size, height: size, data: new Array(size * size * 6).fill(0), note, events });
+};
+
+/**
+ * A mask on a fresh stage, cut into pieces of 256 pixels, so a 16x16 map is 3 by 3 pieces, with what each strength it
+ * is asked for, in order.
+ * @param {LightStrength} strengthOf How brightly each light burns.
+ * @param {AmbientSource[]} sky Sources darkening the map beside its own note; none unless given.
+ * @returns {object} The mask, its stage, its pictures, a renderer writing down its passes, and the strengths asked for.
+ */
+const maskOnStage = (strengthOf: LightStrength = steady, sky: AmbientSource[] = []) =>
+{
+  const layer = new Container();
+  const named = namedPictures();
+  const asked: string[] = [];
+  const counted: LightStrength = (light, clock) =>
+  {
+    asked.push(`${light.id} at ${clock.frames}`);
+    return strengthOf(light, clock);
+  };
+  const sources = [ mapAmbient('#000000'), ...sky ];
+  const setup = { sources, defaults: { color: '#ffffff', intensity: 0 }, strengthOf: counted };
+  const mask = new LightMask({ layer, tileSize: 48, castTone: () => undefined }, setup, named.pictures, 256);
+  const { renderer, passes, containers } = recordingRenderer();
+  const draw = (document: MapDocument, context = 1, clock = at(0), pages: ActivePages = ENGINE_PAGES, view: WorldStretch = WHOLE_VIEW) =>
+    mask.draw({ document, renderer, context, clock, pages, view });
+  const tick = (document: MapDocument, clock: LightingClock, view: WorldStretch = WHOLE_VIEW) =>
+    mask.tick({ document, renderer, context: 1, clock, pages: ENGINE_PAGES, view });
+  const [ root ] = layer.children as Container[];
+  const children = () => root.children as unknown as (DrawnSprite | DrawnQuad)[];
+  const sprites = () => children().filter((child): child is DrawnSprite => 'quad' in child === false);
+  const quads = () => children().filter((child): child is DrawnQuad => 'quad' in child);
+  return { mask, layer, root, sprites, quads, passes, containers, asked, draw, tick, ...named };
+};
+
+/**
+ * The name of a torch's picture: a tile's reach, warm, at 40.
+ */
+const TORCH = '48:#ffbb73:0.4';
+
+/**
+ * A view on the first piece of a 16x16 map cut into pieces of 256 pixels, and one on its last.
+ */
+const FIRST_PIECE: WorldStretch = { x: 0, y: 0, width: 256, height: 256 };
+const LAST_PIECE: WorldStretch = { x: 512, y: 512, width: 256, height: 256 };
+
+describe('LightMask', () =>
+{
+  afterEach(() =>
+  {
+    stand.textures.splice(0);
+    stand.sprites = 0;
+  });
+
+  it('draws on a container of its own in its stage', () =>
+  {
+    // Arrange: a stage.
+
+    // Act.
+    const { layer, root } = maskOnStage();
+
+    // Assert.
+    expect([ layer.children.length, root.children.length ])
+      .toStrictEqual([ 1, 0 ]);
+  });
+
+  it('holds nothing for a map nobody calls dark, however many lights it holds', () =>
+  {
+    // Arrange.
+    const { draw, sprites, passes } = maskOnStage();
+
+    // Act.
+    draw(mapOf(16, '', [ null, torchAt(1, 1, 1) ]));
+
+    // Assert.
+    expect([ sprites().length, passes.length, stand.textures.length ])
+      .toStrictEqual([ 0, 0, 0 ]);
+  });
+
+  it('fills every piece of a dark map no light reaches with the dark, multiplied in, holding no texture', () =>
+  {
+    // Arrange: a cave 13 tiles across, 624 pixels, at 85%, without a light.
+    const { draw, sprites, passes, mask } = maskOnStage();
+
+    // Act.
+    draw(mapOf(13, '<ambient:[85]>', [ null ]));
+
+    // Assert: 3 by 3 pieces, the last of each row and column cut short at 624.
+    expect(sprites().map(sprite => [ sprite.position.x, sprite.position.y, sprite.width, sprite.height, sprite.tint, sprite.blendMode ]))
+      .toStrictEqual([
+        [ 0, 0, 256, 256, 0x262626, 'multiply' ],
+        [ 256, 0, 256, 256, 0x262626, 'multiply' ],
+        [ 512, 0, 112, 256, 0x262626, 'multiply' ],
+        [ 0, 256, 256, 256, 0x262626, 'multiply' ],
+        [ 256, 256, 256, 256, 0x262626, 'multiply' ],
+        [ 512, 256, 112, 256, 0x262626, 'multiply' ],
+        [ 0, 512, 256, 112, 0x262626, 'multiply' ],
+        [ 256, 512, 256, 112, 0x262626, 'multiply' ],
+        [ 512, 512, 112, 112, 0x262626, 'multiply' ],
+      ]);
+    expect([ sprites().every(sprite => (sprite.texture as { white?: boolean }).white === true), passes.length, mask.litChunks ])
+      .toStrictEqual([ true, 0, 0 ]);
+  });
+
+  it('cuts a light into the piece it reaches: its picture added in at its spot over black, shown with the dark\'s fill', () =>
+  {
+    // Arrange: a cave holding a torch at cell 1, 1, whose picture spans 24 to 120 across and 42 to 138 down.
+    const { draw, sprites, quads, passes, mask } = maskOnStage();
+
+    // Act.
+    draw(mapOf(16, '<ambient:[85]>', [ null, torchAt(1, 1, 1) ]));
+
+    // Assert: the first piece drawn into a texture of its own, over black, and shown through a quad at its corner with
+    // the dark's fill, multiplied in, its plain fill hidden; the rest plain.
+    const [ texture ] = stand.textures;
+    expect(passes)
+      .toStrictEqual([ {
+        target: texture,
+        clear: true,
+        clearColor: 0x000000,
+        added: [ { picture: TORCH, x: 72, y: 90, blendMode: 'add', anchor: 0.5, alpha: 1 } ],
+      } ]);
+    const [ first, second ] = sprites();
+    const [ quad ] = quads();
+    expect([ texture.width, texture.height, quad.options.shader.options.resources.uTexture === texture.source, fillOf(quad) ])
+      .toStrictEqual([ 256, 256, true, 0x262626 ]);
+    expect([ quad.position.x, quad.position.y, quad.blendMode, first.visible, second.visible, second.tint, mask.litChunks ])
+      .toStrictEqual([ 0, 0, 'multiply', false, true, 0x262626, 1 ]);
+  });
+
+  it('adds every light reaching a piece into it in one pass, in the order the game adds them', () =>
+  {
+    // Arrange: two torches in the first piece, event 1 at 3, 2 and event 2 nearer the corner at 1, 1; the game adds
+    // them by event, whatever their places.
+    const { draw, passes } = maskOnStage();
+
+    // Act.
+    draw(mapOf(16, '<ambient:[85]>', [ null, torchAt(1, 3, 2), torchAt(2, 1, 1) ]));
+
+    // Assert.
+    expect(passes.map(pass => pass.added.map(added => [ added.x, added.y ])))
+      .toStrictEqual([ [ [ 168, 138 ], [ 72, 90 ] ] ]);
+  });
+
+  it('adds a light at the strength it burns at at the view\'s clock', () =>
+  {
+    // Arrange: a flickering torch, 30 frames in, where it burns at 0.7.
+    const { draw, passes } = maskOnStage(dimming);
+
+    // Act.
+    draw(mapOf(16, '<ambient:[85]>', [ null, torchAt(1, 1, 1, 'flicker') ]), 1, at(30));
+
+    // Assert.
+    expect(passes[0].added[0].alpha)
+      .toBe(0.7);
+  });
+
+  it('draws a piece again with the sprites it has when only how brightly its lights burn changed', () =>
+  {
+    // Arrange: a flickering torch drawn at frame 0, at full strength.
+    const { draw, passes, containers } = maskOnStage(dimming);
+    const cave = mapOf(16, '<ambient:[85]>', [ null, torchAt(1, 1, 1, 'flicker') ]);
+    draw(cave, 1, at(0));
+    const made = stand.sprites;
+
+    // Act: asked again 20 frames on, as an edit elsewhere on the map would ask.
+    draw(cave, 1, at(20));
+
+    // Assert: one more pass, of the same sprites into the same texture, the torch at 0.8; no sprite and no texture made.
+    expect([ passes.length, containers[1] === containers[0], passes[1].target === passes[0].target, passes[1].added[0].alpha ])
+      .toStrictEqual([ 2, true, true, 0.8 ]);
+    expect([ stand.sprites - made, stand.textures.length ])
+      .toStrictEqual([ 0, 1 ]);
+  });
+
+  it('keeps every piece as it was when asked again with nothing changed', () =>
+  {
+    // Arrange: a cave drawn once.
+    const { draw, passes } = maskOnStage();
+    const cave = mapOf(16, '<ambient:[85]>', [ null, torchAt(1, 1, 1) ]);
+    draw(cave);
+
+    // Act.
+    draw(cave);
+
+    // Assert.
+    expect([ passes.length, stand.textures.length ])
+      .toStrictEqual([ 1, 1 ]);
+  });
+
+  it('redraws only the pieces a moved light left and entered, letting go of the quad and the texture it left', () =>
+  {
+    // Arrange: a torch in the first piece, and one in the last.
+    const { draw, sprites, quads, passes } = maskOnStage();
+    draw(mapOf(16, '<ambient:[85]>', [ null, torchAt(1, 1, 1), torchAt(2, 12, 12) ]));
+    const [ , lastTexture ] = stand.textures;
+    const [ , lastQuad ] = quads();
+
+    // Act: the second torch moves into the second piece.
+    draw(mapOf(16, '<ambient:[85]>', [ null, torchAt(1, 1, 1), torchAt(2, 7, 1) ]));
+
+    // Assert: one new pass, into the second piece, the torch placed from that piece's corner at 256; the last piece
+    // plain again and shown, its quad and texture gone.
+    const { 8: last } = sprites();
+    expect([ passes.length, passes[2].target === stand.textures[2], passes[2].added.map(added => [ added.x, added.y ]) ])
+      .toStrictEqual([ 3, true, [ [ 104, 90 ] ] ]);
+    expect([ lastTexture.destroyed, lastQuad.destroyed, quads().map(quad => quad.position.x), last.visible, last.tint, last.width ])
+      .toStrictEqual([ true, true, [ 0, 256 ], true, 0x262626, 256 ]);
+  });
+
+  it('cuts a lamp through the dark only while the page it shows gives light, drawing again only the piece it lights', () =>
+  {
+    // Arrange: a cave with a lamp at 1, 1, cold on its first page and lit on its second, and a steady torch in the last
+    // piece; drawn while the lamp shows its cold page.
+    const { draw, sprites, passes } = maskOnStage();
+    const lamp: RmmzMapEvent = { ...event(1, [ page([]), page([ command(108, [ '<light:[1, #ffbb73, 40]>' ]) ]) ]), x: 1, y: 1 };
+    const cave = mapOf(16, '<ambient:[85]>', [ null, lamp, torchAt(2, 12, 12) ]);
+    const showing = (lampPage: number): ActivePages => ({ activePage: shown => (shown.id === 1 ? lampPage : 0) });
+    draw(cave, 1, at(0), showing(0));
+    const cold = passes.length;
+
+    // Act: the lamp turns to its lit page, then back.
+    draw(cave, 1, at(0), showing(1));
+    const lit = passes.map(pass => pass.added.map(added => [ added.x, added.y ]));
+    draw(cave, 1, at(0), showing(0));
+
+    // Assert: the torch's piece alone at first; then the lamp cut into the first piece, and nothing else drawn; then the
+    // first piece a plain fill again, shown, its texture let go.
+    const [ first ] = sprites();
+    expect([ cold, lit, passes.length, first.visible, first.tint, stand.textures[1].destroyed ])
+      .toStrictEqual([ 1, [ [ [ 88, 106 ] ], [ [ 72, 90 ] ] ], 2, true, 0x262626, true ]);
+  });
+
+  it('draws every lit piece again, in the texture it has, on a context the graphics card gave back', () =>
+  {
+    // Arrange: a cave with a torch in the first and last pieces, drawn on the first context.
+    const { draw, passes } = maskOnStage();
+    const cave = mapOf(16, '<ambient:[85]>', [ null, torchAt(1, 1, 1), torchAt(2, 12, 12) ]);
+    draw(cave, 1);
+
+    // Act: nothing changed but the context.
+    draw(cave, 2);
+
+    // Assert: both lit pieces again, into the textures they had, and no plain piece.
+    expect([ passes.length, passes[2].target === passes[0].target, passes[3].target === passes[1].target, stand.textures.length ])
+      .toStrictEqual([ 4, true, true, 2 ]);
+  });
+
+  it('repaints every piece when the darkness changes, drawing nothing into the lit one again', () =>
+  {
+    // Arrange: a cave at 85% with a torch.
+    const { draw, sprites, quads, passes } = maskOnStage();
+    draw(mapOf(16, '<ambient:[85]>', [ null, torchAt(1, 1, 1) ]));
+    const made = stand.sprites;
+
+    // Act: the note now says 93%.
+    draw(mapOf(16, '<ambient:[93]>', [ null, torchAt(1, 1, 1) ]));
+
+    // Assert: the lit piece's fill and every plain one's tint the new dark, with no pass drawn again and nothing made.
+    expect([ fillOf(quads()[0]), sprites().slice(1).every(sprite => sprite.tint === 0x121212) ])
+      .toStrictEqual([ 0x121212, true ]);
+    expect([ passes.length, stand.sprites - made, stand.textures.length ])
+      .toStrictEqual([ 1, 0, 1 ]);
+  });
+
+  it('covers a map of another size with pieces of its own, letting go of the old ones and their textures', () =>
+  {
+    // Arrange: a lit 16x16 cave drawn.
+    const { draw, sprites } = maskOnStage();
+    draw(mapOf(16, '<ambient:[85]>', [ null, torchAt(1, 1, 1) ]));
+    const old = [ ...sprites() ];
+
+    // Act: an 8x8 cave, 384 pixels across.
+    draw(mapOf(8, '<ambient:[85]>', [ null ]));
+
+    // Assert.
+    expect([ old.every(sprite => sprite.destroyed), stand.textures[0].destroyed, sprites().slice(9).map(sprite => [ sprite.width, sprite.height ]) ])
+      .toStrictEqual([ true, true, [ [ 256, 256 ], [ 128, 256 ], [ 256, 128 ], [ 128, 128 ] ] ]);
+  });
+
+  it('lets go of everything once the map is no longer dark', () =>
+  {
+    // Arrange: a lit cave drawn.
+    const { draw, sprites, quads, mask, kept } = maskOnStage();
+    draw(mapOf(16, '<ambient:[85]>', [ null, torchAt(1, 1, 1) ]));
+    const [ quad ] = quads();
+
+    // Act: the note no longer says it is dark.
+    draw(mapOf(16, '', [ null, torchAt(1, 1, 1) ]));
+
+    // Assert.
+    expect([ sprites().every(sprite => sprite.destroyed), quad.destroyed, quads().length, stand.textures[0].destroyed, mask.litChunks, kept[kept.length - 1] ])
+      .toStrictEqual([ true, true, 0, true, 0, [] ]);
+  });
+
+  it('keeps only the pictures the map\'s lights draw after each draw', () =>
+  {
+    // Arrange: a torch, and a lamp reaching two tiles in white.
+    const lamp: RmmzMapEvent = { ...event(2, [ page([ command(108, [ '<light:[2]>' ]) ]) ]), x: 9, y: 9 };
+    const { draw, kept } = maskOnStage();
+
+    // Act.
+    draw(mapOf(16, '<ambient:[85]>', [ null, torchAt(1, 1, 1), lamp ]));
+
+    // Assert.
+    expect(kept)
+      .toStrictEqual([ [ TORCH, '96:#ffffff:0' ] ]);
+  });
+
+  it('lets go of everything, pictures and its container included, when destroyed', () =>
+  {
+    // Arrange: a lit cave drawn.
+    const { draw, sprites, quads, root, mask, destroyed, containers } = maskOnStage();
+    draw(mapOf(16, '<ambient:[85]>', [ null, torchAt(1, 1, 1) ]));
+    const drawn = [ ...sprites() ];
+    const [ quad ] = quads();
+
+    // Act.
+    mask.destroy();
+
+    // Assert: the pieces, the lit piece's quad and texture and the sprites added into it, the pictures, and the mask's
+    // container.
+    const [ added ] = containers as unknown as { destroyed: boolean }[];
+    expect([ drawn.every(sprite => sprite.destroyed), quad.destroyed, stand.textures[0].destroyed, added.destroyed ])
+      .toStrictEqual([ true, true, true, true ]);
+    expect([ destroyed(), (root as unknown as { destroyed: boolean }).destroyed ])
+      .toStrictEqual([ true, true ]);
+  });
+
+  describe('tick', () =>
+  {
+    it('draws again, as it stands, only a piece a light whose effect runs reaches, every light in it at its strength now', () =>
+    {
+      // Arrange: a flickering torch at 1, 1 and a steady lamp at 3, 2 share the first piece; a steady lamp at 12, 12 has
+      // the last to itself. All drawn at frame 0.
+      const { draw, tick, passes, containers, asked } = maskOnStage(dimming);
+      const cave = mapOf(16, '<ambient:[85]>', [ null, torchAt(1, 1, 1, 'flicker'), torchAt(2, 3, 2), torchAt(3, 12, 12) ]);
+      draw(cave, 1, at(0));
+      asked.splice(0);
+
+      // Act.
+      const moved = tick(cave, at(10));
+
+      // Assert: one pass, into the first piece's texture with the sprites it has, the torch at 0.9 and the lamp at full;
+      // the last piece's lamp never asked after.
+      expect([ moved, passes.length, passes[2].target === passes[0].target, containers[2] === containers[0] ])
+        .toStrictEqual([ true, 3, true, true ]);
+      expect([ passes[2].added.map(added => added.alpha), asked ])
+        .toStrictEqual([ [ 0.9, 1 ], [ 'page:1#0 at 10', 'page:2#0 at 10' ] ]);
+    });
+
+    it('draws nothing again on a tick where every light burns as it was drawn', () =>
+    {
+      // Arrange: a flickering torch drawn at frame 10.
+      const { draw, tick, passes } = maskOnStage(dimming);
+      const cave = mapOf(16, '<ambient:[85]>', [ null, torchAt(1, 1, 1, 'flicker') ]);
+      draw(cave, 1, at(10));
+
+      // Act: the clock still on frame 10.
+      const moved = tick(cave, at(10));
+
+      // Assert.
+      expect([ moved, passes.length ])
+        .toStrictEqual([ false, 1 ]);
+    });
+
+    it('asks after no light on a tick while every light on the map is steady', () =>
+    {
+      // Arrange: two steady torches in the dark.
+      const { draw, tick, passes, asked, mask } = maskOnStage(dimming);
+      const cave = mapOf(16, '<ambient:[85]>', [ null, torchAt(1, 1, 1), torchAt(2, 12, 12) ]);
+      draw(cave, 1, at(0));
+      asked.splice(0);
+
+      // Act.
+      const moved = tick(cave, at(10));
+
+      // Assert.
+      expect([ moved, passes.length, asked, mask.movingChunks ])
+        .toStrictEqual([ false, 2, [], 0 ]);
+    });
+
+    it('asks after no light on a tick on a map nobody calls dark', () =>
+    {
+      // Arrange: a flickering torch on a map with no darkness.
+      const { draw, tick, passes, asked } = maskOnStage(dimming);
+      const field = mapOf(16, '', [ null, torchAt(1, 1, 1, 'flicker') ]);
+      draw(field, 1, at(0));
+
+      // Act.
+      const moved = tick(field, at(10));
+
+      // Assert.
+      expect([ moved, passes.length, asked ])
+        .toStrictEqual([ false, 0, [] ]);
+    });
+
+    it('asks after no light on a tick once the map is no longer dark', () =>
+    {
+      // Arrange: a flickering torch in a cave drawn, then the cave's darkness taken away and drawn again.
+      const { draw, tick, passes, asked } = maskOnStage(dimming);
+      draw(mapOf(16, '<ambient:[85]>', [ null, torchAt(1, 1, 1, 'flicker') ]), 1, at(0));
+      const field = mapOf(16, '', [ null, torchAt(1, 1, 1, 'flicker') ]);
+      draw(field, 1, at(0));
+      asked.splice(0);
+
+      // Act.
+      const moved = tick(field, at(10));
+
+      // Assert.
+      expect([ moved, passes.length, asked ])
+        .toStrictEqual([ false, 1, [] ]);
+    });
+
+    it('draws again only the pieces the view shows, and a piece scrolled into view as its lights burn then', () =>
+    {
+      // Arrange: flickering torches alone in the first piece and in the last, both drawn at frame 0 with the whole map
+      // in view.
+      const { draw, tick, passes, asked } = maskOnStage(dimming);
+      const cave = mapOf(16, '<ambient:[85]>', [ null, torchAt(1, 1, 1, 'flicker'), torchAt(2, 12, 12, 'flicker') ]);
+      draw(cave, 1, at(0));
+      asked.splice(0);
+
+      // Act: ten frames on with the view on the first piece alone, then ten more with it moved onto the last.
+      const first = tick(cave, at(10), FIRST_PIECE);
+      const last = tick(cave, at(20), LAST_PIECE);
+
+      // Assert: the first piece at 0.9, then the last at 0.8, the strength it burns at as it comes into view, each light
+      // asked after only while its piece shows.
+      expect([ first, last, passes.length, passes[2].target === passes[0].target, passes[3].target === passes[1].target ])
+        .toStrictEqual([ true, true, 4, true, true ]);
+      expect([ passes[2].added[0].alpha, passes[3].added[0].alpha, asked ])
+        .toStrictEqual([ 0.9, 0.8, [ 'page:1#0 at 10', 'page:2#0 at 20' ] ]);
+    });
+
+    it('leaves a piece out of view as it stands when a draw finds only its lights burning otherwise, for a tick to draw', () =>
+    {
+      // Arrange: the two flickering torches drawn at frame 0 with the whole map in view.
+      const { draw, tick, passes } = maskOnStage(dimming);
+      const cave = mapOf(16, '<ambient:[85]>', [ null, torchAt(1, 1, 1, 'flicker'), torchAt(2, 12, 12, 'flicker') ]);
+      draw(cave, 1, at(0));
+
+      // Act: asked to draw again twenty frames on, as an edit elsewhere asks, with the view on the first piece alone;
+      // then a tick in the same frame with the view moved onto the last.
+      draw(cave, 1, at(20), ENGINE_PAGES, FIRST_PIECE);
+      const drawn = passes.length;
+      tick(cave, at(20), LAST_PIECE);
+
+      // Assert: the draw drew the first piece alone, at 0.8; the tick the last, at 0.8 too.
+      expect([ drawn, passes.slice(2).map(pass => pass.added[0].alpha), passes[3].target === passes[1].target ])
+        .toStrictEqual([ 3, [ 0.8, 0.8 ], true ]);
+    });
+
+    it('repaints a lit piece out of view when the dark changes, as it does one in view, drawing nothing into either', () =>
+    {
+      // Arrange: steady torches in the first piece and in the last, drawn at 85% with the whole map in view.
+      const { draw, quads, passes } = maskOnStage();
+      draw(mapOf(16, '<ambient:[85]>', [ null, torchAt(1, 1, 1), torchAt(2, 12, 12) ]));
+
+      // Act: the note now says 93%, drawn with the view on the first piece alone.
+      draw(mapOf(16, '<ambient:[93]>', [ null, torchAt(1, 1, 1), torchAt(2, 12, 12) ]), 1, at(0), ENGINE_PAGES, FIRST_PIECE);
+
+      // Assert: both lit pieces repainted with the new fill, and no pass drawn again.
+      expect([ quads().map(fillOf), passes.length ])
+        .toStrictEqual([ [ 0x121212, 0x121212 ], 2 ]);
+    });
+  });
+
+  describe('tick, with the clock moved', () =>
+  {
+    it('gives a map its mask once the clock reaches an hour that darkens it, every light cut through at its strength now', () =>
+    {
+      // Arrange: a field with a flickering torch, no darkness of its own, drawn at 14:00 under a sky dark after 20:00.
+      const { draw, tick, sprites, quads, passes, mask } = maskOnStage(dimming, [ NIGHTFALL ]);
+      const field = mapOf(16, '', [ null, torchAt(1, 1, 1, 'flicker') ]);
+      draw(field, 1, at(0));
+
+      // Act: 20:00, ten frames on.
+      const moved = tick(field, at(10, 1200));
+
+      // Assert: half dark, the torch cut into the first piece at 0.9 and shown with that fill, the rest plain.
+      expect([ moved, passes.map(pass => [ pass.clearColor, pass.added.map(added => added.alpha) ]), quads().map(fillOf), mask.litChunks ])
+        .toStrictEqual([ true, [ [ 0x000000, [ 0.9 ] ] ], [ 0x808080 ], 1 ]);
+      expect(sprites().slice(1).every(sprite => sprite.tint === 0x808080))
+        .toBe(true);
+    });
+
+    it('draws nothing again when the clock moves within the dark it already shows', () =>
+    {
+      // Arrange: the field drawn at 20:00, already half dark.
+      const { draw, tick, passes } = maskOnStage(steady, [ NIGHTFALL ]);
+      const field = mapOf(16, '', [ null, torchAt(1, 1, 1) ]);
+      draw(field, 1, at(0, 1200));
+
+      // Act: 21:30, still half dark.
+      const moved = tick(field, at(0, 1290));
+
+      // Assert.
+      expect([ moved, passes.length ])
+        .toStrictEqual([ false, 1 ]);
+    });
+
+    it('repaints every piece when the hour deepens the dark, drawing none of them again', () =>
+    {
+      // Arrange: the field drawn at 20:00, half dark.
+      const { draw, tick, sprites, quads, passes } = maskOnStage(steady, [ NIGHTFALL ]);
+      const field = mapOf(16, '', [ null, torchAt(1, 1, 1) ]);
+      draw(field, 1, at(0, 1200));
+      const made = stand.sprites;
+
+      // Act: 22:00, three quarters dark.
+      const moved = tick(field, at(0, 1320));
+
+      // Assert: the lit piece's fill and the plain ones' tint the deeper dark, with no pass drawn again and nothing made.
+      expect([ moved, quads().map(fillOf), passes.length, stand.sprites - made ])
+        .toStrictEqual([ true, [ 0x404040 ], 1, 0 ]);
+      expect(sprites().slice(1).every(sprite => sprite.tint === 0x404040))
+        .toBe(true);
+    });
+
+    it('takes the mask away when the clock moves to an hour that lifts the dark', () =>
+    {
+      // Arrange: the field drawn at 22:00.
+      const { draw, tick, sprites, mask } = maskOnStage(steady, [ NIGHTFALL ]);
+      const field = mapOf(16, '', [ null, torchAt(1, 1, 1) ]);
+      draw(field, 1, at(0, 1320));
+      const drawn = [ ...sprites() ];
+
+      // Act: back to 14:00.
+      const moved = tick(field, at(0, 840));
+
+      // Assert.
+      expect([ moved, drawn.every(sprite => sprite.destroyed), stand.textures[0].destroyed, mask.litChunks ])
+        .toStrictEqual([ true, true, true, 0 ]);
+    });
+
+    it('changes nothing when the clock moves on a map no hour darkens', () =>
+    {
+      // Arrange: a field drawn at 14:00 with no sky over it.
+      const { draw, tick, passes } = maskOnStage();
+      const field = mapOf(16, '', [ null, torchAt(1, 1, 1) ]);
+      draw(field, 1, at(0));
+
+      // Act: 22:00.
+      const moved = tick(field, at(0, 1320));
+
+      // Assert.
+      expect([ moved, passes.length ])
+        .toStrictEqual([ false, 0 ]);
+    });
+
+    it('cuts the lights it worked out before the hour lifted the dark through it again when the dark returns', () =>
+    {
+      // Arrange: a flickering torch in the field drawn at 22:00, then the clock moved to 14:00, lifting the dark.
+      const { draw, tick, quads, passes, asked } = maskOnStage(dimming, [ NIGHTFALL ]);
+      const field = mapOf(16, '', [ null, torchAt(1, 1, 1, 'flicker') ]);
+      draw(field, 1, at(0, 1320));
+      tick(field, at(0, 840));
+      asked.splice(0);
+
+      // Act: back to 20:00, twenty frames on.
+      const moved = tick(field, at(20, 1200));
+
+      // Assert: the torch cut through again at its strength twenty frames on, asked after once for that, and shown with
+      // the half dark's fill.
+      expect([ moved, passes.map(pass => pass.added.map(added => added.alpha)), quads().map(fillOf), asked ])
+        .toStrictEqual([ true, [ [ 1 ], [ 0.8 ] ], [ 0x808080 ], [ 'page:1#0 at 20' ] ]);
+    });
+  });
+
+  describe('movingChunks', () =>
+  {
+    it('counts every piece a light whose effect runs reaches, and no piece steady lights alone reach', () =>
+    {
+      // Arrange: a flickering torch at 5, 5, whose picture spans the corner of the first four pieces, and a steady lamp
+      // at 12, 12 in the last.
+      const { draw, mask } = maskOnStage(dimming);
+
+      // Act.
+      draw(mapOf(16, '<ambient:[85]>', [ null, torchAt(1, 5, 5, 'flicker'), torchAt(2, 12, 12) ]), 1, at(0));
+
+      // Assert.
+      expect([ mask.movingChunks, mask.litChunks ])
+        .toStrictEqual([ 4, 5 ]);
+    });
+  });
+});

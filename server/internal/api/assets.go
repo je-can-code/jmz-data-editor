@@ -10,7 +10,8 @@ import (
 	"strings"
 )
 
-// imageFolders are the folders under img/ that RPG Maker MZ's ImageManager loads from.
+// imageFolders are the folders under img/ that RPG Maker MZ's ImageManager loads from, and weather,
+// where J-Weather's ImageManager.loadWeather finds the pictures its particles are drawn with.
 var imageFolders = map[string]bool{
 	"animations":   true,
 	"battlebacks1": true,
@@ -26,6 +27,7 @@ var imageFolders = map[string]bool{
 	"tilesets":     true,
 	"titles1":      true,
 	"titles2":      true,
+	"weather":      true,
 }
 
 // audioFolders are the folders under audio/ that RPG Maker MZ's AudioManager plays from.
@@ -48,18 +50,31 @@ func LoadImage(responseWriter http.ResponseWriter, httpRequest *http.Request) {
 // nothing, since a young project may not have made it yet. An empty list leaves "data" out of the
 // envelope, as every empty answer does.
 func ListImages(responseWriter http.ResponseWriter, httpRequest *http.Request) {
+	listAssets(responseWriter, httpRequest, "img", imageFolders, ".png")
+}
+
+// ListAudio serves GET /api/audio/{folder}: the names of the sounds in audio/{folder}, without .ogg and sorted, for
+// pickers such as the sounds a transfer plays. Like ListImages, it lists only what LoadAudio would serve, and nothing for
+// a folder the project does not have.
+func ListAudio(responseWriter http.ResponseWriter, httpRequest *http.Request) {
+	listAssets(responseWriter, httpRequest, "audio", audioFolders, ".ogg")
+}
+
+// listAssets answers one listing: the folder must be on the allowed list, and its plain files with the extension are
+// listed by name without it, sorted.
+func listAssets(responseWriter http.ResponseWriter, httpRequest *http.Request, base string, folders map[string]bool, extension string) {
 	var req RestRequest
 	if req.ToRestRequest(responseWriter, httpRequest) != nil {
 		return
 	}
 
 	folder := httpRequest.PathValue("folder")
-	if imageFolders[folder] == false {
-		http.Error(responseWriter, "folder must be one of: "+strings.Join(sortedKeys(imageFolders), ", "), http.StatusBadRequest)
+	if folders[folder] == false {
+		http.Error(responseWriter, "folder must be one of: "+strings.Join(sortedKeys(folders), ", "), http.StatusBadRequest)
 		return
 	}
 
-	names, err := listAssetNames(filepath.Join(req.ProjectPath, "img", folder), ".png")
+	names, err := listAssetNames(filepath.Join(req.ProjectPath, base, folder), extension)
 	statusCode := http.StatusOK
 	errMsg := ""
 	if err != nil {

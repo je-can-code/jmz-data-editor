@@ -95,4 +95,18 @@ describe('History', () =>
     expect([ states, dropped, history.undone ])
       .toStrictEqual([ [ 'done', 'undone', null ], [ true, false ], [] ]);
   });
+
+  it('puts a step in the place of the one with its id, done or undone, and leaves a history without it as it was', () =>
+  {
+    // Arrange: a narrowed copy of each of b and d, and one of a step the history never held.
+    const history = new History('map:1', [ step('a'), step('b') ], [ step('c'), step('d') ]);
+    const narrowed = (id: string): HistoryStep => ({ ...step(id), label: `${id} narrowed` });
+
+    // Act.
+    [ narrowed('b'), narrowed('d'), narrowed('z') ].forEach(each => history.replace(each));
+
+    // Assert.
+    expect([ history.done.map(each => each.label), history.undone.map(each => each.label) ])
+      .toStrictEqual([ [ 'a', 'b narrowed' ], [ 'c', 'd narrowed' ] ]);
+  });
 });

@@ -1,9 +1,11 @@
 import {
+  blueprintIdOfMap,
   COMMON_EVENTS_KEY,
   editorDataDocumentKey,
   MAP_INFOS_KEY,
   mapDocumentKey,
   parseDocumentKey,
+  SYSTEM_KEY,
   type DocumentKey,
 } from '../model/documentKeys.ts';
 import type { Patch } from '../model/patches.ts';
@@ -28,32 +30,6 @@ const BLUEPRINTS_DATA_NAME = 'blueprints';
 const TREE_HISTORY_KEY: HistoryKey = 'tree';
 
 /**
- * Names a map's own history: painting, and placing, moving and deleting its events.
- * @param {number} mapId The map id.
- * @returns {HistoryKey} The key.
- */
-const mapHistoryKey = (mapId: number): HistoryKey =>
-{
-  return mapDocumentKey(mapId);
-};
-
-/**
- * Names an event window's history: everything edited inside one event.
- * @param {number} mapId The map the event is on.
- * @param {number} eventId The event id.
- * @returns {HistoryKey} The key.
- */
-const eventHistoryKey = (mapId: number, eventId: number): HistoryKey =>
-{
-  if (Number.isInteger(eventId) === false || eventId < 1)
-  {
-    throw new Error(`an event id is a positive integer, not ${eventId}`);
-  }
-
-  return `event:${mapDocumentKey(mapId).slice('map:'.length)}:${eventId}`;
-};
-
-/**
  * Names a blueprint's history. Undoing a blueprint change rolls every copy of it back with it.
  * @param {string} blueprintId The blueprint's id.
  * @returns {HistoryKey} The key.
@@ -66,6 +42,40 @@ const blueprintHistoryKey = (blueprintId: string): HistoryKey =>
   }
 
   return `blueprint:${blueprintId}`;
+};
+
+/**
+ * Names a map's own history: painting, and placing, moving and deleting its events. A blueprint opened as a map keeps
+ * no history of its own as a map: what is painted and moved there goes in the blueprint's history, beside its save and
+ * its renames, since that is the one thing being changed.
+ * @param {number} mapId The map id, or the id below zero a blueprint opened as a map is named by.
+ * @returns {HistoryKey} The key.
+ */
+const mapHistoryKey = (mapId: number): HistoryKey =>
+{
+  const blueprintId = blueprintIdOfMap(mapId);
+  return blueprintId === null
+    ? mapDocumentKey(mapId)
+    : blueprintHistoryKey(blueprintId);
+};
+
+/**
+ * Names an event window's history: everything edited inside one event. An event of a blueprint opened as a map is named
+ * by the id below zero the blueprint takes as a map, and its history lives on that map, as any event's does on its own.
+ * @param {number} mapId The map the event is on.
+ * @param {number} eventId The event id.
+ * @returns {HistoryKey} The key.
+ */
+const eventHistoryKey = (mapId: number, eventId: number): HistoryKey =>
+{
+  if (Number.isInteger(eventId) === false || eventId < 1)
+  {
+    throw new Error(`an event id is a positive integer, not ${eventId}`);
+  }
+
+  // building the map's key refuses an id that names no map.
+  mapDocumentKey(mapId);
+  return `event:${mapId}:${eventId}`;
 };
 
 /**
@@ -93,6 +103,12 @@ const documentHistoryKey = (key: DocumentKey): HistoryKey =>
 {
   return key;
 };
+
+/**
+ * The history of the switch and variable names: every rename, and every change to how many switches or variables the
+ * game has. It is the system document's own, since the names are all the map editor changes there.
+ */
+const SYSTEM_HISTORY_KEY: HistoryKey = documentHistoryKey(SYSTEM_KEY);
 
 /**
  * Finds the document a history lives on.
@@ -194,6 +210,7 @@ export {
   homeDocumentOf,
   mapHistoryKey,
   outsideChangeHistories,
+  SYSTEM_HISTORY_KEY,
   TREE_HISTORY_KEY,
 };
 export type { HistoryKey };

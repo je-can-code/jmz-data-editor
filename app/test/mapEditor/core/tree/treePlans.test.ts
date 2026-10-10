@@ -331,6 +331,21 @@ describe('treePlans', () =>
         .toStrictEqual([ null, 'World@0#1', 'Town@1#2', 'Inn@2#3', 'Town@6#6', 'Cave@1#4', 'Test@0#5', 'Inn@4#7' ]);
     });
 
+    it('carries each copied map\'s placements of blueprints, as they were when copied, into the map pasted from it', () =>
+    {
+      // Arrange: the town holds a placement of the camp, and the inn none.
+      const rows = buildTreeRows();
+      const camp = { blueprintId: 'aa22', x: 4, y: 7 };
+      const copies = copyMaps(rows, [ 2, 3 ], files(), new Map([ [ 2, [ camp ] ], [ 9, [ { ...camp, x: 1 } ] ] ]));
+
+      // Act.
+      const plan = planPaste(rows, copies, 6);
+
+      // Assert.
+      expect([ copies.map(copy => [ copy.sourceId, copy.spots ]), plan.created.map(each => [ each.mapId, each.spots ]) ])
+        .toStrictEqual([ [ [ 2, [ camp ] ], [ 3, [] ] ], [ [ 4, [ camp ] ], [ 7, [] ] ] ]);
+    });
+
     it('names a single pasted map, and refuses an empty clipboard or a target that is not there', () =>
     {
       // Arrange.
@@ -367,6 +382,21 @@ describe('treePlans', () =>
         .toStrictEqual([ 'Duplicate 2 maps', [ 4, 7 ], [ [ 4, 'world file' ], [ 7, 'Test Town' ] ] ]);
       expect(shapeOf(plan.rows))
         .toStrictEqual([ null, 'World@0#1', 'Town@1#2', 'Inn@2#3', 'World@0#6', 'Cave@1#5', 'Test@0#7', 'Town@1#4' ]);
+    });
+
+    it('gives each copy its original\'s placements of blueprints, and a brand new map none', () =>
+    {
+      // Arrange: the town holds a placement of the camp; the world, given no placements, holds none.
+      const rows = buildTreeRows();
+      const camp = { blueprintId: 'aa22', x: 4, y: 7 };
+      const sources = [ { mapId: 2, content: buildMapJson(), spots: [ camp ] }, { mapId: 1, content: buildMapJson() } ];
+
+      // Act.
+      const plans = [ planDuplicate(rows, sources), planCreate(rows, TREE_ROOT, newMapContent(1)) ];
+
+      // Assert.
+      expect(plans.map(plan => plan.created.map(each => [ each.mapId, each.spots ])))
+        .toStrictEqual([ [ [ 4, [] ], [ 7, [ camp ] ] ], [ [ 4, [] ] ] ]);
     });
 
     it('names a single duplicate, and refuses with nothing picked', () =>

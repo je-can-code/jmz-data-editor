@@ -2,6 +2,8 @@
  * @vitest-environment jsdom
  */
 import { afterEach, describe, expect, it } from 'vitest';
+import type { Camera } from '../../../../src/mapEditor/core/renderer/camera.ts';
+import type { StampOutcome } from '../../../../src/mapEditor/core/stamps/stampPlacement.ts';
 import { makeAutotileId, TileId } from '../../../../src/mapEditor/core/tiles/tileIds.ts';
 import { singleTileBrush } from '../../../../src/mapEditor/core/tools/brush.ts';
 import { INITIAL_PAINT_SETTINGS, PaintState, type PaintSettings } from '../../../../src/mapEditor/core/tools/PaintState.ts';
@@ -9,6 +11,7 @@ import type { ToolOverlay } from '../../../../src/mapEditor/core/tools/ToolSessi
 import { PaintController } from '../../../../src/mapEditor/render/tools/PaintController.ts';
 import { fill, put } from '../../core/tiles/support/tileGridBuilder.ts';
 import { benchWith, layeringWith, stackAt, type PaintBench } from '../../core/tools/support/paintFixtures.ts';
+import { stampOf } from '../../support/stampFixtures.ts';
 
 /*
  * The page's side of painting.
@@ -16,22 +19,29 @@ import { benchWith, layeringWith, stackAt, type PaintBench } from '../../core/to
  * The controller turns the pointer on a map's canvas and the keys held into what the tools do: the left button
  * paints (the right stays the renderer's, for panning), Shift held with the pointer lays tiles exactly, the space bar
  * held over the map paints one stroke on the override's layer (and is kept from the page, which would otherwise
- * scroll or press a button), Escape takes back what is in progress, and a stroke is ended, keeping what it painted,
- * when a Ctrl shortcut arrives mid-stroke or the window loses focus, so an undo never finds a stroke still open. The
- * view is told what to show after every change, and nothing more happens once the controller lets go.
+ * scroll or press a button), Escape takes back what is in progress, or puts a stamp in hand down wherever the pointer
+ * is, and a stroke is ended, keeping what it painted, when a Ctrl shortcut arrives mid-stroke or the window loses
+ * focus, so an undo never finds a stroke still open. A click with the stamp places it, and whoever listens hears what
+ * came of it. The map moving under a still pointer moves the tools to the cell now under it, so the preview always shows
+ * where a click lands. The view is told what to show after every change, and nothing more happens once the controller
+ * lets go.
  */
 const GRASS = 16;
 const ROCK = TileId.A5 + 97;
 
 /**
- * A controller over a canvas, with the bench it paints on, the settings it reads, and every overlay it handed over.
+ * A controller over a canvas, with the bench it paints on, the settings it reads, every overlay it handed over, what
+ * each click of the stamp came to, how to move the camera under the pointer, and how many hear the camera.
  */
 type ControllerBench = PaintBench & {
   readonly canvas: HTMLCanvasElement;
   readonly painting: PaintState;
   readonly controller: PaintController;
   readonly overlays: ToolOverlay[];
+  readonly stamped: StampOutcome[];
   readonly detach: () => void;
+  readonly moveCamera: (camera: Camera) => void;
+  readonly cameraListeners: () => number;
 };
 
 /**
@@ -48,11 +58,14 @@ afterEach(() =>
 });
 
 /**
- * Builds a controller painting a 4x3 map of grass through a canvas with one cell every 48 pixels.
+ * Builds a controller painting a 4x3 map of grass through a canvas with one cell every 48 pixels, under a camera that
+ * starts at the map's corner at the game's scale and can be moved.
  * @param {Partial<PaintSettings>} settings The settings to start from.
+ * @param {(mapId: number) => string | null} linkRefusal Why a map may hold no copy of a blueprint; by default every map
+ * may.
  * @returns {ControllerBench} The controller and everything around it.
  */
-const controllerWith = (settings: Partial<PaintSettings>): ControllerBench =>
+const controllerWith = (settings: Partial<PaintSettings>, linkRefusal: (mapId: number) => string | null = () => null): ControllerBench =>
 {
   const bench = benchWith(4, 3, grid => fill(grid, 0, 0, 3, 2, 0, makeAutotileId(GRASS, 0)));
   const canvas = document.createElement('canvas');
@@ -63,15 +76,26 @@ const controllerWith = (settings: Partial<PaintSettings>): ControllerBench =>
   canvases.push(canvas);
   const painting = new PaintState({ ...INITIAL_PAINT_SETTINGS, ...settings });
   const overlays: ToolOverlay[] = [];
+  const stamped: StampOutcome[] = [];
+  const view = { camera: { x: 0, y: 0, zoom: 1 } as Camera };
+  const listeners = new Set<(camera: Camera) => void>();
   const controller = new PaintController({
     surface: {
       canvas,
-      camera: { x: 0, y: 0, zoom: 1 },
+      get camera()
+      {
+        return view.camera;
+      },
       cellAt: point =>
       {
-        const x = Math.floor(point.x / 48);
-        const y = Math.floor(point.y / 48);
+        const x = Math.floor((view.camera.x + point.x / view.camera.zoom) / 48);
+        const y = Math.floor((view.camera.y + point.y / view.camera.zoom) / 48);
         return x >= 0 && y >= 0 && x < 4 && y < 3 ? { x, y } : null;
+      },
+      onCameraChange: listener =>
+      {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
       },
     },
     hub: bench.hub,
@@ -79,10 +103,23 @@ const controllerWith = (settings: Partial<PaintSettings>): ControllerBench =>
     layering: () => layeringWith(),
     painting,
     overlay: overlay => overlays.push(overlay),
+    onStamped: outcome => stamped.push(outcome),
+    linkRefusal,
   });
   const detach = controller.attach();
   detachers.push(detach);
-  return { ...bench, canvas, painting, controller, overlays, detach };
+
+  /**
+   * Moves the camera, as a zoom, a pan or a view centred on something does, and tells whoever listens.
+   * @param {Camera} camera The camera.
+   */
+  const moveCamera = (camera: Camera): void =>
+  {
+    view.camera = camera;
+    listeners.forEach(listener => listener(camera));
+  };
+
+  return { ...bench, canvas, painting, controller, overlays, stamped, detach, moveCamera, cameraListeners: () => listeners.size };
 };
 
 /**
@@ -315,6 +352,98 @@ describe('PaintController', () =>
       .toEqual([ [], false, false ]);
   });
 
+  it('places the stamp in hand with a click, handing over what came of it', () =>
+  {
+    // Arrange: a stamp of one rock on the ground, with an event on it.
+    const rock = stampOf({ tiles: { layers: [ 0 ], values: [ ROCK ], calledFor: [ -1 ] } });
+    const bench = controllerWith({ tool: 'stamp', stamp: rock });
+
+    // Act.
+    pointer(bench.canvas, 'pointerdown', 2, 1);
+    pointer(bench.canvas, 'pointerup', 2, 1);
+
+    // Assert: the event took id 1 on a map holding none.
+    expect([ bench.map.cellAt(2, 1, 0), bench.map.event(1)?.x, bench.stamped.map(outcome => outcome.ok && outcome.eventIds) ])
+      .toEqual([ ROCK, 2, [ [ 1 ] ] ]);
+  });
+
+  it('moves the stamp\'s preview to the cell the map moves under a still pointer, so a click lands where it shows', () =>
+  {
+    // Arrange: a rock in hand, previewed over 1, 0 at the map's corner.
+    const rock = stampOf({ tiles: { layers: [ 0 ], values: [ ROCK ], calledFor: [ -1 ] }, events: [] });
+    const bench = controllerWith({ tool: 'stamp', stamp: rock });
+    pointer(bench.canvas, 'pointermove', 1, 0);
+    const before = bench.overlays.at(-1)?.hover;
+
+    // Act: the map scrolled up under the pointer by most of a tile, then clicked without the pointer moving.
+    bench.moveCamera({ x: 0, y: 30, zoom: 1 });
+    const after = bench.overlays.at(-1)?.hover;
+    pointer(bench.canvas, 'pointerdown', 1, 0);
+    pointer(bench.canvas, 'pointerup', 1, 0);
+
+    // Assert: the preview went to 1, 1, where the rock went down, and the rock is nowhere near 1, 0.
+    expect([ before, after, bench.map.cellAt(1, 1, 0), bench.map.cellAt(1, 0, 0) === ROCK ])
+      .toEqual([ { x: 1, y: 0, width: 1, height: 1 }, { x: 1, y: 1, width: 1, height: 1 }, ROCK, false ]);
+  });
+
+  it('follows nothing once the pointer has left the map, and stops hearing the camera once let go', () =>
+  {
+    // Arrange: the pen over the map, then the pointer gone from it.
+    const bench = controllerWith({ tool: 'pen', brush: singleTileBrush(ROCK) });
+    pointer(bench.canvas, 'pointermove', 1, 1);
+    pointer(bench.canvas, 'pointerleave', 1, 1);
+    const shown = bench.overlays.length;
+
+    // Act: the camera moved, then the controller let go.
+    bench.moveCamera({ x: 48, y: 0, zoom: 1 });
+    const hearing = bench.cameraListeners();
+    bench.detach();
+
+    // Assert: nothing shown for the move, and nobody left hearing.
+    expect([ bench.overlays.length - shown, hearing, bench.cameraListeners() ])
+      .toEqual([ 0, 1, 0 ]);
+  });
+
+  it('asks the window\'s link gate about the map clicked, refusing a stamp carrying copies of a blueprint where it says no', () =>
+  {
+    // Arrange: a rock whose event is a copy of a blueprint's, over map 1, which the gate keeps from holding a link.
+    const rock = stampOf({ tiles: { layers: [ 0 ], values: [ ROCK ], calledFor: [ -1 ] }, events: [ { ...stampOf().events[0], note: '<blueprint:[k3x9q2mf, 1]>' } ] });
+    const asked: number[] = [];
+    const bench = controllerWith({ tool: 'stamp', stamp: rock }, mapId =>
+    {
+      asked.push(mapId);
+      return 'its events are patterns';
+    });
+
+    // Act.
+    pointer(bench.canvas, 'pointerdown', 2, 1);
+    pointer(bench.canvas, 'pointerup', 2, 1);
+
+    // Assert: nothing went down.
+    expect([ asked.includes(1), bench.stamped, bench.map.cellAt(2, 1, 0) === ROCK, bench.map.eventIds() ])
+      .toEqual([ true, [ { ok: false, message: 'This stamp holds copies of blueprints, which can\'t go here: its events are patterns.' } ], false, [] ]);
+  });
+
+  it('puts the stamp down on Escape wherever the pointer is, taking the key, and leaves an Escape typed in a field alone', () =>
+  {
+    // Arrange: the pen in hand, then a stamp taken up; a text field elsewhere on the page.
+    const bench = controllerWith({ tool: 'pen', brush: singleTileBrush(ROCK) });
+    bench.painting.takeUpStamp(stampOf());
+    const field = document.createElement('input');
+    document.body.appendChild(field);
+
+    // Act: Escape typed into the field, then pressed with the pointer away from the map.
+    const typed = new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'Escape' });
+    field.dispatchEvent(typed);
+    const toolAfterField = bench.painting.settings.tool;
+    const escape = key('keydown', { key: 'Escape' });
+    field.remove();
+
+    // Assert.
+    expect([ typed.defaultPrevented, toolAfterField, escape.defaultPrevented, bench.painting.settings.tool ])
+      .toEqual([ false, 'stamp', true, 'pen' ]);
+  });
+
   it('shows a new tool at once, and nothing more once it has let go', () =>
   {
     // Arrange.
@@ -340,12 +469,13 @@ describe('PaintController without a canvas', () =>
     // Arrange: a renderer that has not mounted yet.
     const bench = benchWith(2, 2, grid => put(grid, 0, 0, 0, ROCK));
     const controller = new PaintController({
-      surface: { canvas: null, camera: { x: 0, y: 0, zoom: 1 }, cellAt: () => null },
+      surface: { canvas: null, camera: { x: 0, y: 0, zoom: 1 }, cellAt: () => null, onCameraChange: () => () => undefined },
       hub: bench.hub,
       map: () => bench.map,
       layering: () => layeringWith(),
       painting: new PaintState(),
       overlay: () => undefined,
+      linkRefusal: () => null,
     });
 
     // Act.

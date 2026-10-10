@@ -1,20 +1,27 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { MapEditorApi } from '../../../../src/mapEditor/core/api/MapEditorApi.ts';
 import {
+  BLUEPRINT_USES,
   BLUEPRINTS,
   EDITOR_DATA_DEFINITIONS,
   EditorDataClient,
   editorDataDefinition,
+  isKeptAlongside,
   LAYOUTS,
+  NEW_BATTLER_LEVELS,
+  saveEditorDocument,
   TILESET_MARKS,
 } from '../../../../src/mapEditor/core/editorData/editorData.ts';
-import { isEditorDataName } from '../../../../src/mapEditor/core/model/documentKeys.ts';
+import { DocumentHub } from '../../../../src/mapEditor/core/history/DocumentHub.ts';
+import { editorDataDocumentKey, isEditorDataName } from '../../../../src/mapEditor/core/model/documentKeys.ts';
+import type { JsonValue } from '../../../../src/mapEditor/core/model/json.ts';
 
 /*
- * Blueprints, "goes on top" marks and saved layouts live inside the project, beside the game's data, so they are
- * versioned with it; the game never reads them. Each is stored with its shape's version, so an older editor meets
- * a newer document with a refusal instead of rewriting what it does not understand, and a project that has never
- * saved one reads the empty document, so nothing downstream has to tell "absent" from "empty".
+ * Blueprints, "goes on top" marks, saved layouts and the level each map's new battlers start at live inside the project,
+ * beside the game's data, so they are versioned with it; the game never reads them. Each is stored with its shape's
+ * version, so an older editor meets a newer document with a refusal instead of rewriting what it does not understand,
+ * and a project that has never saved one reads the empty document, so nothing downstream has to tell "absent" from
+ * "empty".
  */
 describe('editorData', () =>
 {
@@ -28,7 +35,7 @@ describe('editorData', () =>
     saveEditorData: vi.fn(async () => undefined),
   }) as unknown as MapEditorApi;
 
-  it('names three documents, each with a key the server accepts', () =>
+  it('names five documents, each with a key the server accepts', () =>
   {
     // Arrange: the definitions.
 
@@ -37,7 +44,44 @@ describe('editorData', () =>
 
     // Assert.
     expect(names)
-      .toStrictEqual([ [ 'blueprints', true ], [ 'tileset-marks', true ], [ 'layouts', true ] ]);
+      .toStrictEqual([ [ 'blueprints', true ], [ 'blueprint-uses', true ], [ 'tileset-marks', true ], [ 'layouts', true ], [ 'new-battler-levels', true ] ]);
+  });
+
+  it('starts a project that never set a level for new battlers with no map named', async () =>
+  {
+    // Arrange: a project holding no file of levels.
+    const client = new EditorDataClient(buildApi(null));
+
+    // Act.
+    const loaded = await client.load(NEW_BATTLER_LEVELS);
+
+    // Assert.
+    expect(loaded)
+      .toStrictEqual({ schemaVersion: 1, data: { maps: {} } });
+  });
+
+  it('keeps the record of where blueprints are placed alongside the maps, and no other document', () =>
+  {
+    // Arrange: every editor-only document, a map, and a name the editor does not know.
+    const keys = [ ...EDITOR_DATA_DEFINITIONS.map(definition => EditorDataClient.documentKey(definition)), 'map:16' as const, editorDataDocumentKey('misc') ];
+
+    // Act.
+    const kept = keys.map(key => [ key, isKeptAlongside(key) ]);
+
+    // Assert.
+    expect([ kept, BLUEPRINT_USES.schemaVersion ])
+      .toStrictEqual([
+        [
+          [ 'editor-data:blueprints', false ],
+          [ 'editor-data:blueprint-uses', true ],
+          [ 'editor-data:tileset-marks', false ],
+          [ 'editor-data:layouts', false ],
+          [ 'editor-data:new-battler-levels', false ],
+          [ 'map:16', false ],
+          [ 'editor-data:misc', false ],
+        ],
+        2,
+      ]);
   });
 
   it('finds a definition by name, and nothing for an unknown one', () =>
@@ -68,7 +112,7 @@ describe('editorData', () =>
   it('reads a saved document as it is', async () =>
   {
     // Arrange.
-    const stored = { schemaVersion: 1, data: { blueprints: [ { id: 'slime-camp' } ] } };
+    const stored = { schemaVersion: 1, data: { blueprints: { k3x9q2mf: { name: 'Slime camp' } } } };
     const client = new EditorDataClient(buildApi(stored));
 
     // Act.
@@ -130,6 +174,114 @@ describe('editorData', () =>
 
     // Assert.
     expect(keys)
-      .toStrictEqual([ 'editor-data:blueprints', 'editor-data:tileset-marks', 'editor-data:layouts' ]);
+      .toStrictEqual([ 'editor-data:blueprints', 'editor-data:blueprint-uses', 'editor-data:tileset-marks', 'editor-data:layouts', 'editor-data:new-battler-levels' ]);
+  });
+
+  /*
+   * An editor-only document an edit writes at once is written only when it holds something its file lacks, and never
+   * over a file that changed elsewhere while this window held edits it lacks: it waits for the author's choice, as Save
+   * all leaves a map, since once written it would read as saved and nothing would be left to warn them.
+   */
+  describe('saveEditorDocument', () =>
+  {
+    /**
+     * The saved layouts, as a window holds them in their stored form.
+     */
+    const LAYOUTS_DOCUMENT = editorDataDocumentKey('layouts');
+
+    /**
+     * Builds a window holding the saved layouts with one layout, writing down every file its saves write.
+     * @param {() => Promise<void>} write What a save does once written down; by default, nothing more.
+     * @returns {{ hub: DocumentHub, written: JsonValue[] }} The window, and the content of every file written.
+     */
+    const writingWindow = (write: () => Promise<void> = async () => undefined) =>
+    {
+      const written: JsonValue[] = [];
+      const hub = new DocumentHub({
+        clientId: 'window-a',
+        store: {
+          load: async () => null,
+          save: async (_key, content) =>
+          {
+            written.push(content);
+            await write();
+          },
+        },
+      });
+      hub.adopt(LAYOUTS_DOCUMENT, { schemaVersion: 1, data: { layouts: { wide: { panels: 3 } } } });
+      return { hub, written };
+    };
+
+    /**
+     * Changes how many panels the wide layout has, as an edit made in this window would.
+     * @param {DocumentHub} hub The window's documents.
+     */
+    const editLayouts = (hub: DocumentHub): void =>
+    {
+      hub.edit('Widen', [ LAYOUTS_DOCUMENT ], tx => tx.set(LAYOUTS_DOCUMENT, [ 'data', 'layouts', 'wide', 'panels' ], 4));
+    };
+
+    it('writes a document holding an edit its file lacks, leaving it saved', async () =>
+    {
+      // Arrange.
+      const { hub, written } = writingWindow();
+      editLayouts(hub);
+
+      // Act.
+      const outcome = await saveEditorDocument(hub, LAYOUTS_DOCUMENT, 'layouts');
+
+      // Assert.
+      expect([ outcome, written, hub.isDirty(LAYOUTS_DOCUMENT) ])
+        .toStrictEqual([ { ok: true, saved: true }, [ { schemaVersion: 1, data: { layouts: { wide: { panels: 4 } } } } ], false ]);
+    });
+
+    it('leaves a document with nothing unsaved alone', async () =>
+    {
+      // Arrange: the document exactly as its file holds it.
+      const { hub, written } = writingWindow();
+
+      // Act.
+      const outcome = await saveEditorDocument(hub, LAYOUTS_DOCUMENT, 'layouts');
+
+      // Assert.
+      expect([ outcome, written ])
+        .toStrictEqual([ { ok: true, saved: false }, [] ]);
+    });
+
+    it('holds back a document waiting for a choice about its file changed on disk, writing nothing over it', async () =>
+    {
+      // Arrange: an edit not yet written when the file gains a layout from somewhere else.
+      const { hub, written } = writingWindow();
+      editLayouts(hub);
+      const conflict = hub.applyOutsideContent(LAYOUTS_DOCUMENT, { schemaVersion: 1, data: { layouts: { wide: { panels: 3 }, tall: { panels: 2 } } } });
+
+      // Act.
+      const outcome = await saveEditorDocument(hub, LAYOUTS_DOCUMENT, 'layouts');
+
+      // Assert: the file keeps the tall layout until the author chooses, and the edit stays unsaved.
+      expect([ conflict, outcome, written, hub.isDirty(LAYOUTS_DOCUMENT) ])
+        .toStrictEqual([
+          'conflicted',
+          { ok: false, message: 'The layouts were not saved: they are waiting for a choice about changes made elsewhere.' },
+          [],
+          true,
+        ]);
+    });
+
+    it('rejects when the write itself fails, leaving the document unsaved', async () =>
+    {
+      // Arrange: a disk that refuses the write.
+      const { hub } = writingWindow(() => Promise.reject(new Error('the disk is full')));
+      editLayouts(hub);
+
+      // Act.
+      const write = saveEditorDocument(hub, LAYOUTS_DOCUMENT, 'layouts');
+
+      // Assert.
+      await expect(write)
+        .rejects.toThrow('the disk is full');
+      expect(hub.isDirty(LAYOUTS_DOCUMENT))
+        .toBe(true);
+    });
   });
 });

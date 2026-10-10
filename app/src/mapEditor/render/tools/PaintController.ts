@@ -1,6 +1,7 @@
 import type { DocumentHub } from '../../core/history/DocumentHub.ts';
 import type { MapDocument } from '../../core/model/MapDocument.ts';
 import { screenToWorld, TILE_SIZE, type Camera, type MapCell, type ScreenPoint } from '../../core/renderer/camera.ts';
+import type { StampOutcome } from '../../core/stamps/stampPlacement.ts';
 import type { TilesetLayering } from '../../core/tiles/layering.ts';
 import { shadowQuarterAt } from '../../core/tools/paintPlan.ts';
 import { isPaintingTool, type PaintState } from '../../core/tools/PaintState.ts';
@@ -16,12 +17,14 @@ import { isTextEntry, type KeyTarget } from '../../core/workspace/shortcuts.ts';
 const OVERRIDE_KEY_CODE = 'Space';
 
 /**
- * What the controller needs from the renderer: the canvas to listen on, the camera, and the cell under a point.
+ * What the controller needs from the renderer: the canvas to listen on, the camera, the cell under a point, and word
+ * whenever the camera moves.
  */
 type PaintSurface = {
   readonly canvas: HTMLCanvasElement | null;
   readonly camera: Camera;
   cellAt(point: ScreenPoint): MapCell | null;
+  onCameraChange(listener: (camera: Camera) => void): () => void;
 };
 
 /**
@@ -57,6 +60,23 @@ type PaintControllerOptions = {
    * Hands the tools' part of the overlay to the view.
    */
   readonly overlay: (overlay: ToolOverlay) => void;
+
+  /**
+   * Hears what each click of the stamp tool came to: the events it placed, what it left out, or why it was refused.
+   * Left out, nobody hears.
+   */
+  readonly onStamped?: (outcome: StampOutcome) => void;
+
+  /**
+   * Hears what a drop of the select tool's area could not do, in words for the author: why it was refused, or what it
+   * left out. Left out, nobody hears.
+   */
+  readonly onTold?: (message: string, refused: boolean) => void;
+
+  /**
+   * Says why a map may hold no copy of a blueprint, or null when it may: the window's link gate, from its plugin modules.
+   */
+  readonly linkRefusal: (mapId: number) => string | null;
 };
 
 /**
@@ -70,12 +90,16 @@ type HeldKeys = {
 
 /**
  * Wires one map view's painting to the page: the left button on the canvas drives the tool in hand, the keys held
- * (Shift, Ctrl, the space bar) change what it does, Escape abandons what it is doing, and the view is told what to
- * show after every change. The right button and the wheel stay the renderer's, for panning and zooming.
+ * (Shift, Ctrl, the space bar) change what it does, Escape abandons what it is doing, or puts a stamp in hand down and
+ * takes up the tool held before it, and the view is told what to show after every change. The right button and the
+ * wheel stay the renderer's, for panning and zooming.
  *
  * A stroke never outlives the gesture that made it: losing the pointer or the window's focus ends it, keeping what it
  * painted, and so does any Ctrl shortcut pressed mid-stroke, so an undo pressed while drawing takes back the whole
  * stroke rather than finding it still open.
+ *
+ * The map moving under a pointer that stays still, zoomed, panned or centred somewhere, puts another cell under it, so
+ * the tools follow as if the pointer had moved there: the preview always shows the cell a click there would land on.
  */
 class PaintController
 {
@@ -84,6 +108,12 @@ class PaintController
   #session: ToolSession;
 
   #keys: HeldKeys = { shift: false, copy: false, override: false };
+
+  /**
+   * Where the pointer last was over the canvas, while it is there: where the tools are followed to when the map moves
+   * under it.
+   */
+  #point: ScreenPoint | null = null;
 
   #hovering = false;
 
@@ -99,7 +129,7 @@ class PaintController
   constructor(options: PaintControllerOptions)
   {
     this.#options = options;
-    const { hub, map, layering, painting } = options;
+    const { hub, map, layering, painting, linkRefusal } = options;
     this.#session = new ToolSession({
       hub,
       map,
@@ -107,6 +137,9 @@ class PaintController
       settings: () => painting.settings,
       pickBrush: brush => painting.setBrush(brush),
       pickTool: tool => painting.setTool(tool),
+      stamped: outcome => options.onStamped?.(outcome),
+      told: (message, refused) => options.onTold?.(message, refused),
+      linkRefusal,
     });
   }
 
@@ -161,6 +194,7 @@ class PaintController
       this.#session.toolChanged(settings.tool);
       this.#show();
     }));
+    this.#stops.push(this.#options.surface.onCameraChange(() => this.#follow()));
 
     return () =>
     {
@@ -228,10 +262,30 @@ class PaintController
     listen('pointerleave', () =>
     {
       this.#hovering = false;
+      this.#point = null;
       this.#lastSpot = '';
       this.#session.leave();
       this.#show();
     });
+  }
+
+  /**
+   * Follows the map moving under a pointer that stays still: the tools take the cell now under it as if the pointer had
+   * moved there, the preview and any drag in hand with them, so what the preview shows is where a click lands. With the
+   * pointer away from the map there is nothing to follow.
+   */
+  #follow(): void
+  {
+    const point = this.#point;
+    if (point === null)
+    {
+      return;
+    }
+
+    const pointer = this.#pointerAt(point);
+    this.#lastSpot = this.#spotOf(pointer);
+    this.#session.move(pointer);
+    this.#show();
   }
 
   /**
@@ -316,6 +370,11 @@ class PaintController
       return;
     }
 
+    if (this.#putDownStampOnEscape(event, down))
+    {
+      return;
+    }
+
     if (down && event.key === 'Escape' && mine && (session.isActive || session.selection !== null))
     {
       event.preventDefault();
@@ -328,6 +387,27 @@ class PaintController
     {
       this.#setKeys({ ...this.#keys, shift: event.shiftKey, copy: event.ctrlKey || event.metaKey });
     }
+  }
+
+  /**
+   * Puts a stamp in hand down on Escape, wherever the pointer is, going back to the tool held before it. The key is
+   * taken, so nothing else in the window answers it too, such as the event tools deselecting what is selected; an
+   * Escape typed in a text field is the field's.
+   * @param {KeyboardEvent} event The key.
+   * @param {boolean} down True when it went down.
+   * @returns {boolean} True when it put the stamp down.
+   */
+  #putDownStampOnEscape(event: KeyboardEvent, down: boolean): boolean
+  {
+    const { painting } = this.#options;
+    if (down === false || event.key !== 'Escape' || painting.settings.tool !== 'stamp' || isTextEntry(event.target as unknown as KeyTarget))
+    {
+      return false;
+    }
+
+    event.preventDefault();
+    painting.putDownStamp();
+    return true;
   }
 
   /**
@@ -385,16 +465,28 @@ class PaintController
   }
 
   /**
-   * Turns a pointer event into what the tools read: the cell and the quarter under it, and the keys held with it.
+   * Turns a pointer event into what the tools read: the cell and the quarter under it, and the keys held with it. The
+   * spot is kept, for following the map when it moves under the pointer.
    * @param {PointerEvent} event The event.
    * @returns {ToolPointer} The pointer.
    */
   #pointerFor(event: PointerEvent): ToolPointer
   {
-    const { surface } = this.#options;
-    const point = { x: event.offsetX, y: event.offsetY };
-    const world = screenToWorld(surface.camera, point);
+    this.#point = { x: event.offsetX, y: event.offsetY };
     this.#keys = { ...this.#keys, shift: event.shiftKey, copy: event.ctrlKey || event.metaKey };
+    return this.#pointerAt(this.#point);
+  }
+
+  /**
+   * Works out what the tools read at a spot on the canvas, with the camera as it stands now: the cell and the quarter
+   * under it, and the keys held.
+   * @param {ScreenPoint} point The spot.
+   * @returns {ToolPointer} The pointer.
+   */
+  #pointerAt(point: ScreenPoint): ToolPointer
+  {
+    const { surface } = this.#options;
+    const world = screenToWorld(surface.camera, point);
     return {
       cell: surface.cellAt(point),
       quarter: shadowQuarterAt(world.x, world.y, TILE_SIZE),

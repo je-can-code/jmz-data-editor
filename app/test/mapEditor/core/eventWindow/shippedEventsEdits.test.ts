@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { noteBoxOf } from '../../../../src/mapEditor/core/blueprints/copyActions.ts';
 import { parseEventMovement } from '../../../../src/mapEditor/core/eventPage/eventMovement.ts';
 import {
   readTargetEvent,
@@ -114,7 +115,9 @@ const editEverything = (hub: DocumentHub, target: EventWindowTarget): string[] =
   const problems = editRun(hub, target, 'name and note', expectStep =>
   {
     expectStep('rename', renameEvent(hub, target, `${live().name} (edited)`));
-    expectStep('note', setEventNote(hub, target, `${live().note}\nedited`));
+
+    // a line typed after what the Note box shows, which for a copy of a blueprint is its note's own text.
+    expectStep('note', setEventNote(hub, target, `${noteBoxOf(live()).text}\nedited`));
   });
 
   live().pages.forEach((page, index) => problems.push(...editRun(hub, target, `page ${index + 1}`, expectStep =>

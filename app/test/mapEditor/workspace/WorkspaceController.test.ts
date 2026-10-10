@@ -2,14 +2,32 @@ import { describe, expect, it, vi } from 'vitest';
 import type { DockviewApi, IDockviewPanel } from 'dockview-react';
 import { MapEditorApiError, type MapEditorApi } from '../../../src/mapEditor/core/api/MapEditorApi.ts';
 import { apiDocumentStore } from '../../../src/mapEditor/core/api/apiDocumentStore.ts';
+import { saveBlueprint } from '../../../src/mapEditor/core/blueprints/blueprintEdits.ts';
+import { holdBlueprintMap } from '../../../src/mapEditor/core/blueprints/blueprintMaps.ts';
+import { BLUEPRINTS_DOCUMENT } from '../../../src/mapEditor/core/blueprints/blueprints.ts';
+import { BLUEPRINT_RESIZED, blueprintShapeCheck } from '../../../src/mapEditor/core/blueprints/blueprintShape.ts';
+import {
+  BLUEPRINT_USES_DOCUMENT,
+  forgetSpots,
+  readUses,
+  recordSpots,
+  usesOf,
+} from '../../../src/mapEditor/core/blueprints/blueprintUses.ts';
+import type { BlueprintUsesMerge } from '../../../src/mapEditor/core/blueprints/blueprintUsesWriter.ts';
+import type { CloseTarget } from '../../../src/mapEditor/core/closeGuard.ts';
 import { DocumentHub, type DocumentStore } from '../../../src/mapEditor/core/history/DocumentHub.ts';
-import { mapHistoryKey } from '../../../src/mapEditor/core/history/historyKeys.ts';
+import { blueprintHistoryKey, mapHistoryKey } from '../../../src/mapEditor/core/history/historyKeys.ts';
+import { blueprintMapId } from '../../../src/mapEditor/core/model/documentKeys.ts';
 import type { JsonValue } from '../../../src/mapEditor/core/model/json.ts';
 import type { RmmzMap, RmmzMapInfo } from '../../../src/mapEditor/core/model/rmmzTypes.ts';
+import { resizeMap } from '../../../src/mapEditor/core/properties/mapPropertyEdits.ts';
 import type { MapEditorServices } from '../../../src/mapEditor/services/MapEditorServices.ts';
 import { TREE_ROOT, WorkspaceController } from '../../../src/mapEditor/workspace/WorkspaceController.ts';
+import { drawsFor, holdBlueprints, storedBlueprints, storedUses } from '../support/blueprintFixtures.ts';
 import { buildMapJson } from '../support/fixtures.ts';
+import { stampOf } from '../support/stampFixtures.ts';
 import { buildTreeRows } from '../support/treeFixtures.ts';
+import { mergeInto } from '../support/usesServer.ts';
 
 /*
  * The workspace controller is what every panel acts through, and it owes them the shell's rules. Undo follows focus:
@@ -99,11 +117,25 @@ describe('WorkspaceController', () =>
   };
 
   /**
-   * A controller over a hub holding two maps, the tree on an in-memory server, and a store recording saves.
-   * @returns {object} The controller, the hub, the server's files and the saves.
+   * A controller over a hub holding two maps, the tree on an in-memory server, and a store recording saves. The server
+   * keeps editor-only documents only when given some, which it then hands over and keeps as they are written, the record
+   * of where blueprints are placed merged into a map at a time; without, it has no route for them, and asking for one
+   * fails, though merges are still taken, and listed.
+   * @param {Record<string, JsonValue> | null} editorData The editor-only documents on the server, by name, or null for none.
+   * @param {(key: string) => readonly string[]} holders The other windows holding each document; none by default.
+   * @returns {object} The controller, the hub, the server's files, the saves and the merges.
    */
-  const buildController = () =>
+  const buildController = (editorData: Record<string, JsonValue> | null = null, holders: (key: string) => readonly string[] = () => []) =>
   {
+    const merges: BlueprintUsesMerge[] = [];
+    const mergeBlueprintUses = async (merge: BlueprintUsesMerge) =>
+    {
+      merges.push(structuredClone(merge));
+      if (editorData !== null)
+      {
+        editorData['blueprint-uses'] = mergeInto(editorData['blueprint-uses'] ?? null, merge);
+      }
+    };
     const maps = new Map<number, RmmzMap>([ 1, 2, 3, 5, 6 ].map(id => [ id, { ...buildMapJson(), displayName: `file ${id}` } ]));
     const state = { infos: buildTreeRows() as (RmmzMapInfo | null)[] };
     const api = {
@@ -140,6 +172,16 @@ describe('WorkspaceController', () =>
       {
         state.infos = structuredClone([ ...infos ]);
       },
+      mergeBlueprintUses,
+      ...(editorData === null
+        ? {}
+        : {
+          loadEditorData: async (name: string) => structuredClone(editorData[name] ?? null),
+          saveEditorData: async (name: string, document: JsonValue) =>
+          {
+            editorData[name] = structuredClone(document);
+          },
+        }),
     } as unknown as MapEditorApi;
     const saves: string[] = [];
     const store: DocumentStore = {
@@ -158,8 +200,12 @@ describe('WorkspaceController', () =>
     const hub = new DocumentHub({ clientId: 'window-a', store });
     hub.adopt('map:1', buildMapJson() as unknown as JsonValue);
     hub.adopt('map:2', buildMapJson() as unknown as JsonValue);
-    const services = { hub, api, openDocument: (key: string) => hub.load(key as never) } as unknown as MapEditorServices;
-    return { controller: new WorkspaceController(services), hub, api, maps, state, saves };
+
+    // no event anywhere is a copy of a blueprint, counted at once, and the other windows hold what the test says.
+    const blueprintCopies = { start: () => undefined, countOf: () => ({ total: 0, maps: [] }) };
+    const sync = { holders };
+    const services = { hub, api, sync, blueprintCopies, openDocument: (key: string) => hub.load(key as never) } as unknown as MapEditorServices;
+    return { controller: new WorkspaceController(services), hub, api, maps, state, saves, merges };
   };
 
   const MAIN: FakeGroup = { id: 'main-maps', api: { location: { type: 'grid' } } };
@@ -312,6 +358,25 @@ describe('WorkspaceController', () =>
           { eventId: 5, request: 3 },
           { 40: { eventId: 2, request: 1 }, 12: { eventId: 5, request: 3 } },
         ]);
+    });
+
+    it('makes every ask for a cell a new one, centring there again when asked again, and leaves the events asked for alone', () =>
+    {
+      // Arrange: map 12 open, and asked for at an event.
+      const { controller } = buildController();
+      const dock = buildDock([ { id: 'map-12', component: 'map', params: { mapId: 12 }, group: MAIN } ]);
+      controller.attach(dock.api);
+      controller.openMap(12, { focusEventId: 5 });
+
+      // Act: the middle of a placement asked for twice, then a plain open.
+      controller.openMap(12, { focusCell: { x: 3, y: 4 } });
+      const { 12: first } = controller.getState().cellFocus;
+      controller.openMap(12, { focusCell: { x: 3, y: 4 } });
+      controller.openMap(12, { focusCell: null });
+
+      // Assert.
+      expect([ first, controller.getState().cellFocus, controller.getState().eventFocus, dock.added ])
+        .toStrictEqual([ { cell: { x: 3, y: 4 }, request: 2 }, { 12: { cell: { x: 3, y: 4 }, request: 3 } }, { 12: { eventId: 5, request: 1 } }, [] ]);
     });
 
     it('opens a new map as a tab in the centre, not where the last map focused sits, and never in a torn-out window', () =>
@@ -704,6 +769,30 @@ describe('WorkspaceController', () =>
         .toStrictEqual([ 'Test Town', 'Harbor', null ]);
     });
 
+    it('names a map an undo is refused over as the map tree shows it', async () =>
+    {
+      // Arrange: the tree held, naming map 1 World and map 2 Town; a door pair across both, then map 1 let go of and opened
+      // again from its file, which records nothing of the pair; undo following map 2.
+      const { controller, hub } = buildController();
+      await hub.load('mapinfos');
+      hub.edit('Place door pair', [ mapHistoryKey(1), mapHistoryKey(2) ], tx =>
+      {
+        tx.set('map:1', [ 'displayName' ], 'Near side');
+        tx.set('map:2', [ 'displayName' ], 'Far side');
+      });
+      const onDisk = hub.committedContent('map:1');
+      hub.release('map:1');
+      hub.adopt('map:1', onDisk);
+      controller.focusHistory(mapHistoryKey(2));
+
+      // Act.
+      await controller.undo();
+
+      // Assert.
+      expect(controller.getState().notice?.text)
+        .toBe('"Place door pair" cannot be undone: this window cannot tell what changed in World after "Place door pair".');
+    });
+
     it('does nothing on undo before anything has focus', async () =>
     {
       // Arrange.
@@ -733,12 +822,27 @@ describe('WorkspaceController', () =>
         .toStrictEqual([ [ 'map:1', 'map:2' ], false, true, 'Could not save Map 2.' ]);
     });
 
+    it('names a map it could not save as the map tree shows it', async () =>
+    {
+      // Arrange: the tree held, naming map 2 "Town", whose save fails.
+      const { controller, hub } = buildController();
+      hub.adopt('mapinfos', buildTreeRows() as unknown as JsonValue);
+      hub.edit('Rename map', [ mapHistoryKey(2) ], tx => tx.set('map:2', [ 'displayName' ], 'Port'));
+
+      // Act.
+      await controller.saveAll();
+
+      // Assert.
+      expect(controller.getState().notice?.text)
+        .toBe('Could not save Town.');
+    });
+
     it('leaves a document in conflict unsaved, and says so', async () =>
     {
-      // Arrange.
+      // Arrange: map 1's file changed on disk while it held an unsaved edit.
       const { controller, hub, saves } = buildController();
       hub.edit('Rename map', [ mapHistoryKey(1) ], tx => tx.set('map:1', [ 'displayName' ], 'Harbor'));
-      hub.flagConflict('map:1', { kind: 'disk', content: null });
+      hub.flagConflict('map:1', { kind: 'disk', content: buildMapJson() as unknown as JsonValue });
 
       // Act.
       await controller.saveAll();
@@ -746,6 +850,22 @@ describe('WorkspaceController', () =>
       // Assert.
       expect([ saves, controller.getState().notice?.text ])
         .toStrictEqual([ [], 'Saved 0; 1 waiting for a choice about changes made elsewhere.' ]);
+    });
+
+    it('saves a map whose file was deleted straight back, nothing to choose first, and the bar about it goes', async () =>
+    {
+      // Arrange: map 1's file deleted while the map held nothing unsaved, as the hub hears it from the disk.
+      const { controller, hub, saves, maps } = buildController();
+      maps.delete(1);
+      hub.applyOutsideContent('map:1', null);
+      const flagged = hub.conflict('map:1');
+
+      // Act.
+      await controller.saveAll();
+
+      // Assert: the file is back holding the map, which reads as saved, and nothing waits.
+      expect([ flagged, saves, maps.get(1)?.displayName, hub.isDirty('map:1'), hub.conflict('map:1'), controller.getState().notice?.text ])
+        .toStrictEqual([ { kind: 'disk', content: null }, [ 'map:1' ], buildMapJson().displayName, false, null, 'Saved 1 map.' ]);
     });
 
     it('says everything is saved when nothing was waiting', async () =>
@@ -778,6 +898,20 @@ describe('WorkspaceController', () =>
       .toStrictEqual([ 'Map 5', 'Cave', 'Map 99' ]);
   });
 
+  it('names a blueprint from the blueprints, and by its id while they are not held or no longer hold it', () =>
+  {
+    // Arrange.
+    const { controller } = buildController();
+    const before = controller.blueprintName('k3x9q2mf');
+
+    // Act.
+    holdBlueprints(controller.services.hub, { k3x9q2mf: { name: 'Goblin camp', stamp: stampOf() } });
+
+    // Assert.
+    expect([ before, controller.blueprintName('k3x9q2mf'), controller.blueprintName('zz99') ])
+      .toStrictEqual([ 'k3x9q2mf', 'Goblin camp', 'zz99' ]);
+  });
+
   it('dismisses only the notice still showing', () =>
   {
     // Arrange.
@@ -794,6 +928,493 @@ describe('WorkspaceController', () =>
     // Assert.
     expect([ afterStale, controller.getState().notice ])
       .toStrictEqual([ 'second', null ]);
+  });
+
+  /*
+   * The workspace holds the blueprints and the record of where they are placed from the moment it opens, since every
+   * edit moving a placement changes the record only while the window holds it; a tree change waits until they are asked
+   * for, so a map deleted or copied the moment the window opens takes its placements with it. Each map's placements are
+   * written with that map, merged into the record on the server, and the tree writes those of the maps it brings or
+   * takes away; the record itself never holds anything unsaved, so Save all never counts it. A placement write the server
+   * refused is still unsaved work, though: the window asks before it closes while one waits, and Save all tries it again,
+   * calling everything saved only once it lands. So is a map's unsaved placements while only an event window shares the
+   * map, which could save its file but never the placements, so the window asks then too. No undo takes away a blueprint
+   * whose tiles are still placed, in the words a delete of it is refused in.
+   *
+   * On the server, the camp (aa22) is placed on the cave (5), at 4, 0.
+   */
+  describe('blueprint placements', () =>
+  {
+    /**
+     * The editor-only documents on the server: no blueprints yet, and the camp's placement on the cave.
+     * @returns {Record<string, JsonValue>} The documents, by name.
+     */
+    const onServer = (): Record<string, JsonValue> => ({ 'blueprints': storedBlueprints(), 'blueprint-uses': storedUses([ { blueprintId: 'aa22', mapId: 5, x: 4, y: 0 } ]) });
+
+    it('holds the blueprints and the record from the start, and neither in a window with no server', async () =>
+    {
+      // Arrange.
+      const { controller, hub } = buildController(onServer());
+      const serverlessHub = new DocumentHub({ clientId: 'window-b' });
+      const serverless = new WorkspaceController({ hub: serverlessHub, api: null } as unknown as MapEditorServices);
+
+      // Act.
+      await Promise.all([ controller.whenPlacementsHeld(), serverless.whenPlacementsHeld() ]);
+
+      // Assert.
+      expect([ hub.has(BLUEPRINTS_DOCUMENT), hub.has(BLUEPRINT_USES_DOCUMENT), serverlessHub.documentKeys() ])
+        .toStrictEqual([ true, true, [] ]);
+    });
+
+    it('waits for the record before a tree change, so a map deleted at once takes its placements with it, on disk too', async () =>
+    {
+      // Arrange.
+      const documents = onServer();
+      const { controller, hub } = buildController(documents);
+
+      // Act.
+      await controller.deleteMaps([ 5 ]);
+      await controller.placements?.whenWritten();
+
+      // Assert.
+      expect([ hub.has('mapinfos'), usesOf(hub.document(BLUEPRINT_USES_DOCUMENT)), readUses((documents['blueprint-uses'] as { data: JsonValue }).data) ])
+        .toStrictEqual([ true, [], [] ]);
+    });
+
+    it('copies a map to the clipboard with its placements, once the record is held', async () =>
+    {
+      // Arrange.
+      const { controller } = buildController(onServer());
+
+      // Act.
+      await controller.copyMaps([ 5 ]);
+
+      // Assert.
+      const { clipboard } = controller.getState();
+      expect(clipboard?.kind === 'copy' && clipboard.copies.map(copy => copy.spots))
+        .toStrictEqual([ [ { blueprintId: 'aa22', x: 4, y: 0 } ] ]);
+    });
+
+    it('writes a map\'s placements, and no other map\'s, with the window\'s own save of the map', async () =>
+    {
+      // Arrange: the camp placed on maps 1 and 2 too, unsaved.
+      const documents = onServer();
+      const { controller, hub, saves, merges } = buildController(documents);
+      await controller.whenPlacementsHeld();
+      [ 1, 2 ].forEach(mapId => hub.edit('Place', [ mapHistoryKey(mapId) ], tx =>
+      {
+        tx.set(`map:${mapId}`, [ 'displayName' ], 'Camped');
+        recordSpots(tx, hub, mapId, [ { blueprintId: 'aa22', x: 0, y: 0 } ]);
+      }));
+
+      // Act.
+      await hub.save('map:1');
+      await controller.placements?.whenWritten();
+
+      // Assert: the map saved through its own route, and its placements alone merged into the record.
+      expect([ saves, merges, readUses((documents['blueprint-uses'] as { data: JsonValue }).data) ])
+        .toStrictEqual([
+          [ 'map:1' ],
+          [ { schemaVersion: 2, maps: { 1: { aa22: [ { x: 0, y: 0 } ] } } } ],
+          [ { blueprintId: 'aa22', x: 0, y: 0, mapId: 1 }, { blueprintId: 'aa22', x: 4, y: 0, mapId: 5 } ],
+        ]);
+    });
+
+    it('tells what Save all saved in maps, the record never among what it saves', async () =>
+    {
+      // Arrange: a placement forgotten, which goes to disk at once, then map 1 unsaved too.
+      const { controller, hub, saves } = buildController(onServer());
+      await controller.whenPlacementsHeld();
+      hub.edit('Forget', [ BLUEPRINT_USES_DOCUMENT ], tx => forgetSpots(tx, hub, 5, [ { blueprintId: 'aa22', x: 4, y: 0 } ]));
+
+      // Act.
+      await controller.saveAll();
+      const alone = controller.getState().notice?.text;
+      hub.edit('Rename map', [ mapHistoryKey(1) ], tx => tx.set('map:1', [ 'displayName' ], 'Harbor'));
+      await controller.saveAll();
+
+      // Assert.
+      expect([ alone, controller.getState().notice?.text, saves, hub.dirtyKeys() ])
+        .toStrictEqual([ 'Everything is saved.', 'Saved 1 map.', [ 'map:1' ], [] ]);
+    });
+
+    /**
+     * Places the camp at the top-left of map 1, unsaved.
+     * @param {DocumentHub} hub The window's documents.
+     */
+    const placeOnMapOne = (hub: DocumentHub): void =>
+    {
+      hub.edit('Place', [ mapHistoryKey(1) ], tx =>
+      {
+        tx.set('map:1', [ 'displayName' ], 'Camped');
+        recordSpots(tx, hub, 1, [ { blueprintId: 'aa22', x: 0, y: 0 } ]);
+      });
+    };
+
+    /**
+     * Makes the server refuse every merge of placements from now on, counting each one it refuses.
+     * @param {MapEditorApi} api The server.
+     * @returns {{ refused: number }} The count, kept current.
+     */
+    const refuseMerges = (api: MapEditorApi): { refused: number } =>
+    {
+      const count = { refused: 0 };
+      api.mergeBlueprintUses = async () =>
+      {
+        count.refused += 1;
+        throw new MapEditorApiError('PUT /api/editor-data/blueprint-uses/maps answered 500', 500, 'the disk is full');
+      };
+
+      return count;
+    };
+
+    /**
+     * A window stand-in keeping its beforeunload listeners.
+     * @returns {{ target: CloseTarget, closing: () => boolean }} The window, and closing it, which says whether it asked
+     * first.
+     */
+    const closingWindow = () =>
+    {
+      const listeners: ((event: Event) => void)[] = [];
+      const target: CloseTarget = {
+        addEventListener: (type, listener) =>
+        {
+          listeners.push(listener);
+        },
+        removeEventListener: (type, listener) =>
+        {
+          listeners.splice(listeners.indexOf(listener), 1);
+        },
+      };
+      const closing = (): boolean =>
+      {
+        const event = { preventDefault: vi.fn(), returnValue: 'x' };
+        listeners.forEach(listener => listener(event as unknown as Event));
+        return event.preventDefault.mock.calls.length > 0;
+      };
+
+      return { target, closing };
+    };
+
+    /**
+     * What the author hears when the server refuses a merge of placements.
+     */
+    const REFUSED = 'The blueprint placements could not be saved: the disk is full. They are tried again with the next save.';
+
+    it('asks before the window closes while a placement write the server refused waits to be tried again', async () =>
+    {
+      // Arrange: the server refusing every merge, the window guarded, and the camp placed on map 1.
+      const { controller, hub, api } = buildController(onServer());
+      await controller.whenPlacementsHeld();
+      refuseMerges(api);
+      const window = closingWindow();
+      controller.guardClose(window.target);
+      const beforeAnything = window.closing();
+      placeOnMapOne(hub);
+
+      // Act: map 1 saved, its placements refused.
+      await hub.save('map:1');
+      await controller.placements?.whenWritten();
+
+      // Assert: no asking before, and asking now, though map 1 itself is saved.
+      expect([ beforeAnything, window.closing(), hub.isDirty('map:1'), controller.getState().notice?.text ])
+        .toStrictEqual([ false, true, false, REFUSED ]);
+    });
+
+    it('asks before the window closes while only an event window shares a map holding unsaved placements, and not once it is saved', async () =>
+    {
+      // Arrange: an event window holding map 1, and no other window holding the record; the window guarded, and the camp
+      // placed on map 1.
+      const { controller, hub } = buildController(onServer(), key => (key === 'map:1' ? [ 'window-e' ] : []));
+      await controller.whenPlacementsHeld();
+      const window = closingWindow();
+      controller.guardClose(window.target);
+      placeOnMapOne(hub);
+      const whileUnsaved = window.closing();
+
+      // Act: map 1 saved, its placements with it.
+      await hub.save('map:1');
+      await controller.placements?.whenWritten();
+
+      // Assert: asked while only the event window could have saved map 1, and not once its placements were written.
+      expect([ whileUnsaved, window.closing() ])
+        .toStrictEqual([ true, false ]);
+    });
+
+    it('tries a refused placement write again with Save all, though nothing else is unsaved, and says all is saved once it lands', async () =>
+    {
+      // Arrange: map 1's placement refused once, map 1 itself saved, then the server taking merges again.
+      const documents = onServer();
+      const { controller, hub, api } = buildController(documents);
+      await controller.whenPlacementsHeld();
+      const { mergeBlueprintUses } = api;
+      refuseMerges(api);
+      placeOnMapOne(hub);
+      await hub.save('map:1');
+      await controller.placements?.whenWritten();
+      api.mergeBlueprintUses = mergeBlueprintUses;
+
+      // Act.
+      await controller.saveAll();
+
+      // Assert: map 1's placement on disk beside the cave's, nothing left unwritten, and everything said to be saved.
+      expect([ readUses((documents['blueprint-uses'] as { data: JsonValue }).data), controller.placements?.hasUnwritten(), controller.getState().notice?.text ])
+        .toStrictEqual([
+          [ { blueprintId: 'aa22', x: 0, y: 0, mapId: 1 }, { blueprintId: 'aa22', x: 4, y: 0, mapId: 5 } ],
+          false,
+          'Everything is saved.',
+        ]);
+    });
+
+    it('never says everything is saved while Save all cannot write a refused placement either, leaving the refusal showing', async () =>
+    {
+      // Arrange: the server refusing every merge, and map 1's placement saved and refused.
+      const { controller, hub, api } = buildController(onServer());
+      await controller.whenPlacementsHeld();
+      const count = refuseMerges(api);
+      placeOnMapOne(hub);
+      await hub.save('map:1');
+      await controller.placements?.whenWritten();
+
+      // Act.
+      await controller.saveAll();
+
+      // Assert: tried twice, the refusal said again, and the placement still unwritten.
+      expect([ count.refused, controller.getState().notice?.text, controller.placements?.hasUnwritten() ])
+        .toStrictEqual([ 2, REFUSED, true ]);
+    });
+
+    it('refuses to undo a blueprint\'s save while its tiles are still placed, in the words a delete of it is refused in', async () =>
+    {
+      // Arrange: the roost (k3x9q2mf) saved here, as the step undo would take back, and placed on the cave already.
+      const documents = { ...onServer(), 'blueprint-uses': storedUses([ { blueprintId: 'k3x9q2mf', mapId: 5, x: 1, y: 1 } ]) };
+      const { controller, hub } = buildController(documents);
+      await controller.whenPlacementsHeld();
+      saveBlueprint(hub, stampOf(), 'Bat roost', drawsFor([ 'k3x9q2mf' ]));
+      controller.focusHistory(blueprintHistoryKey('k3x9q2mf'));
+
+      // Act.
+      await controller.undo();
+
+      // Assert.
+      expect([ controller.getState().notice?.text, controller.blueprintName('k3x9q2mf') ])
+        .toStrictEqual([ '"Save blueprint "Bat roost"" cannot be undone: "Bat roost" is still placed once, on Map 5, so it can\'t be deleted.', 'Bat roost' ]);
+    });
+  });
+
+  /*
+   * A blueprint opens as a small map in a tab of its own, wherever a map would open, and is brought forward when it is
+   * open already. Focused, it hands undo the blueprint's own history, which nothing done to a map reaches, and which
+   * reaches no map. Its changes have no file of their own and are not saved yet: Save all saves the maps and says the
+   * blueprints' changes stay unsaved. An edit the window's checks refuse, such as a resize of a blueprint, is said in the
+   * notice, whichever tool made it.
+   *
+   * On the server, the camp (k3x9q2mf) is a blueprint of one event, two cells wide, open in the window as a map.
+   */
+  describe('blueprints opened as maps', () =>
+  {
+    /**
+     * A controller over the camp, held as the window holds it once opened, with the check the window keeps every
+     * blueprint to.
+     * @returns {Promise<ReturnType<typeof buildController> & { mapId: number }>} The controller, its hub and the rest, and
+     * the camp's map id.
+     */
+    const withCamp = async () =>
+    {
+      const built = buildController({ 'blueprints': storedBlueprints({ k3x9q2mf: { name: 'Goblin camp', stamp: stampOf({ width: 2 }) } }), 'blueprint-uses': storedUses() });
+      built.hub.addCommitCheck(blueprintShapeCheck(built.hub));
+      await built.controller.whenPlacementsHeld();
+      holdBlueprintMap(built.hub, 'k3x9q2mf');
+      return { ...built, mapId: blueprintMapId('k3x9q2mf') };
+    };
+
+    it('opens a blueprint as a tab in the centre named for the blueprint, and brings it forward once open', async () =>
+    {
+      // Arrange.
+      const { controller, mapId } = await withCamp();
+      const dock = buildDock([ { id: 'start', component: 'start', group: MAIN } ]);
+      controller.attach(dock.api);
+
+      // Act.
+      controller.openBlueprint('k3x9q2mf');
+      controller.openBlueprint('k3x9q2mf');
+
+      // Assert.
+      expect([ dock.added, dock.api.getPanel('blueprint-k3x9q2mf')?.params, dock.activated, controller.mapName(mapId) ])
+        .toStrictEqual([
+          [ { id: 'blueprint-k3x9q2mf', position: { referenceGroup: MAIN, direction: 'within' } } ],
+          { mapId },
+          [ 'blueprint-k3x9q2mf' ],
+          'Goblin camp',
+        ]);
+    });
+
+    it('closes every tab of a blueprint deleted on disk, lets go of it, and says so', async () =>
+    {
+      // Arrange: the camp open in two views, beside map 1.
+      const { controller, hub, mapId } = await withCamp();
+      const dock = buildDock([
+        { id: 'blueprint-k3x9q2mf', component: 'map', params: { mapId }, group: MAIN },
+        { id: 'blueprint-k3x9q2mf-2', component: 'map', params: { mapId }, group: TORN },
+        { id: 'map-1', component: 'map', params: { mapId: 1 }, group: MAIN },
+      ]);
+      controller.attach(dock.api);
+
+      // Act.
+      controller.closeBlueprintDeletedOnDisk('k3x9q2mf', 'Goblin camp');
+
+      // Assert.
+      expect([ dock.closed, hub.has('blueprint-map:k3x9q2mf'), hub.has('map:1'), controller.getState().notice?.text ])
+        .toStrictEqual([ [ 'blueprint-k3x9q2mf', 'blueprint-k3x9q2mf-2' ], false, true, '"Goblin camp" was deleted on disk, so its tab was closed.' ]);
+    });
+
+    it('says a blueprint deleted on disk whose name was never known is a blueprint', async () =>
+    {
+      // Arrange.
+      const { controller, mapId } = await withCamp();
+      const dock = buildDock([ { id: 'blueprint-k3x9q2mf', component: 'map', params: { mapId }, group: MAIN } ]);
+      controller.attach(dock.api);
+
+      // Act.
+      controller.closeBlueprintDeletedOnDisk('k3x9q2mf', '');
+
+      // Assert.
+      expect(controller.getState().notice?.text)
+        .toBe('A blueprint was deleted on disk, so its tab was closed.');
+    });
+
+    it('lets go of a blueprint deleted on disk with no tab open quietly, closing nothing', async () =>
+    {
+      // Arrange: the camp held, its tab closed.
+      const { controller, hub } = await withCamp();
+      const dock = buildDock([ { id: 'map-1', component: 'map', params: { mapId: 1 }, group: MAIN } ]);
+      controller.attach(dock.api);
+
+      // Act.
+      controller.closeBlueprintDeletedOnDisk('k3x9q2mf', 'Goblin camp');
+
+      // Assert.
+      expect([ dock.closed, hub.has('blueprint-map:k3x9q2mf'), controller.getState().notice ])
+        .toStrictEqual([ [], false, null ]);
+    });
+
+    it('says why a blueprint whose id no map id can spell does not open, opening nothing', async () =>
+    {
+      // Arrange: an id one character too long, as only a hand-edited blueprints file holds.
+      const { controller } = await withCamp();
+      const dock = buildDock([ { id: 'start', component: 'start', group: MAIN } ]);
+      controller.attach(dock.api);
+
+      // Act.
+      const panel = controller.openBlueprint('k3x9q2mf123');
+
+      // Assert.
+      expect([ panel, dock.added, controller.getState().notice?.text ])
+        .toStrictEqual([ null, [], '"k3x9q2mf123" can\'t be opened: its id in the blueprints file is too long.' ]);
+    });
+
+    it('hands undo the blueprint\'s own history while its panel has focus, which reaches no map and no map\'s reaches', async () =>
+    {
+      // Arrange: map 1 renamed, then the camp's event moved, then map 1 renamed again.
+      const { controller, hub, mapId } = await withCamp();
+      const { api } = buildDock([ { id: 'blueprint-k3x9q2mf', component: 'map', params: { mapId }, group: MAIN } ]);
+      hub.edit('Rename map', [ mapHistoryKey(1) ], tx => tx.set('map:1', [ 'displayName' ], 'Harbor'));
+      hub.edit('Move event', [ mapHistoryKey(mapId) ], tx => tx.set('blueprint-map:k3x9q2mf', [ 'events', 1, 'x' ], 1));
+      hub.edit('Rename map again', [ mapHistoryKey(1) ], tx => tx.set('map:1', [ 'displayName' ], 'Port'));
+
+      // Act.
+      controller.panelActivated(api.getPanel('blueprint-k3x9q2mf'));
+      await controller.undo();
+
+      // Assert: the move is undone, and map 1 keeps both renames, its history untouched.
+      expect([
+        controller.getState().activeHistory,
+        controller.getState().currentMapId,
+        hub.map('blueprint-map:k3x9q2mf').event(1)?.x,
+        hub.map('map:1').property('displayName'),
+        hub.history(mapHistoryKey(1)).rows.map(row => [ row.label, row.done ]),
+        hub.history(blueprintHistoryKey('k3x9q2mf')).rows.map(row => [ row.label, row.done ]),
+      ])
+        .toStrictEqual([
+          'blueprint:k3x9q2mf',
+          mapId,
+          0,
+          'Port',
+          [ [ 'Rename map', true ], [ 'Rename map again', true ] ],
+          [ [ 'Move event', false ] ],
+        ]);
+    });
+
+    it('never saves a blueprint by hand on Save all, saying when a change to one is not written, and saves the maps', async () =>
+    {
+      // Arrange: the camp's event moved in a window writing nothing, and map 1 renamed.
+      const { controller, hub, saves, mapId } = await withCamp();
+      hub.edit('Move event', [ mapHistoryKey(mapId) ], tx => tx.set('blueprint-map:k3x9q2mf', [ 'events', 1, 'x' ], 1));
+      hub.edit('Rename map', [ mapHistoryKey(1) ], tx => tx.set('map:1', [ 'displayName' ], 'Harbor'));
+
+      // Act.
+      await controller.saveAll();
+      const withMap = controller.getState().notice?.text;
+      await controller.saveAll();
+
+      // Assert.
+      expect([ withMap, controller.getState().notice?.text, saves, hub.dirtyKeys() ])
+        .toStrictEqual([
+          'Saved 1 map; a change to a blueprint is not written yet.',
+          'A change to a blueprint is not written yet; everything else is saved.',
+          [ 'map:1' ],
+          [ 'blueprint-map:k3x9q2mf' ],
+        ]);
+    });
+
+    it('waits on Save all for a blueprint\'s changes on their way to disk before saving any map, and hears its problems', async () =>
+    {
+      // Arrange: a writer whose act is on its way, and which has a problem to tell.
+      const order: string[] = [];
+      let land = () => undefined as void;
+      const listeners: ((message: string, alarm: boolean) => void)[] = [];
+      const blueprintWriter = {
+        whenWritten: () => new Promise<void>(resolve =>
+        {
+          land = () =>
+          {
+            order.push('written');
+            resolve();
+          };
+        }),
+        onProblem: (listener: (message: string, alarm: boolean) => void) => listeners.push(listener),
+        guard: () => null,
+      };
+      const built = buildController();
+      const services = { ...(built.controller.services as object), blueprintWriter } as unknown as MapEditorServices;
+      const controller = new WorkspaceController(services);
+      built.hub.edit('Rename map', [ mapHistoryKey(1) ], tx => tx.set('map:1', [ 'displayName' ], 'Harbor'));
+      built.hub.subscribe(event => (event.type === 'saved' ? order.push(event.document) : undefined));
+
+      // Act.
+      const saving = controller.saveAll();
+      await Promise.resolve();
+      land();
+      await saving;
+      listeners.forEach(listener => listener('The change to the blueprint could not be written.', true));
+
+      // Assert.
+      expect([ order, controller.getState().notice ])
+        .toStrictEqual([ [ 'written', 'map:1' ], expect.objectContaining({ text: 'The change to the blueprint could not be written.', severity: 'alarm' }) ]);
+    });
+
+    it('says why an edit the window\'s checks refused was refused', async () =>
+    {
+      // Arrange.
+      const { controller, hub, mapId } = await withCamp();
+
+      // Act.
+      const step = resizeMap(hub, mapId, 4, 1, 'top-left');
+
+      // Assert.
+      expect([ step, controller.getState().notice ])
+        .toStrictEqual([ null, { id: 1, text: BLUEPRINT_RESIZED, severity: 'error' } ]);
+    });
   });
 
   describe('the event selection', () =>

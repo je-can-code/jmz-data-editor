@@ -2,6 +2,9 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   diskOperationId,
   DocumentHub,
+  isFileGone,
+  isOutsideStep,
+  type CommitCheck,
   type DocumentSnapshot,
   type DocumentStore,
   type HubEvent,
@@ -19,7 +22,7 @@ import { createEventPage, createMapEvent } from '../../../../src/mapEditor/core/
 import type { DocumentKey } from '../../../../src/mapEditor/core/model/documentKeys.ts';
 import type { JsonValue } from '../../../../src/mapEditor/core/model/json.ts';
 import type { MapDocument } from '../../../../src/mapEditor/core/model/MapDocument.ts';
-import type { MapTiles } from '../../../../src/mapEditor/core/model/patches.ts';
+import type { MapTiles, Patch } from '../../../../src/mapEditor/core/model/patches.ts';
 import type { RmmzMap, RmmzMapEvent } from '../../../../src/mapEditor/core/model/rmmzTypes.ts';
 import { operationFor } from '../../../../src/mapEditor/core/sync/SyncPeer.ts';
 import { buildMapJson } from '../../support/fixtures.ts';
@@ -42,11 +45,18 @@ import { buildMapJson } from '../../support/fixtures.ts';
  * Saving never touches history. Jeremy: "saving is just saving data, not resetting the undo history." Neither a
  * save nor another window ever sees an edit that is still open, since it may yet be cancelled.
  *
+ * A document reads as saved exactly when it holds what its file holds, as the window last read the file, wrote it, or
+ * heard another window write it, whatever moved either there. Where its history stands decides nothing: a blueprint's
+ * change writes a map's file at once, apart from the map's unsaved edits, so a map can come to hold its file's content,
+ * or leave it, by roads no list of steps tells. A map that read as saved while its file held something else would lose
+ * work with nobody warned, and every blueprint change after it would be planned against the wrong copy.
+ *
  * A file changed outside the editor never resets history either. On a clean document the file's version arrives as
  * one step, "Externally modified", in the history of whatever it touched and already saved: undo brings back the
  * version the editor had, as an unsaved edit, and redo takes the file's version again. Every window that hears the
- * change records the very same step, so their copies stay one. A file holding what the window last saved, as the
- * echo of its own save does, records nothing; a document with unsaved edits is flagged and never merged into.
+ * change records the very same step, so their copies stay one. A file holding what the window last wrote or read
+ * there, as the echo of its own save does, records nothing; a document with unsaved edits is flagged and never merged
+ * into.
  *
  * And every operation from another window is checked against this window's lineage before it is repeated, so a
  * copy that went elsewhere is announced, never quietly written over.
@@ -314,6 +324,26 @@ describe('DocumentHub', () =>
         .toStrictEqual([ 'Harbor', 'Test Town', true, false ]);
     });
 
+    it('says an edit is open from the moment it begins until it is committed or cancelled', () =>
+    {
+      // Arrange.
+      const hub = buildHub();
+      const idle = hub.isEditing();
+
+      // Act.
+      const committed = hub.begin('Rename map', [ mapHistoryKey(1) ]);
+      const whileCommitting = hub.isEditing();
+      committed.set(MAP_A, [ 'displayName' ], 'Harbor').commit();
+      const afterCommit = hub.isEditing();
+      const cancelled = hub.begin('Rename map', [ mapHistoryKey(1) ]);
+      const whileCancelling = hub.isEditing();
+      cancelled.cancel();
+
+      // Assert.
+      expect([ idle, whileCommitting, afterCommit, whileCancelling, hub.isEditing() ])
+        .toStrictEqual([ false, true, false, true, false ]);
+    });
+
     it('records nothing for an edit that changes nothing', () =>
     {
       // Arrange.
@@ -421,6 +451,203 @@ describe('DocumentHub', () =>
       // Assert.
       expect(run)
         .toThrow(/has no tiles/u);
+    });
+  });
+
+  /*
+   * A window's commit checks are how a document with rules beyond any patch's keeps to them, whatever tool edits it: a
+   * blueprint opened as a map keeps its size and its events however it is painted or edited. So an edit a check refuses
+   * must leave no trace (every document as it was, no step in any history, nothing unsaved, the hub free for the next
+   * edit), and the author must hear why. A check reads the edit as it leaves the documents, and may add to it, which is
+   * how a change can be carried further as part of the same step. Only this window's own edits are asked about.
+   */
+  describe('commit checks', () =>
+  {
+    /**
+     * A check refusing any edit that changes map 2, in the words given, and letting every other through.
+     * @param {string} words Why it refuses.
+     * @returns {CommitCheck} The check.
+     */
+    const keepsMapB = (words: string): CommitCheck => transaction =>
+    {
+      return transaction.entries.some(entry => entry.document === MAP_B) ? words : null;
+    };
+
+    it('puts back an edit a check refuses, recording nothing anywhere, and says why', () =>
+    {
+      // Arrange: an edit to both maps, which the check refuses for touching map 2.
+      const hub = buildHub();
+      hub.addCommitCheck(keepsMapB('map 2 stays as it is'));
+      const events: HubEvent[] = [];
+      hub.subscribe(event => events.push(event));
+      const before = { ...stateOf(hub, [ mapHistoryKey(1), mapHistoryKey(2) ]), revisions: null };
+
+      // Act.
+      const step = hub.edit('Rename both', [ mapHistoryKey(1), mapHistoryKey(2) ], tx =>
+      {
+        tx.set(MAP_A, [ 'displayName' ], 'Harbor');
+        tx.set(MAP_B, [ 'displayName' ], 'Harbor too');
+      });
+
+      // Assert.
+      expect([ step, { ...stateOf(hub, [ mapHistoryKey(1), mapHistoryKey(2) ]), revisions: null }, events ])
+        .toStrictEqual([
+          null,
+          before,
+          [ { type: 'refused', label: 'Rename both', histories: [ 'map:1', 'map:2' ], message: 'map 2 stays as it is' } ],
+        ]);
+    });
+
+    it('lets through an edit every check passes, and takes the next edit after one it refused', () =>
+    {
+      // Arrange: a refused edit to map 2 first.
+      const hub = buildHub();
+      hub.addCommitCheck(keepsMapB('map 2 stays as it is'));
+      hub.edit('Rename B', [ mapHistoryKey(2) ], tx => tx.set(MAP_B, [ 'displayName' ], 'Harbor'));
+
+      // Act.
+      const step = hub.edit('Rename A', [ mapHistoryKey(1) ], tx => tx.set(MAP_A, [ 'displayName' ], 'Harbor'));
+
+      // Assert.
+      expect([ step?.label, fileOf(hub, MAP_A).displayName, fileOf(hub, MAP_B).displayName, hub.history(mapHistoryKey(2)).rows ])
+        .toStrictEqual([ 'Rename A', 'Harbor', 'Test Town', [] ]);
+    });
+
+    it('asks the checks in the order they were added, stopping at the first that refuses', () =>
+    {
+      // Arrange: one passing, then two refusing.
+      const hub = buildHub();
+      const asked: string[] = [];
+      hub.addCommitCheck(() =>
+      {
+        asked.push('first');
+        return null;
+      });
+      hub.addCommitCheck(() =>
+      {
+        asked.push('second');
+        return 'the second says no';
+      });
+      hub.addCommitCheck(() =>
+      {
+        asked.push('third');
+        return 'the third says no';
+      });
+      const refusals: string[] = [];
+      hub.subscribe(event => (event.type === 'refused' ? refusals.push(event.message) : undefined));
+
+      // Act.
+      hub.edit('Rename', [ mapHistoryKey(1) ], tx => tx.set(MAP_A, [ 'displayName' ], 'Harbor'));
+
+      // Assert.
+      expect([ asked, refusals ])
+        .toStrictEqual([ [ 'first', 'second' ], [ 'the second says no' ] ]);
+    });
+
+    it('shows a check the edit as it leaves the documents, and keeps what the check adds as part of the same step', () =>
+    {
+      // Arrange: a check that names map 2 after map 1 as part of every edit renaming map 1.
+      const hub = buildHub();
+      const seen: unknown[] = [];
+      hub.addCommitCheck(transaction =>
+      {
+        seen.push(hub.document(MAP_A).valueAt([ 'displayName' ]), transaction.entries.length);
+        transaction.set(MAP_B, [ 'displayName' ], `After ${String(hub.document(MAP_A).valueAt([ 'displayName' ]))}`);
+        return null;
+      });
+
+      // Act.
+      const step = hub.edit('Rename', [ mapHistoryKey(1) ], tx => tx.set(MAP_A, [ 'displayName' ], 'Harbor')) as HistoryStep;
+      const named = fileOf(hub, MAP_B).displayName;
+      hub.undo(mapHistoryKey(1));
+
+      // Assert: one step held both, and one undo took both back.
+      expect([ seen, step.entries.map(entry => entry.document), named, fileOf(hub, MAP_A).displayName, fileOf(hub, MAP_B).displayName ])
+        .toStrictEqual([ [ 'Harbor', 1 ], [ MAP_A, MAP_B ], 'After Harbor', 'Test Town', 'Test Town' ]);
+    });
+
+    it('never asks about an edit that changed nothing', () =>
+    {
+      // Arrange.
+      const hub = buildHub();
+      const check = vi.fn(() => 'never');
+      hub.addCommitCheck(check);
+
+      // Act.
+      const step = hub.edit('Rename', [ mapHistoryKey(1) ], tx => tx.set(MAP_A, [ 'displayName' ], 'Test Town'));
+
+      // Assert.
+      expect([ step, check.mock.calls.length ])
+        .toStrictEqual([ null, 0 ]);
+    });
+
+    it('refuses a transaction opened with begin at its commit, putting back everything it showed', () =>
+    {
+      // Arrange: a stroke over map 2, which shows as it goes.
+      const hub = buildHub();
+      hub.addCommitCheck(keepsMapB('map 2 stays as it is'));
+      const before = fileOf(hub, MAP_B);
+      const stroke = hub.begin('Paint', [ mapHistoryKey(2) ]);
+      stroke.tiles(MAP_B, [ [ 0, 900 ] ]);
+      const [ midStroke ] = hub.map('map:2').cells;
+
+      // Act.
+      const step = stroke.commit();
+
+      // Assert: the hub takes another edit at once.
+      expect([ midStroke, step, fileOf(hub, MAP_B), stroke.isOpen, hub.begin('Next', [ mapHistoryKey(1) ]).isOpen ])
+        .toStrictEqual([ 900, null, before, false, true ]);
+    });
+
+    it('puts the edit back when a check fails outright, the failure going on up, and takes the next edit', () =>
+    {
+      // Arrange.
+      const hub = buildHub();
+      const remove = hub.addCommitCheck(() =>
+      {
+        throw new Error('the check broke');
+      });
+
+      // Act.
+      const run = () => hub.edit('Rename', [ mapHistoryKey(1) ], tx => tx.set(MAP_A, [ 'displayName' ], 'Harbor'));
+
+      // Assert.
+      expect(run)
+        .toThrow('the check broke');
+      remove();
+      expect([ fileOf(hub, MAP_A).displayName, hub.history(mapHistoryKey(1)).rows, hub.edit('Again', [ mapHistoryKey(1) ], tx => tx.set(MAP_A, [ 'note' ], 'x'))?.label ])
+        .toStrictEqual([ 'Test Town', [], 'Again' ]);
+    });
+
+    it('stops asking a check once it is taken away', () =>
+    {
+      // Arrange.
+      const hub = buildHub();
+      const remove = hub.addCommitCheck(keepsMapB('map 2 stays as it is'));
+
+      // Act.
+      remove();
+      const step = hub.edit('Rename B', [ mapHistoryKey(2) ], tx => tx.set(MAP_B, [ 'displayName' ], 'Harbor'));
+
+      // Assert.
+      expect([ step?.label, fileOf(hub, MAP_B).displayName ])
+        .toStrictEqual([ 'Rename B', 'Harbor' ]);
+    });
+
+    it('never asks about another window\'s edit, which that window\'s own checks looked over', () =>
+    {
+      // Arrange: the second window refuses edits to map 2, the first does not.
+      const first = buildHub(undefined, 'window-a');
+      const second = buildHub(undefined, 'window-b');
+      second.addCommitCheck(keepsMapB('map 2 stays as it is'));
+      mirror(first, second);
+
+      // Act.
+      first.edit('Rename B', [ mapHistoryKey(2) ], tx => tx.set(MAP_B, [ 'displayName' ], 'Harbor'));
+
+      // Assert.
+      expect([ fileOf(second, MAP_B).displayName, second.history(mapHistoryKey(2)).rows.map(row => row.label) ])
+        .toStrictEqual([ 'Harbor', [ 'Rename B' ] ]);
     });
   });
 
@@ -943,6 +1170,82 @@ describe('DocumentHub', () =>
 
   describe('undoing a step past later edits', () =>
   {
+    /**
+     * Renames map 1's door and, on map 2, makes an empty slot 5 past the end of the list and puts event 5 in it, as one
+     * step on both maps, the way placing a door pair does.
+     * @param {DocumentHub} hub The hub.
+     * @returns {HistoryStep} The step.
+     */
+    const placeSlottedPair = (hub: DocumentHub): HistoryStep => hub.edit('Place door pair', [ mapHistoryKey(1), mapHistoryKey(2) ], tx =>
+    {
+      tx.set(MAP_A, [ 'events', 1, 'name' ], 'Door to cave');
+      tx.apply(MAP_B, { kind: 'splice', path: [ 'events' ], index: 5, removed: [], inserted: [ null ] });
+      tx.apply(MAP_B, { kind: 'set', path: [ 'events', 5 ], before: null, after: createMapEvent(5, 0, 1) as unknown as JsonValue });
+    }) as HistoryStep;
+
+    it('undoes a step past an event placed after the empty slot it made, leaving the slot empty and the event its id', () =>
+    {
+      // Arrange: map 2 places event 6 after the pair's event 5.
+      const hub = buildHub();
+      placeSlottedPair(hub);
+      placeNewerEvent(hub, 6);
+
+      // Act: undo the pair from map 1, where it is still the newest step.
+      const result = hub.undo(mapHistoryKey(1));
+
+      // Assert: the slot alone is left, so event 6 keeps its id; the door's name is back.
+      expect([ result.ok, result.ok && result.left?.map(part => [ part.document, part.patch.kind, part.by?.label ]), slotsOf(hub), fileOf(hub, MAP_A).events[1]?.name ])
+        .toStrictEqual([ true, [ [ MAP_B, 'splice', 'Place event' ] ], [ null, '1:Door', null, '3:Chest', null, null, '6:Newer' ], 'Door' ]);
+    });
+
+    it('undoes a step whose empty slot nothing stands beyond, taking the slot out with the rest', () =>
+    {
+      // Arrange: the pair alone.
+      const hub = buildHub();
+      placeSlottedPair(hub);
+
+      // Act.
+      const result = hub.undo(mapHistoryKey(1));
+
+      // Assert: nothing is left; map 2's list is as long as it was.
+      expect([ result.ok, result.ok && result.left, slotsOf(hub) ])
+        .toStrictEqual([ true, undefined, [ null, '1:Door', null, '3:Chest', null ] ]);
+    });
+
+    it('redoes a step undone with its empty slot left, putting the event back in that slot', () =>
+    {
+      // Arrange: the pair undone past event 6.
+      const hub = buildHub();
+      placeSlottedPair(hub);
+      placeNewerEvent(hub, 6);
+      hub.undo(mapHistoryKey(1));
+
+      // Act.
+      const result = hub.redo(mapHistoryKey(1));
+
+      // Assert.
+      expect([ result.ok, slotsOf(hub), fileOf(hub, MAP_A).events[1]?.name ])
+        .toStrictEqual([ true, [ null, '1:Door', null, '3:Chest', null, '5:EV005', '6:Newer' ], 'Door to cave' ]);
+    });
+
+    it('still refuses to undo a step whose event a later edit changed, naming the edit and the map it is on', () =>
+    {
+      // Arrange: event 6 placed after the pair's event, which alone would not refuse it, then event 5 renamed.
+      const hub = buildHub();
+      placeSlottedPair(hub);
+      placeNewerEvent(hub, 6);
+      hub.edit('Rename event', [ mapHistoryKey(2) ], tx => tx.set(MAP_B, [ 'events', 5, 'name' ], 'Cave door'));
+      const histories = [ mapHistoryKey(1), mapHistoryKey(2) ];
+      const before = stateOf(hub, histories);
+
+      // Act.
+      const result = hub.undo(mapHistoryKey(1));
+
+      // Assert: refused before anything moved.
+      expect([ result.ok === false && result.reason, result.ok === false && 'blockedBy' in result && result.blockedBy?.label, result.ok === false && 'document' in result && result.document, stateOf(hub, histories) ])
+        .toStrictEqual([ 'conflict', 'Rename event', MAP_B, before ]);
+    });
+
     it('refuses to undo a step on two maps after a resize moved the tiles it changed, and changes nothing', () =>
     {
       // Arrange: map 1 grows a row after the pair, so the erased tile's cell has a new index, and the index it had
@@ -1251,18 +1554,20 @@ describe('DocumentHub', () =>
       // Act.
       const result = hub.undo(mapHistoryKey(2));
 
-      // Assert.
+      // Assert: the refusal names the map by its label, and says which document it is for a window that names it otherwise.
       expect([
         result.ok === false && result.reason,
         result.ok === false && 'blockedBy' in result && result.blockedBy,
         result.ok === false && 'message' in result && result.message,
+        result.ok === false && 'document' in result && result.document,
         triggersOf(hub),
         stateOf(hub, histories),
       ])
         .toStrictEqual([
           'untracked',
           null,
-          'this window cannot tell what changed in map:1 after "Place door pair"',
+          'this window cannot tell what changed in Map 1 after "Place door pair"',
+          MAP_A,
           [ 3, 3 ],
           before,
         ]);
@@ -1516,11 +1821,12 @@ describe('DocumentHub', () =>
       hub.adoptSnapshot(whole);
       const redone = hub.redo(mapHistoryKey(1));
 
-      // Assert.
+      // Assert: the refusal names the map by its label, and says which document it is for a window that names it otherwise.
       expect([
         refused.ok === false && refused.reason,
         refused.ok === false && 'blockedBy' in refused && refused.blockedBy,
         refused.ok === false && 'message' in refused && refused.message,
+        refused.ok === false && 'document' in refused && refused.document,
         afterRefusal,
         redone.ok,
         slotsOf(hub),
@@ -1528,7 +1834,8 @@ describe('DocumentHub', () =>
         .toStrictEqual([
           'untracked',
           null,
-          'this window cannot tell what changed in map:2 since "Place door pair" was undone',
+          'this window cannot tell what changed in Map 2 since "Place door pair" was undone',
+          MAP_B,
           before,
           true,
           [ null, '1:Door', null, '3:Chest', null, '5:EV005' ],
@@ -1779,6 +2086,73 @@ describe('DocumentHub', () =>
       expect([ hub.isDirty(MAP_A), hub.dirtyKeys() ])
         .toStrictEqual([ true, [ MAP_A ] ]);
     });
+
+    it('reads as saved once later edits bring a document back to what its file holds, whatever steps it took there', () =>
+    {
+      // Arrange: a rename, then a second edit putting the old name back, both on map 1; map 2 renamed alone.
+      const hub = buildHub();
+      hub.edit('Rename', [ mapHistoryKey(1) ], tx => tx.set(MAP_A, [ 'displayName' ], 'Harbor'));
+      const renamed = hub.isDirty(MAP_A);
+      hub.edit('Rename back', [ mapHistoryKey(1) ], tx => tx.set(MAP_A, [ 'displayName' ], 'Test Town'));
+
+      // Act.
+      hub.edit('Rename', [ mapHistoryKey(2) ], tx => tx.set(MAP_B, [ 'displayName' ], 'Harbor'));
+
+      // Assert: map 1 holds two steps no save named, and reads as saved; map 2 does not.
+      expect([ renamed, hub.appliedSteps(MAP_A).length, hub.isDirty(MAP_A), hub.dirtyKeys() ])
+        .toStrictEqual([ true, 2, false, [ MAP_B ] ]);
+    });
+
+    it('leaves an edit still open out of whether a document is saved, reading it once the edit is done', () =>
+    {
+      // Arrange: a stroke under way on map 1, asked about before it began, and once it has painted.
+      const hub = buildHub();
+      const before = hub.isDirty(MAP_A);
+      const stroke = hub.begin('Paint', [ mapHistoryKey(1) ]);
+      stroke.tiles(MAP_A, [ [ 0, 999 ] ]);
+      const midStroke = hub.isDirty(MAP_A);
+
+      // Act.
+      stroke.commit();
+
+      // Assert.
+      expect([ before, midStroke, hub.isDirty(MAP_A) ])
+        .toStrictEqual([ false, false, true ]);
+    });
+
+    it('works out a document\'s saved state under an open edit from what it holds without that edit', () =>
+    {
+      // Arrange: a rename made, then a stroke opened over it before the map was ever asked about.
+      const hub = buildHub();
+      hub.edit('Rename', [ mapHistoryKey(1) ], tx => tx.set(MAP_A, [ 'displayName' ], 'Harbor'));
+      hub.edit('Rename back', [ mapHistoryKey(1) ], tx => tx.set(MAP_A, [ 'displayName' ], 'Test Town'));
+      const stroke = hub.begin('Paint', [ mapHistoryKey(1) ]);
+      stroke.tiles(MAP_A, [ [ 0, 999 ] ]);
+
+      // Act.
+      const midStroke = hub.isDirty(MAP_A);
+      stroke.cancel();
+
+      // Assert: saved mid-stroke, as the map would be with the stroke cancelled, and so it is.
+      expect([ midStroke, hub.isDirty(MAP_A) ])
+        .toStrictEqual([ false, false ]);
+    });
+
+    it('hands what a document\'s file holds to another window with its unsaved edits, and nothing more for a clean one', () =>
+    {
+      // Arrange: map 1 renamed and unsaved; map 2 untouched.
+      const source = buildHub();
+      const target = new DocumentHub({ clientId: 'window-b', now: () => 1000 });
+      source.edit('Rename', [ mapHistoryKey(1) ], tx => tx.set(MAP_A, [ 'displayName' ], 'Harbor'));
+      const snapshots = [ source.snapshot(MAP_A), source.snapshot(MAP_B) ];
+
+      // Act.
+      snapshots.forEach(snapshot => target.adoptSnapshot(snapshot));
+
+      // Assert: the other window reads map 1 unsaved against the file this one knows, and map 2 saved.
+      expect([ snapshots.map(snapshot => 'file' in snapshot), target.isDirty(MAP_A), target.fileContent(MAP_A), target.isDirty(MAP_B) ])
+        .toStrictEqual([ [ true, false ], true, buildMapJson(), false ]);
+    });
   });
 
   describe('external changes', () =>
@@ -1832,6 +2206,20 @@ describe('DocumentHub', () =>
         .toStrictEqual([ 'recorded', 'Changed in MZ', [ 'Rename', 'Externally modified' ], false, 1 ]);
       expect([ hub.lineage(MAP_A).length, hub.lineage(MAP_A)[0], rowsOf(hub, mapHistoryKey(2)), fileOf(hub, MAP_B).displayName ])
         .toStrictEqual([ 3, diskOperationId(buildMapJson() as unknown as JsonValue), [], 'Test Town' ]);
+    });
+
+    it('tells the step a version found on disk is recorded as from every step made in a window', async () =>
+    {
+      // Arrange: the rename made here, then the file's version taken.
+      const { hub } = await buildChangedOutside();
+      await hub.handleExternalChange(MAP_A);
+
+      // Act.
+      const told = hub.appliedSteps(MAP_A).map(step => [ step.label, isOutsideStep(step) ]);
+
+      // Assert.
+      expect(told)
+        .toStrictEqual([ [ 'Rename', false ], [ 'Externally modified', true ] ]);
     });
 
     it('undoes the step to the version the editor had, as an unsaved edit, and redoes it to the file\'s version, saved again', async () =>
@@ -2085,6 +2473,132 @@ describe('DocumentHub', () =>
         .toStrictEqual([ [ 'conflicted', 'ignored' ], { kind: 'disk', content: null }, before, false ]);
     });
 
+    /*
+     * A map whose file is removed outside the editor holds the only copy left, so it matches no file: it reads as unsaved,
+     * which is what makes closing its window ask first, until a save writes the file back. A map that read as saved there
+     * would be let go of with nobody warned, and the map lost. The file coming back is a version found on disk like any
+     * other, weighed against what the file held before it went: a map holding just that takes it as a clean map would.
+     */
+    describe('a file removed from disk', () =>
+    {
+      it('reads a clean map as unsaved once its file is removed, the map beside it still saved, and saved once a save writes it back', async () =>
+      {
+        // Arrange: map 1's file removed from disk, and taken as removed.
+        const { store, files } = buildStore();
+        const hub = buildHub(store);
+        files.delete(MAP_A);
+        hub.applyOutsideContent(MAP_A, null);
+        const removed = [ hub.dirtyKeys(), hub.isFileRemoved(MAP_A), hub.fileContent(MAP_A), hub.isFileRemoved(MAP_B) ];
+
+        // Act: the author keeps the map, and saves it.
+        hub.clearConflict(MAP_A);
+        await hub.save(MAP_A);
+
+        // Assert: the save wrote the map back as it stands, and it reads as saved again.
+        expect([ removed, files.get(MAP_A), hub.isDirty(MAP_A), hub.isFileRemoved(MAP_A), hub.fileContent(MAP_A) ])
+          .toStrictEqual([ [ [ MAP_A ], true, null, false ], fileOf(hub, MAP_A), false, false, fileOf(hub, MAP_A) ]);
+      });
+
+      it('settles a removed file\'s conflict by the save that writes it back, and leaves a changed file\'s standing', async () =>
+      {
+        // Arrange: map 1's file removed, and map 2's changed on disk while it held an unsaved edit.
+        const { store, files } = buildStore();
+        const hub = buildHub(store);
+        files.delete(MAP_A);
+        hub.applyOutsideContent(MAP_A, null);
+        hub.edit('Rename map', [ mapHistoryKey(2) ], tx => tx.set(MAP_B, [ 'displayName' ], 'Harbor'));
+        hub.flagConflict(MAP_B, { kind: 'disk', content: buildMapJson() as unknown as JsonValue });
+        const before = [ isFileGone(hub.conflict(MAP_A)), isFileGone(hub.conflict(MAP_B)), isFileGone(null) ];
+
+        // Act: both saved, neither settled by hand first.
+        await hub.save(MAP_A);
+        await hub.save(MAP_B);
+
+        // Assert: map 1's file is back and nothing stands over it; map 2's choice still waits for the author.
+        expect([ before, files.get(MAP_A), hub.conflict(MAP_A), hub.isDirty(MAP_A), hub.conflict(MAP_B)?.kind ])
+          .toStrictEqual([ [ true, false, false ], fileOf(hub, MAP_A), null, false, 'disk' ]);
+      });
+
+      it('takes a removed file come back as the map holds it as nothing new, the map saved and the removal no longer flagged', () =>
+      {
+        // Arrange.
+        const hub = buildHub();
+        hub.applyOutsideContent(MAP_A, null);
+
+        // Act.
+        const result = hub.applyOutsideContent(MAP_A, buildMapJson() as unknown as JsonValue);
+
+        // Assert.
+        expect([ result, hub.isDirty(MAP_A), hub.isConflicted(MAP_A), hub.isFileRemoved(MAP_A), rowsOf(hub, mapHistoryKey(1)) ])
+          .toStrictEqual([ 'unchanged', false, false, false, [] ]);
+      });
+
+      it('records a removed file come back changed as a step on a map holding no edits of its own, saved and no longer flagged', () =>
+      {
+        // Arrange.
+        const hub = buildHub();
+        hub.applyOutsideContent(MAP_A, null);
+        const changed = { ...buildMapJson(), displayName: 'Back again' } as unknown as JsonValue;
+
+        // Act.
+        const result = hub.applyOutsideContent(MAP_A, changed);
+
+        // Assert.
+        expect([ result, fileOf(hub, MAP_A).displayName, rowsOf(hub, mapHistoryKey(1)), hub.isDirty(MAP_A), hub.isConflicted(MAP_A) ])
+          .toStrictEqual([ 'recorded', 'Back again', [ 'Externally modified' ], false, false ]);
+      });
+
+      it('flags a removed file come back changed on a map holding edits of its own, which keeps them and stays unsaved', () =>
+      {
+        // Arrange: map 1 renamed and unsaved before its file was removed.
+        const hub = buildHub();
+        hub.edit('Rename', [ mapHistoryKey(1) ], tx => tx.set(MAP_A, [ 'displayName' ], 'Harbor'));
+        hub.applyOutsideContent(MAP_A, null);
+        const changed = { ...buildMapJson(), displayName: 'Back again' } as unknown as JsonValue;
+
+        // Act.
+        const result = hub.applyOutsideContent(MAP_A, changed);
+
+        // Assert.
+        expect([ result, hub.conflict(MAP_A), fileOf(hub, MAP_A).displayName, hub.isDirty(MAP_A), hub.isFileRemoved(MAP_A) ])
+          .toStrictEqual([ 'conflicted', { kind: 'disk', content: changed }, 'Harbor', true, false ]);
+      });
+
+      it('takes a removed file come back when only re-read after the stream came back, though the map read as unsaved', () =>
+      {
+        // Arrange: map 1's file removed; map 2 holds an unsaved rename, so a re-read leaves it alone.
+        const hub = buildHub();
+        hub.applyOutsideContent(MAP_A, null);
+        hub.edit('Rename', [ mapHistoryKey(2) ], tx => tx.set(MAP_B, [ 'displayName' ], 'Harbor'));
+        const file = buildMapJson() as unknown as JsonValue;
+
+        // Act.
+        const results = [ hub.applyOutsideContent(MAP_A, file, true), hub.applyOutsideContent(MAP_B, file, true) ];
+
+        // Assert.
+        expect([ results, hub.isDirty(MAP_A), hub.isConflicted(MAP_A), hub.isDirty(MAP_B) ])
+          .toStrictEqual([ [ 'unchanged', 'ignored' ], false, false, true ]);
+      });
+
+      it('hands a removed file to another window, which reads the map as unsaved and takes the file back as this one would', () =>
+      {
+        // Arrange: map 1's file removed here; map 2's still there.
+        const source = buildHub();
+        const target = new DocumentHub({ clientId: 'window-b', now: () => 1000 });
+        source.applyOutsideContent(MAP_A, null);
+        const snapshots = [ source.snapshot(MAP_A), source.snapshot(MAP_B) ];
+        snapshots.forEach(snapshot => target.adoptSnapshot(snapshot));
+        const adopted = [ target.isDirty(MAP_A), target.isFileRemoved(MAP_A), target.isDirty(MAP_B) ];
+
+        // Act: the file comes back as it was before it went.
+        const result = target.applyOutsideContent(MAP_A, buildMapJson() as unknown as JsonValue);
+
+        // Assert.
+        expect([ snapshots.map(snapshot => snapshot.removed), adopted, result, target.isDirty(MAP_A) ])
+          .toStrictEqual([ [ true, undefined ], [ true, true, false ], 'unchanged', false ]);
+      });
+    });
+
     it('leaves a document with unsaved edits alone when its file is only re-read, and takes a clean one\'s change', () =>
     {
       // Arrange: map 1 has an unsaved rename; both files changed while the change stream was down.
@@ -2118,7 +2632,7 @@ describe('DocumentHub', () =>
         .toStrictEqual([ 'unchanged', false, [ 'Rename', '(Retag)' ], '' ]);
     });
 
-    it('flags a file it cannot tell from what it last saved, once a step that save held is gone', async () =>
+    it('finds nothing to do when the file holds what it last wrote, though the step that save held is gone', async () =>
     {
       // Arrange: a rename saved, undone, and pushed out of the history by a new edit; the file holds the rename.
       const { store } = buildStore();
@@ -2131,12 +2645,12 @@ describe('DocumentHub', () =>
       // Act.
       const result = await hub.handleExternalChange(MAP_A);
 
-      // Assert: flagged, since nothing unsaved is ever merged into; the edits stay as they were.
-      expect([ result, hub.conflict(MAP_A)?.kind, rowsOf(hub, mapHistoryKey(1)), fileOf(hub, MAP_A).note ])
-        .toStrictEqual([ 'conflicted', 'disk', [ 'Retag' ], 'unsaved' ]);
+      // Assert: nothing flagged, the edits stay as they were, and the map still reads unsaved against the rename.
+      expect([ result, hub.isConflicted(MAP_A), rowsOf(hub, mapHistoryKey(1)), fileOf(hub, MAP_A).note, hub.isDirty(MAP_A) ])
+        .toStrictEqual([ 'unchanged', false, [ 'Retag' ], 'unsaved', true ]);
     });
 
-    it('flags a file it cannot tell from what it last saved, once an unsaved edit\'s data was changed behind its back', async () =>
+    it('finds nothing to do when the file holds what it was known to hold, though an unsaved edit\'s data was changed behind its back', async () =>
     {
       // Arrange: an unsaved rename, whose target then changes without any step, so it no longer takes back out.
       const { store } = buildStore();
@@ -2147,9 +2661,46 @@ describe('DocumentHub', () =>
       // Act.
       const result = await hub.handleExternalChange(MAP_A);
 
-      // Assert: flagged, with the window's copy as it was.
-      expect([ result, hub.conflict(MAP_A)?.kind, fileOf(hub, MAP_A).displayName, rowsOf(hub, mapHistoryKey(1)) ])
-        .toStrictEqual([ 'conflicted', 'disk', 'Elsewhere', [ 'Rename' ] ]);
+      // Assert: nothing flagged, with the window's copy as it was.
+      expect([ result, hub.isConflicted(MAP_A), fileOf(hub, MAP_A).displayName, rowsOf(hub, mapHistoryKey(1)) ])
+        .toStrictEqual([ 'unchanged', false, 'Elsewhere', [ 'Rename' ] ]);
+    });
+
+    it('flags a document with unsaved edits once its file comes to hold something it cannot tell from any state it passed through', async () =>
+    {
+      // Arrange: a rename saved, undone, and pushed out of the history by a new edit; the file then changes in MZ.
+      const { store, files } = buildStore();
+      const hub = buildHub(store);
+      hub.edit('Rename', [ mapHistoryKey(1) ], tx => tx.set(MAP_A, [ 'displayName' ], 'Harbor'));
+      await hub.save(MAP_A);
+      hub.undo(mapHistoryKey(1));
+      hub.edit('Retag', [ mapHistoryKey(1) ], tx => tx.set(MAP_A, [ 'note' ], 'unsaved'));
+      const changed = changeOnDisk(files, 'Changed in MZ');
+
+      // Act.
+      const result = await hub.handleExternalChange(MAP_A);
+
+      // Assert: flagged, since nothing unsaved is ever merged into; the edits stay as they were, and the map reads
+      // unsaved against the file's new version.
+      expect([ result, hub.conflict(MAP_A), rowsOf(hub, mapHistoryKey(1)), hub.isDirty(MAP_A), hub.fileContent(MAP_A) ])
+        .toStrictEqual([ 'conflicted', { kind: 'disk', content: changed }, [ 'Retag' ], true, changed ]);
+    });
+
+    it('learns what a file re-read holds for a document with unsaved edits, which then reads as saved when it holds just that', () =>
+    {
+      // Arrange: map 1 has an unsaved rename, and its file came to hold that very rename while the change stream was down.
+      const hub = buildHub();
+      hub.edit('Rename', [ mapHistoryKey(1) ], tx => tx.set(MAP_A, [ 'displayName' ], 'Harbor'));
+      const renamed = { ...buildMapJson(), displayName: 'Harbor' } as unknown as JsonValue;
+      const events: HubEvent[] = [];
+      hub.subscribe(event => events.push(event));
+
+      // Act.
+      const result = hub.applyOutsideContent(MAP_A, renamed, true);
+
+      // Assert: left alone, but saved, and every listener told what the file holds.
+      expect([ result, hub.isDirty(MAP_A), hub.isConflicted(MAP_A), events ])
+        .toStrictEqual([ 'ignored', false, false, [ { type: 'written', document: MAP_A, content: renamed, source: 'local', origin: 'window-a' } ] ]);
     });
 
     it('keeps unsaved edits and flags the document with the file\'s content beside them, recording no step', async () =>
@@ -2441,7 +2992,7 @@ describe('DocumentHub', () =>
       source.undo(mapHistoryKey(1));
       const afterUndo = fileOf(target, MAP_A).displayName;
       source.redo(mapHistoryKey(1));
-      target.applyRemote({ type: 'saved', origin: 'window-a', document: MAP_A, marker: [ step.id ] });
+      target.applyRemote({ type: 'saved', origin: 'window-a', document: MAP_A, marker: [ step.id ], content: fileOf(source, MAP_A) as unknown as JsonValue });
       source.forgetStep(step.id);
 
       // Assert.
@@ -2584,6 +3135,843 @@ describe('DocumentHub', () =>
       // Assert.
       expect([ target.version(MAP_A), target.history(mapHistoryKey(1)).rows.length, target.has(MAP_B) ])
         .toStrictEqual([ 2, 1, false ]);
+    });
+  });
+
+  /*
+   * A document kept alongside others, such as the record of where blueprints are placed, is state saved a part at a
+   * time with the documents it describes. It moves with their steps like any document, but it never reads as unsaved
+   * and is never saved whole, a change to its file is handed on rather than taken or flagged, it is never flagged at
+   * all, and another window's step goes into it whenever its patches fit, whatever its head.
+   */
+  describe('documents kept alongside others', () =>
+  {
+    const USES: DocumentKey = 'editor-data:blueprint-uses';
+
+    /**
+     * A hub holding both fixture maps and an empty record of placements.
+     * @param {DocumentStore} store Optional store.
+     * @param {string} clientId The window's id.
+     * @returns {DocumentHub} The hub.
+     */
+    const buildRecordHub = (store?: DocumentStore, clientId = 'window-a'): DocumentHub =>
+    {
+      const hub = buildHub(store, clientId);
+      hub.adopt(USES, { schemaVersion: 2, data: { maps: {} } });
+      return hub;
+    };
+
+    /**
+     * Paints map 1 or 2 and records a placement on it in the same step, as placing a blueprint does.
+     * @param {DocumentHub} hub The hub.
+     * @param {1 | 2} mapId The map.
+     * @param {number} x The placement's column.
+     * @returns {HistoryStep} The step.
+     */
+    const place = (hub: DocumentHub, mapId: 1 | 2, x: number): HistoryStep => hub.edit('Place', [ mapHistoryKey(mapId) ], tx =>
+    {
+      tx.set(`map:${mapId}`, [ 'note' ], `placed at ${x}`);
+      tx.set(USES, [ 'data', 'maps', String(mapId) ], { aa22: [ { x, y: 0 } ] });
+    }) as HistoryStep;
+
+    it('never reads as unsaved, while the map its step changed does', () =>
+    {
+      // Arrange.
+      const hub = buildRecordHub();
+
+      // Act.
+      place(hub, 1, 3);
+
+      // Assert.
+      expect([ hub.isDirty(USES), hub.isDirty(MAP_A), hub.dirtyKeys() ])
+        .toStrictEqual([ false, true, [ MAP_A ] ]);
+    });
+
+    it('keeps no copy of its file, its keeper writing that a part at a time, and hands none to another window', () =>
+    {
+      // Arrange.
+      const hub = buildRecordHub();
+      place(hub, 1, 3);
+
+      // Act.
+      const snapshot = hub.snapshot(USES);
+
+      // Assert: the map beside it keeps the file it was loaded from.
+      expect([ hub.fileContent(USES), 'file' in snapshot, hub.fileContent(MAP_A) ])
+        .toStrictEqual([ null, false, buildMapJson() ]);
+    });
+
+    it('refuses to be saved whole, writing nothing', async () =>
+    {
+      // Arrange.
+      const { store, saves } = buildStore();
+      const hub = buildRecordHub(store);
+      place(hub, 1, 3);
+
+      // Act.
+      const save = hub.save(USES);
+
+      // Assert.
+      await expect(save)
+        .rejects.toThrow('editor-data:blueprint-uses is kept alongside the documents it describes, and is never saved whole');
+      expect(saves)
+        .toStrictEqual([]);
+    });
+
+    it('hands a change to its file on as it was read, taking nothing and flagging nothing', () =>
+    {
+      // Arrange: a placement here the file lacks, then the file changed elsewhere, and then removed.
+      const hub = buildRecordHub();
+      place(hub, 1, 3);
+      const before = hub.document(USES).toJson();
+      const events: HubEvent[] = [];
+      hub.subscribe(event => events.push(event));
+      const changed = { schemaVersion: 2, data: { maps: { 2: { bb11: [ { x: 0, y: 0 } ] } } } };
+
+      // Act.
+      const results = [ hub.applyOutsideContent(USES, changed), hub.applyOutsideContent(USES, null, true) ];
+
+      // Assert.
+      expect([ results, events, hub.document(USES).toJson(), hub.isConflicted(USES) ])
+        .toStrictEqual([
+          [ 'kept', 'kept' ],
+          [
+            { type: 'outside', document: USES, content: changed, recheck: false },
+            { type: 'outside', document: USES, content: null, recheck: true },
+          ],
+          before,
+          false,
+        ]);
+    });
+
+    it('is never flagged in conflict, while any other document is', () =>
+    {
+      // Arrange.
+      const hub = buildRecordHub();
+
+      // Act.
+      hub.flagConflict(USES, { kind: 'disk', content: null });
+      hub.flagConflict(MAP_A, { kind: 'disk', content: null });
+
+      // Assert.
+      expect([ hub.isConflicted(USES), hub.isConflicted(MAP_A) ])
+        .toStrictEqual([ false, true ]);
+    });
+
+    it('takes steps made on different parts at the same moment in two windows in both, in either order', () =>
+    {
+      // Arrange: each window places on its own map before hearing the other.
+      const windowA = buildRecordHub(undefined, 'window-a');
+      const windowB = buildRecordHub(undefined, 'window-b');
+      const fromA: RemoteOperation[] = [];
+      const fromB: RemoteOperation[] = [];
+      windowA.subscribe(event => fromA.push(operationFor(event, 'window-a') as RemoteOperation));
+      windowB.subscribe(event => fromB.push(operationFor(event, 'window-b') as RemoteOperation));
+      place(windowA, 1, 3);
+      place(windowB, 2, 5);
+      const events: HubEvent[] = [];
+      windowA.subscribe(event => events.push(event));
+      windowB.subscribe(event => events.push(event));
+
+      // Act.
+      windowA.applyRemote(structuredClone(fromB[0]));
+      windowB.applyRemote(structuredClone(fromA[0]));
+
+      // Assert: both placements in both windows, each map's own step in its own history, and nothing out of step.
+      const expected = { schemaVersion: 2, data: { maps: { 1: { aa22: [ { x: 3, y: 0 } ] }, 2: { aa22: [ { x: 5, y: 0 } ] } } } };
+      expect([
+        windowA.document(USES).toJson(),
+        windowB.document(USES).toJson(),
+        fileOf(windowA, MAP_B).note,
+        events.map(event => event.type),
+      ])
+        .toStrictEqual([ expected, expected, 'placed at 5', [ 'committed', 'committed' ] ]);
+    });
+
+    it('refuses another window\'s step whose patch on it does not fit, changing nothing anywhere', () =>
+    {
+      // Arrange: both windows place on map 1 before hearing each other.
+      const windowA = buildRecordHub(undefined, 'window-a');
+      const windowB = buildRecordHub(undefined, 'window-b');
+      const fromB: RemoteOperation[] = [];
+      windowB.subscribe(event => fromB.push(operationFor(event, 'window-b') as RemoteOperation));
+      place(windowA, 1, 3);
+      place(windowB, 1, 5);
+      const before = [ windowA.document(USES).toJson(), fileOf(windowA, MAP_A) ];
+      const events: HubEvent[] = [];
+      windowA.subscribe(event => events.push(event));
+
+      // Act.
+      windowA.applyRemote(structuredClone(fromB[0]));
+
+      // Assert.
+      expect([ [ windowA.document(USES).toJson(), fileOf(windowA, MAP_A) ], events ])
+        .toStrictEqual([ before, [ { type: 'out-of-sync', documents: [ MAP_A, USES ], origin: 'window-b' } ] ]);
+    });
+
+    it('still holds every other document to its head', () =>
+    {
+      // Arrange: map 1 moved on in this window alone, then another window's step on map 1 and the record.
+      const windowA = buildRecordHub(undefined, 'window-a');
+      const windowB = buildRecordHub(undefined, 'window-b');
+      const fromB: RemoteOperation[] = [];
+      windowB.subscribe(event => fromB.push(operationFor(event, 'window-b') as RemoteOperation));
+      windowA.edit('Rename', [ mapHistoryKey(1) ], tx => tx.set(MAP_A, [ 'displayName' ], 'Harbor'));
+      place(windowB, 1, 5);
+      const events: HubEvent[] = [];
+      windowA.subscribe(event => events.push(event));
+
+      // Act.
+      windowA.applyRemote(structuredClone(fromB[0]));
+
+      // Assert.
+      expect([ windowA.document(USES).toJson(), events ])
+        .toStrictEqual([ { schemaVersion: 2, data: { maps: {} } }, [ { type: 'out-of-sync', documents: [ MAP_A, USES ], origin: 'window-b' } ] ]);
+    });
+  });
+
+  /*
+   * A save names the window that wrote the file, so whoever writes what goes with that file knows whether that window
+   * wrote it already; and the steps a document holds, and those its file holds, can be read.
+   */
+  describe('saves and the steps behind them', () =>
+  {
+    it('names this window for its own save, and the saving window for another window\'s, each with what the file holds', async () =>
+    {
+      // Arrange.
+      const { store } = buildStore();
+      const hub = buildHub(store);
+      const step = hub.edit('Rename', [ mapHistoryKey(1) ], tx => tx.set(MAP_A, [ 'displayName' ], 'Harbor')) as HistoryStep;
+      const renamed = fileOf(hub, MAP_A) as unknown as JsonValue;
+      const events: HubEvent[] = [];
+      hub.subscribe(event => events.push(event));
+
+      // Act.
+      await hub.save(MAP_A);
+      hub.applyRemote({ type: 'saved', origin: 'window-b', document: MAP_A, marker: [ step.id ], content: renamed });
+
+      // Assert.
+      expect(events)
+        .toStrictEqual([
+          { type: 'saved', document: MAP_A, marker: [ step.id ], source: 'local', origin: 'window-a', content: renamed },
+          { type: 'saved', document: MAP_A, marker: [ step.id ], source: 'remote', origin: 'window-b', content: renamed },
+        ]);
+    });
+
+    it('reads as saved against what another window saved, whatever its own steps say', () =>
+    {
+      // Arrange: map 1 renamed here, then another window says it saved a retitle of the map this window has not seen.
+      const hub = buildHub();
+      const step = hub.edit('Rename', [ mapHistoryKey(1) ], tx => tx.set(MAP_A, [ 'displayName' ], 'Harbor')) as HistoryStep;
+      const retitled = { ...buildMapJson(), displayName: 'Harbor', note: 'retitled elsewhere' } as unknown as JsonValue;
+      const events: HubEvent[] = [];
+      hub.subscribe(event => events.push(event));
+
+      // Act: one save names only the rename; one names a step never seen here.
+      hub.applyRemote({ type: 'saved', origin: 'window-b', document: MAP_A, marker: [ step.id ], content: retitled });
+      const afterKnown = hub.isDirty(MAP_A);
+      hub.applyRemote({ type: 'saved', origin: 'window-b', document: MAP_A, marker: [ 'window-b#9' ], content: buildMapJson() as unknown as JsonValue });
+
+      // Assert: unsaved against a file holding the retitle the map lacks, though the save named every step the map holds,
+      // and unsaved still against the next; the step never seen is announced, and its steps are not taken.
+      expect([ afterKnown, hub.isDirty(MAP_A), hub.savedSteps(MAP_A), events.map(event => event.type) ])
+        .toStrictEqual([ true, true, [ step.id ], [ 'saved', 'out-of-sync' ] ]);
+    });
+
+    it('takes another window\'s word of a file it wrote otherwise than by saving, telling every listener, and ignores a document it does not hold', () =>
+    {
+      // Arrange: map 1 renamed here, and not saved.
+      const hub = buildHub();
+      hub.edit('Rename', [ mapHistoryKey(1) ], tx => tx.set(MAP_A, [ 'displayName' ], 'Harbor'));
+      const renamed = fileOf(hub, MAP_A) as unknown as JsonValue;
+      const events: HubEvent[] = [];
+      hub.subscribe(event => events.push(event));
+
+      // Act.
+      hub.applyRemote({ type: 'written', origin: 'window-b', document: MAP_A, content: renamed });
+      hub.applyRemote({ type: 'written', origin: 'window-b', document: 'map:40', content: renamed });
+
+      // Assert.
+      expect([ hub.isDirty(MAP_A), hub.fileContent(MAP_A), events ])
+        .toStrictEqual([ false, renamed, [ { type: 'written', document: MAP_A, content: renamed, source: 'remote', origin: 'window-b' } ] ]);
+    });
+
+    it('finds a step a held history lists, done or undone, and nothing for one no history lists any more', () =>
+    {
+      // Arrange: a rename done, one undone, and one forgotten.
+      const hub = buildHub();
+      const done = hub.edit('Rename', [ mapHistoryKey(1) ], tx => tx.set(MAP_A, [ 'displayName' ], 'Harbor')) as HistoryStep;
+      const forgotten = hub.edit('Retitle', [ mapHistoryKey(2) ], tx => tx.set(MAP_B, [ 'displayName' ], 'Cave')) as HistoryStep;
+      hub.forgetStep(forgotten.id);
+      const undone = hub.edit('Note', [ mapHistoryKey(1) ], tx => tx.set(MAP_A, [ 'note' ], 'undone')) as HistoryStep;
+      hub.undo(mapHistoryKey(1));
+
+      // Act.
+      const found = [ done, undone, forgotten ].map(step => hub.knownStep(step.id));
+
+      // Assert.
+      expect(found)
+        .toStrictEqual([ done, undone, null ]);
+    });
+
+    it('lists the steps a document holds and those its file holds, and none for a document not held', async () =>
+    {
+      // Arrange: a saved rename, an unsaved one, and one undone.
+      const { store } = buildStore();
+      const hub = buildHub(store);
+      const saved = hub.edit('Rename', [ mapHistoryKey(1) ], tx => tx.set(MAP_A, [ 'displayName' ], 'Harbor')) as HistoryStep;
+      await hub.save(MAP_A);
+      const unsaved = hub.edit('Retitle', [ mapHistoryKey(1) ], tx => tx.set(MAP_A, [ 'note' ], 'unsaved')) as HistoryStep;
+      hub.edit('Undone', [ mapHistoryKey(1) ], tx => tx.set(MAP_A, [ 'note' ], 'undone'));
+      hub.undo(mapHistoryKey(1));
+
+      // Act.
+      const lists = [ hub.appliedSteps(MAP_A).map(step => step.id), hub.savedSteps(MAP_A), hub.appliedSteps('map:9'), hub.savedSteps('map:9') ];
+
+      // Assert.
+      expect(lists)
+        .toStrictEqual([ [ saved.id, unsaved.id ], [ saved.id ], [], [] ]);
+    });
+  });
+
+  /*
+   * A blueprint's change reaches every copy of it as one step, so a check looking an edit over can name more histories
+   * for it, write patches through to maps no window holds, which reach their files alone, and say what the files of maps
+   * held with unsaved edits take instead of the maps' own patches. A step writing a document through moves without that
+   * document being held anywhere; a window holding one changes it in place; and a document opened from a file such a
+   * step wrote takes the step up, so undo reaches it from there too, but only while its file holds exactly what the step
+   * left. Getting any of this wrong would leave a blueprint's undo stuck, or put a map's file out of step with its copy.
+   */
+  describe('documents written through, and files that differ from their documents', () =>
+  {
+    const MAP_UNHELD: DocumentKey = 'map:9';
+
+    /**
+     * A patch renaming a map from the fixture's name, as one against an unheld map's file would be made.
+     * @param {string} name The new name.
+     * @returns {import('../../../../src/mapEditor/core/model/patches.ts').Patch} The patch.
+     */
+    const renameFile = (name: string) => ({ kind: 'set' as const, path: [ 'displayName' ], before: 'Test Town', after: name });
+
+    /**
+     * A check that, with every edit renaming map 1, writes the same rename through to map 9 and joins map 9's history.
+     * @returns {CommitCheck} The check.
+     */
+    const writesMapNine = (): CommitCheck => transaction =>
+    {
+      if (transaction.entries.some(entry => entry.document === MAP_A))
+      {
+        transaction.writeThrough(MAP_UNHELD, renameFile('Harbor'));
+        transaction.join([ mapHistoryKey(9) ]);
+      }
+
+      return null;
+    };
+
+    it('joins a check\'s histories to the step, each once, so it undoes from any of them', () =>
+    {
+      // Arrange: a check joining map 2's history, and naming map 1's again, to every rename of map 1.
+      const hub = buildHub();
+      hub.addCommitCheck(transaction =>
+      {
+        transaction.set(MAP_B, [ 'displayName' ], 'Harbor too');
+        transaction.join([ mapHistoryKey(2), mapHistoryKey(1) ]);
+        return null;
+      });
+      const step = hub.edit('Rename', [ mapHistoryKey(1) ], tx => tx.set(MAP_A, [ 'displayName' ], 'Harbor')) as HistoryStep;
+
+      // Act.
+      const undone = hub.undo(mapHistoryKey(2));
+
+      // Assert: the other map's event history never had it.
+      expect([ step.histories, undone.ok, fileOf(hub, MAP_A).displayName, fileOf(hub, MAP_B).displayName, hub.history(eventHistoryKey(2, 3)).rows ])
+        .toStrictEqual([ [ 'map:1', 'map:2' ], true, 'Test Town', 'Test Town', [] ]);
+    });
+
+    it('refuses a joined history living on a document neither held nor written through, putting the edit back', () =>
+    {
+      // Arrange.
+      const hub = buildHub();
+      hub.addCommitCheck(transaction =>
+      {
+        transaction.join([ mapHistoryKey(9) ]);
+        return null;
+      });
+
+      // Act.
+      const run = () => hub.edit('Rename', [ mapHistoryKey(1) ], tx => tx.set(MAP_A, [ 'displayName' ], 'Harbor'));
+
+      // Assert.
+      expect(run)
+        .toThrow('open map:9 before recording history on it');
+      expect([ fileOf(hub, MAP_A).displayName, hub.history(mapHistoryKey(1)).rows ])
+        .toStrictEqual([ 'Test Town', [] ]);
+    });
+
+    it('carries a patch written through in the step, changing nothing held, and moves it with that document held nowhere', () =>
+    {
+      // Arrange.
+      const hub = buildHub();
+      hub.addCommitCheck(writesMapNine());
+      const step = hub.edit('Rename', [ mapHistoryKey(1) ], tx => tx.set(MAP_A, [ 'displayName' ], 'Harbor')) as HistoryStep;
+      const made = [ step.through, step.entries.map(entry => entry.document), step.histories, hub.has(MAP_UNHELD) ];
+
+      // Act.
+      const undone = hub.undo(mapHistoryKey(1));
+      const afterUndo = fileOf(hub, MAP_A).displayName;
+      const redone = hub.redo(mapHistoryKey(1));
+
+      // Assert.
+      expect([ made, undone.ok, afterUndo, redone.ok, fileOf(hub, MAP_A).displayName ])
+        .toStrictEqual([ [ [ 'map:9' ], [ 'map:1', 'map:9' ], [ 'map:1', 'map:9' ], false ], true, 'Test Town', true, 'Harbor' ]);
+    });
+
+    it('still asks for a document a step changed in place and no longer finds held', () =>
+    {
+      // Arrange: a step across both maps, then map 2 let go of.
+      const hub = buildHub();
+      hub.edit('Rename both', [ mapHistoryKey(1), mapHistoryKey(2) ], tx =>
+      {
+        tx.set(MAP_A, [ 'displayName' ], 'Harbor');
+        tx.set(MAP_B, [ 'displayName' ], 'Harbor too');
+      });
+      hub.release(MAP_B);
+
+      // Act.
+      const undone = hub.undo(mapHistoryKey(1));
+
+      // Assert.
+      expect(undone)
+        .toMatchObject({ ok: false, reason: 'missing-documents', documents: [ MAP_B ] });
+    });
+
+    it('refuses to write through a document the window holds, and skips a patch that changes nothing', () =>
+    {
+      // Arrange.
+      const hub = buildHub();
+      const seen: unknown[] = [];
+      hub.addCommitCheck(transaction =>
+      {
+        transaction.writeThrough(MAP_UNHELD, renameFile('Test Town'));
+        seen.push(transaction.through);
+        try
+        {
+          transaction.writeThrough(MAP_B, renameFile('Harbor'));
+        }
+        catch (error)
+        {
+          seen.push((error as Error).message);
+        }
+
+        return null;
+      });
+
+      // Act.
+      const step = hub.edit('Rename', [ mapHistoryKey(1) ], tx => tx.set(MAP_A, [ 'displayName' ], 'Harbor')) as HistoryStep;
+
+      // Assert: the step keeps its exact shape, with nothing written through.
+      expect([ seen, step.entries.map(entry => entry.document), 'through' in step ])
+        .toStrictEqual([ [ [], 'map:2 is held here, so it changes in place' ], [ 'map:1' ], false ]);
+    });
+
+    it('puts back only what it applied when an edit writing through is refused', () =>
+    {
+      // Arrange: a later check refusing what the first wrote through.
+      const hub = buildHub();
+      hub.addCommitCheck(writesMapNine());
+      hub.addCommitCheck(transaction => (transaction.through.length > 0 ? 'not today' : null));
+
+      // Act.
+      const step = hub.edit('Rename', [ mapHistoryKey(1) ], tx => tx.set(MAP_A, [ 'displayName' ], 'Harbor'));
+
+      // Assert.
+      expect([ step, fileOf(hub, MAP_A).displayName, hub.history(mapHistoryKey(1)).rows ])
+        .toStrictEqual([ null, 'Test Town', [] ]);
+    });
+
+    it('carries what the files of held documents take in place of their patches, none included, gathered by document', () =>
+    {
+      // Arrange: map 1's file takes two patches given apart, one changing nothing, and map 2's takes none.
+      const hub = buildHub();
+      hub.addCommitCheck(transaction =>
+      {
+        transaction.fileVersion(MAP_A, [ renameFile('On disk') ]);
+        transaction.fileVersion(MAP_B, []);
+        transaction.fileVersion(MAP_A, [ renameFile('Test Town'), { kind: 'set', path: [ 'note' ], before: '', after: 'disk' } ]);
+        return null;
+      });
+
+      // Act.
+      const step = hub.edit('Rename', [ mapHistoryKey(1) ], tx => tx.set(MAP_A, [ 'displayName' ], 'Harbor')) as HistoryStep;
+
+      // Assert: the documents themselves took only the edit.
+      expect([ step.fileVersions, fileOf(hub, MAP_A).displayName, fileOf(hub, MAP_A).note ])
+        .toStrictEqual([
+          [
+            { document: MAP_A, patches: [ renameFile('On disk'), { kind: 'set', path: [ 'note' ], before: '', after: 'disk' } ] },
+            { document: MAP_B, patches: [] },
+          ],
+          'Harbor',
+          '',
+        ]);
+    });
+
+    it('refuses a file version for a document the window does not hold', () =>
+    {
+      // Arrange.
+      const hub = buildHub();
+      hub.addCommitCheck(transaction =>
+      {
+        transaction.fileVersion(MAP_UNHELD, []);
+        return null;
+      });
+
+      // Act.
+      const run = () => hub.edit('Rename', [ mapHistoryKey(1) ], tx => tx.set(MAP_A, [ 'displayName' ], 'Harbor'));
+
+      // Assert.
+      expect(run)
+        .toThrow('map:9 is not held here, so its file takes what is written through');
+    });
+
+    it('applies a step written through to a document another window opened from its file, whatever its head', () =>
+    {
+      // Arrange: the second window holds map 9 as the file has it, at a head the first never saw.
+      const first = buildHub(undefined, 'window-a');
+      first.addCommitCheck(writesMapNine());
+      const second = buildHub(undefined, 'window-b');
+      second.adopt(MAP_UNHELD, buildMapJson() as unknown as JsonValue);
+      mirror(first, second);
+
+      // Act.
+      first.edit('Rename', [ mapHistoryKey(1) ], tx => tx.set(MAP_A, [ 'displayName' ], 'Harbor'));
+      first.undo(mapHistoryKey(1));
+      const afterUndo = fileOf(second, MAP_UNHELD).displayName;
+      first.redo(mapHistoryKey(1));
+
+      // Assert.
+      expect([ afterUndo, fileOf(second, MAP_UNHELD).displayName, second.history(mapHistoryKey(9)).rows.map(row => [ row.label, row.done ]) ])
+        .toStrictEqual([ 'Test Town', 'Harbor', [ [ 'Rename', true ] ] ]);
+    });
+
+    it('still reports a document written through whose copy elsewhere the step does not fit', () =>
+    {
+      // Arrange: the second window's map 9 renamed already.
+      const first = buildHub(undefined, 'window-a');
+      first.addCommitCheck(writesMapNine());
+      const second = buildHub(undefined, 'window-b');
+      second.adopt(MAP_UNHELD, { ...buildMapJson(), displayName: 'Elsewhere' } as unknown as JsonValue);
+      const events: HubEvent[] = [];
+      second.subscribe(event => (event.type === 'out-of-sync' ? events.push(event) : undefined));
+      mirror(first, second);
+
+      // Act.
+      first.edit('Rename', [ mapHistoryKey(1) ], tx => tx.set(MAP_A, [ 'displayName' ], 'Harbor'));
+
+      // Assert.
+      expect([ fileOf(second, MAP_A).displayName, events.map(event => event.type === 'out-of-sync' ? event.documents : []) ])
+        .toStrictEqual([ 'Test Town', [ [ MAP_A, MAP_UNHELD ] ] ]);
+    });
+
+    it('takes up the steps a document\'s file holds when it is opened, saved, in its own history, and undoes them there', () =>
+    {
+      // Arrange: map 9 opened from the file the step wrote.
+      const hub = buildHub();
+      hub.addCommitCheck(writesMapNine());
+      const step = hub.edit('Rename', [ mapHistoryKey(1) ], tx => tx.set(MAP_A, [ 'displayName' ], 'Harbor')) as HistoryStep;
+      hub.adopt(MAP_UNHELD, { ...buildMapJson(), displayName: 'Harbor' } as unknown as JsonValue);
+      const events: HubEvent[] = [];
+      hub.subscribe(event => events.push(event));
+
+      // Act.
+      const taken = hub.attachSteps(MAP_UNHELD, [ step ]);
+      const state = [ hub.appliedSteps(MAP_UNHELD).map(each => each.id), hub.savedSteps(MAP_UNHELD), hub.isDirty(MAP_UNHELD), hub.history(mapHistoryKey(9)).rows.map(row => row.label) ];
+      const undone = hub.undo(mapHistoryKey(9));
+
+      // Assert.
+      expect([ taken, state, events[0], undone.ok, fileOf(hub, MAP_UNHELD).displayName, fileOf(hub, MAP_A).displayName ])
+        .toStrictEqual([
+          true,
+          [ [ step.id ], [ step.id ], false, [ 'Rename' ] ],
+          { type: 'attached', document: MAP_UNHELD, stepIds: [ step.id ] },
+          true,
+          'Test Town',
+          'Test Town',
+        ]);
+    });
+
+    it('takes up nothing from a file that no longer holds what the step left there, and the step is then untracked there', () =>
+    {
+      // Arrange: map 9's file renamed again after the step.
+      const hub = buildHub();
+      hub.addCommitCheck(writesMapNine());
+      const step = hub.edit('Rename', [ mapHistoryKey(1) ], tx => tx.set(MAP_A, [ 'displayName' ], 'Harbor')) as HistoryStep;
+      hub.adopt(MAP_UNHELD, { ...buildMapJson(), displayName: 'Renamed in MZ' } as unknown as JsonValue);
+
+      // Act.
+      const taken = hub.attachSteps(MAP_UNHELD, [ step ]);
+      const undone = hub.undo(mapHistoryKey(1));
+
+      // Assert.
+      expect([ taken, hub.appliedSteps(MAP_UNHELD), hub.history(mapHistoryKey(9)).rows, undone ])
+        .toStrictEqual([ false, [], [], expect.objectContaining({ ok: false, reason: 'untracked' }) ]);
+    });
+
+    it('takes up nothing for a step undone since, a document already holding steps, or no steps at all', () =>
+    {
+      // Arrange: one step undone, and map 1 holding steps of its own.
+      const hub = buildHub();
+      hub.addCommitCheck(writesMapNine());
+      const step = hub.edit('Rename', [ mapHistoryKey(1) ], tx => tx.set(MAP_A, [ 'displayName' ], 'Harbor')) as HistoryStep;
+      hub.undo(mapHistoryKey(1));
+      hub.adopt(MAP_UNHELD, buildMapJson() as unknown as JsonValue);
+      const other = hub.edit('Note', [ mapHistoryKey(2) ], tx => tx.set(MAP_B, [ 'note' ], 'kept')) as HistoryStep;
+
+      // Act.
+      const answers = [ hub.attachSteps(MAP_UNHELD, [ step ]), hub.attachSteps(MAP_B, [ other ]), hub.attachSteps(MAP_UNHELD, []), hub.attachSteps('map:8', [ other ]) ];
+
+      // Assert.
+      expect([ answers, hub.appliedSteps(MAP_UNHELD) ])
+        .toStrictEqual([ [ false, false, false, false ], [] ]);
+    });
+
+    it('notes what a file written otherwise holds, the map reading saved exactly when it holds that, telling every listener', () =>
+    {
+      // Arrange: two steps on map 1; the file comes to hold the first alone, as a write of it elsewhere would leave it.
+      const hub = buildHub();
+      hub.edit('Rename', [ mapHistoryKey(1) ], tx => tx.set(MAP_A, [ 'displayName' ], 'Harbor'));
+      const first = fileOf(hub, MAP_A) as unknown as JsonValue;
+      hub.edit('Note', [ mapHistoryKey(1) ], tx => tx.set(MAP_A, [ 'note' ], 'later'));
+      const events: HubEvent[] = [];
+      hub.subscribe(event => events.push(event));
+
+      // Act.
+      hub.noteWritten(MAP_A, first);
+      const dirtyAfterFirst = hub.isDirty(MAP_A);
+      hub.undo(mapHistoryKey(1));
+
+      // Assert: back at what the file holds, the map reads as saved, though no save ever named its steps.
+      expect([ dirtyAfterFirst, hub.isDirty(MAP_A), hub.savedSteps(MAP_A), events[0] ])
+        .toStrictEqual([ true, false, [], { type: 'written', document: MAP_A, content: first, source: 'local', origin: 'window-a' } ]);
+    });
+
+    it('notes nothing for a document not held, and refuses one kept alongside others', () =>
+    {
+      // Arrange.
+      const hub = buildHub();
+      hub.adopt('editor-data:blueprint-uses', { schemaVersion: 2, data: { maps: {} } });
+      const events: HubEvent[] = [];
+      hub.subscribe(event => events.push(event));
+
+      // Act.
+      hub.noteWritten(MAP_UNHELD, buildMapJson() as unknown as JsonValue);
+      hub.notePatched(MAP_UNHELD, [ renameFile('Harbor') ]);
+      const run = () => hub.noteWritten('editor-data:blueprint-uses', { schemaVersion: 2, data: { maps: {} } });
+
+      // Assert.
+      expect(run)
+        .toThrow('editor-data:blueprint-uses is kept alongside the documents it describes, and is never written whole');
+      expect(events)
+        .toStrictEqual([]);
+    });
+
+    it('notes a file taking patches onto what the window knew it held, apart from the map\'s unsaved edits', () =>
+    {
+      // Arrange: map 1 retitled by hand, unsaved; then its file takes a rename the map never had, as a blueprint's change
+      // written to it at once would.
+      const hub = buildHub();
+      hub.edit('Retitle', [ mapHistoryKey(1) ], tx => tx.set(MAP_A, [ 'note' ], 'by hand'));
+      const events: HubEvent[] = [];
+      hub.subscribe(event => events.push(event));
+
+      // Act: the patches noted, then the retitle undone and the map renamed to match.
+      hub.notePatched(MAP_A, [ renameFile('Harbor') ]);
+      const afterPatch = [ hub.isDirty(MAP_A), (hub.fileContent(MAP_A) as unknown as RmmzMap).displayName, (hub.fileContent(MAP_A) as unknown as RmmzMap).note ];
+      hub.undo(mapHistoryKey(1));
+      hub.edit('Rename', [ mapHistoryKey(1) ], tx => tx.set(MAP_A, [ 'displayName' ], 'Harbor'));
+
+      // Assert: the file holds the rename and none of the retitle; the map, holding just the rename once the retitle is
+      // undone, reads as saved.
+      expect([ afterPatch, fileOf(hub, MAP_A).note, hub.isDirty(MAP_A), events[0] ])
+        .toStrictEqual([
+          [ true, 'Harbor', '' ],
+          '',
+          false,
+          { type: 'written', document: MAP_A, content: hub.fileContent(MAP_A), source: 'local', origin: 'window-a' },
+        ]);
+    });
+
+    it('reads a file again when patches it took do not fit what the window knew, unsaved until the read lands', async () =>
+    {
+      // Arrange: the file on disk renamed behind the window's back; then a patch reaches it that assumed the rename.
+      const { store, files } = buildStore();
+      const hub = buildHub(store);
+      const onDisk = { ...buildMapJson(), displayName: 'Harbor', note: 'took it' } as unknown as JsonValue;
+      files.set(MAP_A, onDisk);
+      const events: HubEvent[] = [];
+      hub.subscribe(event => events.push(event));
+
+      // Act.
+      hub.notePatched(MAP_A, [ { kind: 'set', path: [ 'note' ], before: 'renamed', after: 'took it' } ]);
+      const meanwhile = [ hub.fileContent(MAP_A), hub.isDirty(MAP_A) ];
+      await Promise.resolve();
+      await Promise.resolve();
+
+      // Assert: not known until the read lands, then what the disk holds.
+      expect([ meanwhile, hub.fileContent(MAP_A), hub.isDirty(MAP_A), events.map(event => event.type) ])
+        .toStrictEqual([ [ null, true ], onDisk, true, [ 'written' ] ]);
+    });
+
+    it('keeps a file unknown without a store to read it again from', () =>
+    {
+      // Arrange.
+      const hub = buildHub();
+
+      // Act: two renames from the fixture's name, of which the second no longer fits.
+      hub.notePatched(MAP_A, [ renameFile('Elsewhere'), renameFile('Elsewhere') ]);
+
+      // Assert.
+      expect([ hub.fileContent(MAP_A), hub.isDirty(MAP_A) ])
+        .toStrictEqual([ null, true ]);
+    });
+
+    /**
+     * A store over the fixture's files whose reads fail for a while, as a file held open elsewhere for a moment, or a
+     * server busy for one, makes them, counting every read of each document.
+     * @param {number} failing How many reads fail before they go through.
+     * @returns {{ store: DocumentStore, files: Map<DocumentKey, JsonValue>, reads: Map<DocumentKey, number> }} The store,
+     * its files and its reads.
+     */
+    const buildFlakyStore = (failing: number) =>
+    {
+      const { store, files } = buildStore();
+      const reads = new Map<DocumentKey, number>();
+      let left = failing;
+      const flaky: DocumentStore = {
+        load: key =>
+        {
+          reads.set(key, (reads.get(key) ?? 0) + 1);
+          left -= 1;
+          return left >= 0
+            ? Promise.reject(new Error('the file is busy'))
+            : store.load(key);
+        },
+        save: store.save,
+      };
+
+      return { store: flaky, files, reads };
+    };
+
+    /**
+     * A patch a file takes that assumed something the window never knew the file held, so the file is read again.
+     * @returns {Patch} The patch.
+     */
+    const unforeseenPatch = (): Patch => ({ kind: 'set', path: [ 'note' ], before: 'renamed', after: 'took it' });
+
+    it('tries a failed read of a file again a while later, each wait twice the last, the map reading as saved once the file can be read', async () =>
+    {
+      // Arrange: map 1 holds just what its file does; its first two reads fail.
+      vi.useFakeTimers();
+      try
+      {
+        const { store, reads } = buildFlakyStore(2);
+        const hub = buildHub(store);
+        hub.notePatched(MAP_A, [ unforeseenPatch() ]);
+        const seen: [ number, boolean ][] = [];
+
+        // Act: just short of each wait, and at it.
+        for (const wait of [ 999, 1, 1999, 1 ])
+        {
+          await vi.advanceTimersByTimeAsync(wait);
+          seen.push([ reads.get(MAP_A) ?? 0, hub.isDirty(MAP_A) ]);
+        }
+
+        // Assert: read again at a second and three seconds, unsaved until the third read landed, saved after.
+        expect([ seen, hub.fileContent(MAP_A) ])
+          .toStrictEqual([ [ [ 1, true ], [ 2, true ], [ 2, true ], [ 3, false ] ], buildMapJson() ]);
+      }
+      finally
+      {
+        vi.useRealTimers();
+      }
+    });
+
+    it('stops trying a failed read of a file once something newer is learnt of it, or its map is let go of', async () =>
+    {
+      // Arrange: three maps whose files are read again, every read failing; map 3 is left alone, so it shows the reads
+      // going on.
+      vi.useFakeTimers();
+      try
+      {
+        const { store, reads } = buildFlakyStore(Number.POSITIVE_INFINITY);
+        const hub = buildHub(store);
+        hub.adopt('map:3', buildMapJson() as unknown as JsonValue);
+        [ MAP_A, MAP_B, 'map:3' as DocumentKey ].forEach(key => hub.notePatched(key, [ unforeseenPatch() ]));
+        await vi.advanceTimersByTimeAsync(0);
+
+        // Act: map 1 saved, its file learnt from what the save wrote; map 2 let go of.
+        await hub.save(MAP_A);
+        hub.release(MAP_B);
+        await vi.advanceTimersByTimeAsync(60_000);
+
+        // Assert.
+        expect([ reads.get(MAP_A), reads.get(MAP_B), (reads.get('map:3') ?? 0) > 1, hub.isDirty(MAP_A) ])
+          .toStrictEqual([ 1, 1, true, false ]);
+      }
+      finally
+      {
+        vi.useRealTimers();
+      }
+    });
+
+    it('takes no read of a file that lands after something newer was learnt about it', async () =>
+    {
+      // Arrange: a store whose reads hand back the file as it stood when asked, but only once let go.
+      const files = new Map<DocumentKey, JsonValue>([ [ MAP_A, buildMapJson() as unknown as JsonValue ] ]);
+      let letGo = () => undefined as void;
+      const gate = new Promise<void>(resolve =>
+      {
+        letGo = resolve;
+      });
+      const store: DocumentStore = {
+        load: key =>
+        {
+          const content = structuredClone(files.get(key) as JsonValue);
+          return gate.then(() => content);
+        },
+        save: async (key, content) =>
+        {
+          files.set(key, structuredClone(content));
+        },
+      };
+      const hub = buildHub(store);
+      hub.edit('Rename', [ mapHistoryKey(1) ], tx => tx.set(MAP_A, [ 'displayName' ], 'Harbor'));
+
+      // Act: a patch that does not fit starts a read; a save lands before the read does.
+      hub.notePatched(MAP_A, [ { kind: 'set', path: [ 'note' ], before: 'renamed', after: 'took it' } ]);
+      await hub.save(MAP_A);
+      letGo();
+      await gate;
+      await Promise.resolve();
+
+      // Assert: the file holds what the save wrote, not the older read.
+      expect([ (hub.fileContent(MAP_A) as unknown as RmmzMap).displayName, hub.isDirty(MAP_A) ])
+        .toStrictEqual([ 'Harbor', false ]);
+    });
+
+    it('reads a document\'s committed content, an edit still open left out', () =>
+    {
+      // Arrange: a stroke still open on map 1.
+      const hub = buildHub();
+      const stroke = hub.begin('Rename', [ mapHistoryKey(1) ]);
+      stroke.set(MAP_A, [ 'displayName' ], 'Mid-stroke');
+
+      // Act.
+      const committed = hub.committedContent(MAP_A) as unknown as RmmzMap;
+
+      // Assert.
+      expect([ committed.displayName, fileOf(hub, MAP_A).displayName ])
+        .toStrictEqual([ 'Test Town', 'Mid-stroke' ]);
     });
   });
 });

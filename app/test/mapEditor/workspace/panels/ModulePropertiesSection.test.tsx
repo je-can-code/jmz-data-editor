@@ -1,0 +1,408 @@
+/**
+ * @vitest-environment jsdom
+ */
+import React from 'react';
+import { describe, expect, it } from 'vitest';
+import { act, fireEvent, render, screen } from '@testing-library/react';
+import '@testing-library/jest-dom/vitest';
+import { DocumentHub } from '../../../../src/mapEditor/core/history/DocumentHub.ts';
+import { mapHistoryKey } from '../../../../src/mapEditor/core/history/historyKeys.ts';
+import type { JsonValue } from '../../../../src/mapEditor/core/model/json.ts';
+import type { ConfigRead, MapPropertiesSection, OnDemandConfig } from '../../../../src/mapEditor/core/modules/PluginModule.ts';
+import { CLOCK_SKY, mapLightingSource } from '../../../../src/mapEditor/modules/lighting/mapLighting.ts';
+import { weatherSettingsSource } from '../../../../src/mapEditor/modules/weather/weatherSettings.ts';
+import type { MapEditorServices } from '../../../../src/mapEditor/services/MapEditorServices.ts';
+import { ModulePropertiesSection } from '../../../../src/mapEditor/workspace/panels/ModulePropertiesSection.tsx';
+import { WorkspaceController } from '../../../../src/mapEditor/workspace/WorkspaceController.ts';
+import { WorkspaceProvider } from '../../../../src/mapEditor/workspace/workspaceHooks.tsx';
+import { buildMapJson } from '../../support/fixtures.ts';
+
+/*
+ * A section a plugin module adds to Map Properties shows its heading, what it says about the map as a whole, and its
+ * settings, with the same controls the quick panel shows an event's settings with. Every change is one step in the
+ * map's own history. A value still being chosen, as a colour picker passes through colours or a slider is dragged,
+ * shows on the map as it goes, before it is a step, and becomes one step once chosen; one still showing when another
+ * setting changes, or when the section goes, is kept as its own step first, so no change is lost or merged into another.
+ * A change the map cannot take is refused, saying why, and leaves the map as it was; the refusal goes once a change is
+ * made. The section reads its settings again whenever the map's own properties change, even mid-edit, and never for a
+ * brush stroke's tiles or an event moved, which change many times a second. A config its settings read only once
+ * something needs it is asked for once the section shows, and every read of it shows the settings afresh; a drop-down
+ * choosing among names, as J-Weather's looks are, writes the name picked. A part of the section that draws itself, for a
+ * setting the map's own file never holds, shows below the settings, handed the map.
+ *
+ * J-Lighting's own section stands in for any module's here, over a cave at 85% darkness with no sky.
+ */
+describe('ModulePropertiesSection', () =>
+{
+  /**
+   * J-Lighting's section, its sky offered as it is while J-Lighting-Time alone reads it.
+   */
+  const LIGHTING: MapPropertiesSection = { id: 'lighting.map', title: 'Lighting', source: mapLightingSource('#000000', () => [ CLOCK_SKY ]) };
+
+  /**
+   * J-Weather's config, holding two looks.
+   */
+  const WEATHER_CONFIG = { motions: { fall: { edge: 'top' } }, presets: { rain: { stops: {} }, fog: { stops: {} } } } as unknown as JsonValue;
+
+  /**
+   * A config the window holds and reads only once asked for: unread until the test reads it in, which its listeners
+   * hear, noting how often it was asked for.
+   * @returns {{ config: OnDemandConfig, asked: () => number, arrive: (read: ConfigRead) => void }} The config, how
+   * often it was asked for, and a read arriving.
+   */
+  const heldConfig = () =>
+  {
+    const listeners = new Set<() => void>();
+    let read: ConfigRead | undefined;
+    let asked = 0;
+    const config: OnDemandConfig = {
+      current: () => read,
+      request: () =>
+      {
+        asked += 1;
+      },
+      subscribe: listener =>
+      {
+        listeners.add(listener);
+        return () =>
+        {
+          listeners.delete(listener);
+        };
+      },
+    };
+    const arrive = (next: ConfigRead) =>
+    {
+      read = next;
+      listeners.forEach(listener => listener());
+    };
+    return { config, asked: () => asked, arrive };
+  };
+
+  /**
+   * Renders a section over a hub holding map 1 with the given note.
+   * @param {string} note The map's note.
+   * @param {MapPropertiesSection} section The section.
+   * @returns {{ hub: DocumentHub, unmount: () => void }} The hub, and a way to take the section away.
+   */
+  const renderSection = (note: string, section: MapPropertiesSection = LIGHTING) =>
+  {
+    const hub = new DocumentHub({ clientId: 'window-a' });
+    hub.adopt('map:1', { ...buildMapJson(), note } as unknown as JsonValue);
+    const controller = new WorkspaceController({ hub, api: null, openDocument: async () => undefined } as unknown as MapEditorServices);
+    const { unmount } = render(
+      <WorkspaceProvider controller={controller}>
+        <ModulePropertiesSection mapId={1} map={hub.map('map:1')} section={section}/>
+      </WorkspaceProvider>
+    );
+    return { hub, unmount };
+  };
+
+  /**
+   * Reads map 1's note.
+   * @param {DocumentHub} hub The hub.
+   * @returns {string} The note.
+   */
+  const noteIn = (hub: DocumentHub): string => hub.map('map:1').property('note');
+
+  /**
+   * Lists the names of the steps map 1's history holds.
+   * @param {DocumentHub} hub The hub.
+   * @returns {string[]} The names, oldest first.
+   */
+  const stepsIn = (hub: DocumentHub): string[] => hub.history(mapHistoryKey(1)).rows.map(row => row.label);
+
+  /**
+   * Finds the colour of the dark's picker.
+   * @returns {HTMLInputElement} The picker.
+   */
+  const darkPicker = () => screen.getByLabelText('Colour of the dark') as HTMLInputElement;
+
+  it('shows its heading, what it says about the map, and each setting as the map holds it', () =>
+  {
+    // Arrange: a note setting the darkness twice, the last line's at 70, with no sky.
+
+    // Act.
+    renderSection('<noToneChange>\n<ambient:[30]>\n<ambient:[70]>');
+
+    // Assert.
+    expect([
+      screen.getByText('Lighting').textContent,
+      screen.getByText(/sets a darkness 2 times/u).textContent,
+      (screen.getByRole('textbox', { name: 'Darkness' }) as HTMLInputElement).value,
+      darkPicker().value,
+      (screen.getByRole('checkbox', { name: 'Sky follows the clock' }) as HTMLInputElement).checked,
+    ])
+      .toStrictEqual([
+        'Lighting',
+        'This note sets a darkness 2 times; the game reads only the last line\'s, which is the one shown here.',
+        '70',
+        '#000000',
+        false,
+      ]);
+  });
+
+  it('shows each colour of the dark on the map as it is picked, before it is a step, and makes the one it closes on a single step', () =>
+  {
+    // Arrange.
+    const { hub } = renderSection('<noToneChange>\n<ambient:[85]>');
+
+    // Act.
+    fireEvent.input(darkPicker(), { target: { value: '#112233' } });
+    fireEvent.input(darkPicker(), { target: { value: '#0a2a2a' } });
+    const showing = [ noteIn(hub), stepsIn(hub) ];
+    fireEvent.change(darkPicker(), { target: { value: '#0a2a2a' } });
+
+    // Assert.
+    expect([ showing, noteIn(hub), stepsIn(hub) ])
+      .toStrictEqual([ [ '<noToneChange>\n<ambient:[85, #0a2a2a]>', [] ], '<noToneChange>\n<ambient:[85, #0a2a2a]>', [ 'Change darkness colour' ] ]);
+  });
+
+  it('makes a darkness dragged along its track one step', () =>
+  {
+    // Arrange.
+    const { hub } = renderSection('<noToneChange>\n<ambient:[85]>');
+
+    // Act: one step up the track.
+    fireEvent.keyDown(screen.getByRole('slider', { name: 'Darkness' }), { key: 'ArrowRight' });
+
+    // Assert.
+    expect([ noteIn(hub), stepsIn(hub) ])
+      .toStrictEqual([ '<noToneChange>\n<ambient:[86]>', [ 'Change darkness' ] ]);
+  });
+
+  it('makes a typed darkness one step', () =>
+  {
+    // Arrange.
+    const { hub } = renderSection('<noToneChange>\n<ambient:[85]>');
+    const box = screen.getByRole('textbox', { name: 'Darkness' });
+
+    // Act.
+    fireEvent.change(box, { target: { value: '12.5' } });
+    fireEvent.keyDown(box, { key: 'Enter' });
+
+    // Assert.
+    expect([ noteIn(hub), stepsIn(hub) ])
+      .toStrictEqual([ '<noToneChange>\n<ambient:[12.5]>', [ 'Change darkness' ] ]);
+  });
+
+  it('keeps a colour still showing as its own step when another setting changes', () =>
+  {
+    // Arrange.
+    const { hub } = renderSection('<noToneChange>\n<ambient:[85]>');
+    fireEvent.input(darkPicker(), { target: { value: '#0a2a2a' } });
+
+    // Act: the sky follows the clock again.
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Sky follows the clock' }));
+
+    // Assert.
+    expect([ noteIn(hub), stepsIn(hub) ])
+      .toStrictEqual([ '<ambient:[85, #0a2a2a]>', [ 'Change darkness colour', 'Change sky' ] ]);
+  });
+
+  it('keeps a colour still showing as its own step when another setting starts showing a value', () =>
+  {
+    // Arrange.
+    const { hub } = renderSection('<noToneChange>\n<ambient:[85]>');
+    fireEvent.input(darkPicker(), { target: { value: '#0a2a2a' } });
+
+    // Act: the darkness drags a step up the track.
+    fireEvent.keyDown(screen.getByRole('slider', { name: 'Darkness' }), { key: 'ArrowRight' });
+
+    // Assert.
+    expect([ noteIn(hub), stepsIn(hub) ])
+      .toStrictEqual([ '<noToneChange>\n<ambient:[86, #0a2a2a]>', [ 'Change darkness colour', 'Change darkness' ] ]);
+  });
+
+  it('keeps a colour still showing as its own step when the section goes', () =>
+  {
+    // Arrange.
+    const { hub, unmount } = renderSection('<noToneChange>\n<ambient:[85]>');
+    fireEvent.input(darkPicker(), { target: { value: '#0a2a2a' } });
+
+    // Act.
+    unmount();
+
+    // Assert.
+    expect([ noteIn(hub), stepsIn(hub) ])
+      .toStrictEqual([ '<noToneChange>\n<ambient:[85, #0a2a2a]>', [ 'Change darkness colour' ] ]);
+  });
+
+  it('says why a change cannot be made, and leaves the map as it was', () =>
+  {
+    // Arrange: a stray bracket swallows any tag written after it.
+    const { hub } = renderSection('the gate < the wall');
+
+    // Act: the sky stops following the clock.
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Sky follows the clock' }));
+
+    // Assert.
+    expect([ screen.getByRole('alert').textContent, noteIn(hub), stepsIn(hub) ])
+      .toStrictEqual([ 'That change could not be made: the game would not read this map\'s sky back as written', 'the gate < the wall', [] ]);
+  });
+
+  it('stops saying a change was refused once a change is made', () =>
+  {
+    // Arrange: a stray bracket at the note's end swallows a sky tag added after it, while the darkness above it still
+    // takes a change in place; the sky is refused first.
+    const { hub } = renderSection('<ambient:[85]>\nthe gate < the wall');
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Sky follows the clock' }));
+    const refused = screen.queryByRole('alert') !== null;
+    const box = screen.getByRole('textbox', { name: 'Darkness' });
+
+    // Act.
+    fireEvent.change(box, { target: { value: '60' } });
+    fireEvent.keyDown(box, { key: 'Enter' });
+
+    // Assert.
+    expect([ refused, screen.queryByRole('alert'), noteIn(hub) ])
+      .toStrictEqual([ true, null, '<ambient:[60]>\nthe gate < the wall' ]);
+  });
+
+  it('reads its settings again for a change to the map\'s own properties mid-edit, never for its tiles or events', () =>
+  {
+    // Arrange: J-Lighting's section, counting each time it reads the map, and an edit left open as a brush stroke leaves
+    // it.
+    let reads = 0;
+    const counted: MapPropertiesSection = {
+      ...LIGHTING,
+      source: map =>
+      {
+        reads += 1;
+        return LIGHTING.source(map);
+      },
+    };
+    const { hub } = renderSection('<noToneChange>\n<ambient:[85]>', counted);
+    const before = reads;
+    const stroke = hub.begin('Paint', [ mapHistoryKey(1) ]);
+
+    // Act: a tile painted and an event moved, then the note changed, all inside the open edit.
+    act(() =>
+    {
+      stroke.tiles('map:1', [ [ 0, 99 ] ]);
+      stroke.set('map:1', [ 'events', 1, 'x' ], 2);
+    });
+    const readsForStroke = reads - before;
+    act(() =>
+    {
+      stroke.set('map:1', [ 'note' ], '<noToneChange>\n<ambient:[40]>');
+    });
+    const shown = (screen.getByRole('textbox', { name: 'Darkness' }) as HTMLInputElement).value;
+    stroke.cancel();
+
+    // Assert: the stroke cost no read at all, and the note's change showed at once.
+    expect([ readsForStroke, shown ])
+      .toStrictEqual([ 0, '40' ]);
+  });
+
+  it('lets what it said about a refused change be dismissed', () =>
+  {
+    // Arrange.
+    renderSection('the gate < the wall');
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Sky follows the clock' }));
+
+    // Act.
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+
+    // Assert.
+    expect(screen.queryByRole('alert'))
+      .toBeNull();
+  });
+
+  it('asks for the config its settings read once it shows, and shows them afresh on each read of it', () =>
+  {
+    // Arrange: a section whose one line says what its config holds, over a config read only once asked for.
+    const held = heldConfig();
+    const section: MapPropertiesSection = {
+      id: 'test.map',
+      title: 'Test',
+      source: () =>
+      {
+        const read = held.config.current();
+        return { note: read === undefined ? 'Not read yet.' : `Read: ${String(read.content)}.`, fields: [] };
+      },
+      config: held.config,
+    };
+    renderSection('', section);
+    const before = [ held.asked(), screen.getByText(/read/u).textContent ];
+
+    // Act: the config arrives, then is read again holding something else.
+    act(() => held.arrive({ content: 'clouds', problem: null }));
+    const first = screen.getByText(/Read:/u).textContent;
+    act(() => held.arrive({ content: 'rain', problem: null }));
+
+    // Assert: asked for once, as it showed, and each read shown.
+    expect([ before, first, screen.getByText(/Read:/u).textContent, held.asked() ])
+      .toStrictEqual([ [ 1, 'Not read yet.' ], 'Read: clouds.', 'Read: rain.', 1 ]);
+  });
+
+  it('writes a look picked by name as one step in the map\'s history', () =>
+  {
+    // Arrange: J-Weather's section over a map naming rain, its config read.
+    const held = heldConfig();
+    held.arrive({ content: WEATHER_CONFIG, problem: null });
+    const weather: MapPropertiesSection = { id: 'weather.settings', title: 'Weather', source: weatherSettingsSource(held.config, () => []), config: held.config };
+    const { hub } = renderSection('<weather:rain>', weather);
+
+    // Act.
+    fireEvent.mouseDown(screen.getByLabelText('Look'));
+    fireEvent.click(screen.getByRole('option', { name: 'fog' }));
+
+    // Assert.
+    expect([ noteIn(hub), stepsIn(hub) ])
+      .toStrictEqual([ '<weather:fog>', [ 'Change weather' ] ]);
+  });
+
+  it('says what a refusal says even when it is no error', () =>
+  {
+    // Arrange: a section whose one setting refuses every value with a bare word.
+    const refusing: MapPropertiesSection = {
+      id: 'test.map',
+      title: 'Test',
+      source: () => ({
+        note: null,
+        fields: [ {
+          key: 'test.check',
+          label: 'Refuses',
+          control: { kind: 'check' },
+          value: false,
+          step: 'Change',
+          write: () =>
+          {
+            throw 'never';
+          },
+        } ],
+      }),
+    };
+    renderSection('', refusing);
+
+    // Act.
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Refuses' }));
+
+    // Assert.
+    expect(screen.getByRole('alert').textContent)
+      .toBe('That change could not be made: never');
+  });
+
+  it('draws a section\'s own part below its settings, handed the map, and none for a section without one', () =>
+  {
+    // Arrange: a section whose own part names the map it was handed and the map's display name, beside J-Lighting's.
+    const drawn: MapPropertiesSection = {
+      id: 'test.map',
+      title: 'Test',
+      source: LIGHTING.source,
+      body: props => <p data-testid={'own-part'}>{`Map ${props.mapId}: ${props.map.property('displayName')}`}</p>,
+    };
+
+    // Act.
+    const { unmount } = renderSection('<ambient:[70]>', drawn);
+    const own = screen.getByTestId('own-part');
+    const below = screen.getByRole('textbox', { name: 'Darkness' }).compareDocumentPosition(own) === Node.DOCUMENT_POSITION_FOLLOWING;
+    const text = own.textContent;
+    unmount();
+    renderSection('<ambient:[70]>');
+
+    // Assert.
+    expect([ text, below, screen.queryByTestId('own-part') ])
+      .toStrictEqual([ 'Map 1: Test Town', true, null ]);
+  });
+});

@@ -43,6 +43,18 @@ type Placement struct {
 	PageCount int `json:"pageCount"`
 }
 
+// BattlerPage is one map event standing as a battler of the enemy asked about, with the first of its pages naming
+// that enemy, whole: its picture, its settings and its comments, which is what the map editor shapes a new battler of
+// the enemy after.
+type BattlerPage struct {
+	MapId     int    `json:"mapId"`
+	EventId   int    `json:"eventId"`
+	EventName string `json:"eventName"`
+
+	// Page is the first of the event's pages naming the enemy, exactly as the map file holds it.
+	Page db.RpgMapEventPage `json:"page"`
+}
+
 // Arrival is one transfer, on any map, that names outright a tile of the map asked about as where it lands.
 type Arrival struct {
 	// MapId is the map the transfer is on, which may be the map asked about itself.
@@ -62,10 +74,13 @@ type Arrival struct {
 	Y int `json:"y"`
 }
 
-// mapFacts is what the index keeps of one map once read: its battlers, and the transfers on it.
+// mapFacts is what the index keeps of one map once read: its battlers, the transfers on it, the notes its events hold,
+// and the pictures its doors are drawn with.
 type mapFacts struct {
 	battlers  []battler
 	transfers []transfer
+	notes     []eventNote
+	doors     []doorSprite
 }
 
 // Subscriber is where an index hears that files changed: the server's change stream, a *watch.Hub.
@@ -73,11 +88,11 @@ type Subscriber interface {
 	Subscribe(root string) (*watch.Subscription, error)
 }
 
-// Index answers where an enemy is placed, and which transfers land on a map, from a scan of every map that it
-// keeps until a map changes.
+// Index answers where an enemy is placed, which transfers land on a map, what the events' notes hold, and what the
+// doors are drawn with, from a scan of every map that it keeps until a map changes.
 //
-// Finding either means decoding every map, far too slow to repeat for each answer, so each map's battlers and
-// transfers are kept once found and forgotten when the change stream says that map changed. To hear
+// Finding any of them means decoding every map, far too slow to repeat for each answer, so each map's battlers,
+// transfers, notes and doors are kept once found and forgotten when the change stream says that map changed. To hear
 // every change, the index listens for as long as it lives, and starts before it reads anything, which
 // keeps the stream's watcher running from the first answer on. It applies what it heard at the start
 // of each answer rather than as changes arrive, so no answer given after a change was announced can
@@ -103,7 +118,7 @@ type Index struct {
 	// names are the map tree's names by map id, or nil when MapInfos.json must be read again.
 	names map[int]string
 
-	// scanned holds the battlers and transfers of every map read since it last changed, by map id.
+	// scanned holds the battlers, transfers and notes of every map read since it last changed, by map id.
 	scanned map[int]mapFacts
 }
 
@@ -131,6 +146,35 @@ func (index *Index) Placements(root string, enemyId int) ([]Placement, error) {
 		for _, standing := range facts.battlers {
 			if standing.enemyId == enemyId {
 				found = append(found, placementOf(mapId, mapName, standing))
+			}
+		}
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return found, nil
+}
+
+// BattlerPages answers every map event in the project at root that stands as a battler of an enemy, by map id
+// and then event, each with the first of its pages naming the enemy, whole. The list is empty, never nil, when
+// there are none. The map editor shapes a new battler of the enemy after the ones already placed.
+//
+// A map that cannot be read strictly fails the whole answer, naming its file, as the placements do.
+func (index *Index) BattlerPages(root string, enemyId int) ([]BattlerPage, error) {
+	index.mu.Lock()
+	defer index.mu.Unlock()
+
+	found := []BattlerPage{}
+	err := index.eachMap(root, func(mapId int, _ string, facts mapFacts) {
+		for _, standing := range facts.battlers {
+			if standing.enemyId == enemyId {
+				found = append(found, BattlerPage{
+					MapId:     mapId,
+					EventId:   standing.eventId,
+					EventName: standing.eventName,
+					Page:      standing.firstPage,
+				})
 			}
 		}
 	})
@@ -174,6 +218,52 @@ func (index *Index) Arrivals(root string, targetMapId int) ([]Arrival, error) {
 	}
 
 	return found, nil
+}
+
+// EventNotes answers every event note in the project at root that holds anything, by map id and then event, each
+// exactly as its map file holds it. Nearly every event's note is empty, and those are left out. The list is empty,
+// never nil, when there are none. The map editor counts the copies of each blueprint from these, since a copy's note
+// is where its link to the blueprint lives.
+//
+// A map that cannot be read strictly fails the whole answer, naming its file, rather than leaving its notes out of a
+// list that would look complete: a blueprint whose copies on that map went uncounted could be deleted from under them.
+func (index *Index) EventNotes(root string) ([]EventNote, error) {
+	index.mu.Lock()
+	defer index.mu.Unlock()
+
+	found := []EventNote{}
+	err := index.eachMap(root, func(mapId int, _ string, facts mapFacts) {
+		for _, held := range facts.notes {
+			found = append(found, EventNote{MapId: mapId, EventId: held.eventId, Note: held.note})
+		}
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return found, nil
+}
+
+// DoorSprites answers every picture the doors in the project at root are drawn with, and how many doors use each, the
+// most used first: what the map editor offers when it places a door, defaulting to the picture the project's doors use
+// most. A door is a page playing a door's opening on itself (see doorsOnMap). The list is empty, never nil, when there
+// are no doors.
+//
+// A map that cannot be read strictly fails the whole answer, naming its file, rather than leaving its doors out of a
+// count that would look complete.
+func (index *Index) DoorSprites(root string) ([]DoorSprite, error) {
+	index.mu.Lock()
+	defer index.mu.Unlock()
+
+	doors := []doorSprite{}
+	err := index.eachMap(root, func(_ int, _ string, facts mapFacts) {
+		doors = append(doors, facts.doors...)
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return countDoorSprites(doors), nil
 }
 
 // eachMap brings the cache up to date with the project at root and hands over what it knows of every map,
@@ -324,7 +414,7 @@ func (index *Index) mapNames() (map[int]string, error) {
 	return names, nil
 }
 
-// scan returns a map's battlers and transfers, reading the map only when they are not already known.
+// scan returns a map's battlers, transfers, notes and doors, reading the map only when they are not already known.
 // Only a clean read is kept, so a map that failed is read afresh next time rather than failing from
 // memory.
 func (index *Index) scan(mapId int) (mapFacts, error) {
@@ -342,8 +432,8 @@ func (index *Index) scan(mapId int) (mapFacts, error) {
 		return mapFacts{}, fmt.Errorf("%s: %w", relativePath, err)
 	}
 
-	// a map the battler scan accepted holds a map, so its transfers can be read from it.
-	facts := mapFacts{battlers: battlers, transfers: transfersOnMap(gameMap)}
+	// a map the battler scan accepted holds a map, so its transfers, notes and doors can be read from it.
+	facts := mapFacts{battlers: battlers, transfers: transfersOnMap(gameMap), notes: notesOnMap(gameMap), doors: doorsOnMap(gameMap)}
 	index.scanned[mapId] = facts
 	return facts, nil
 }

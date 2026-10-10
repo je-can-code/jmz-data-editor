@@ -1,5 +1,5 @@
 import type { MapEditorApi } from '../api/MapEditorApi.ts';
-import { TILESET_MARKS } from '../editorData/editorData.ts';
+import { saveEditorDocument, TILESET_MARKS, type EditorDataSaveOutcome } from '../editorData/editorData.ts';
 import type { DocumentHub } from '../history/DocumentHub.ts';
 import { documentHistoryKey } from '../history/historyKeys.ts';
 import type { HistoryStep } from '../history/HistoryStep.ts';
@@ -69,6 +69,19 @@ const toggleTileMark = (hub: DocumentHub, tilesetId: number, tileId: number): Hi
   {
     tx.set(TILESET_MARKS_DOCUMENT, [ 'data', 'tilesets', key ], entry);
   });
+};
+
+/**
+ * Writes the marks to disk, as every toggle does at once, so every window and every later session paints with them:
+ * nothing when nothing is unsaved, and nothing while they wait for the author's choice about changes made elsewhere,
+ * which writing them would put this copy over (see {@link saveEditorDocument}).
+ * @param {DocumentHub} hub The window's documents; the marks document must be held.
+ * @returns {Promise<EditorDataSaveOutcome>} Settles once the file is written, or at once when there is nothing to write
+ * or the write is held back; rejects when the write itself fails.
+ */
+const saveTileMarks = (hub: DocumentHub): Promise<EditorDataSaveOutcome> =>
+{
+  return saveEditorDocument(hub, TILESET_MARKS_DOCUMENT, 'tile marks');
 };
 
 /**
@@ -204,5 +217,5 @@ const openTilesetMarks = (opener: MarksOpener): Promise<EditorDocument> =>
   return open;
 };
 
-export { isMarkableTile, marksOf, openTilesetMarks, seedTilesetMarks, TILESET_MARKS_DOCUMENT, toggleTileMark };
+export { isMarkableTile, marksOf, openTilesetMarks, saveTileMarks, seedTilesetMarks, TILESET_MARKS_DOCUMENT, toggleTileMark };
 export type { MarksOpener };

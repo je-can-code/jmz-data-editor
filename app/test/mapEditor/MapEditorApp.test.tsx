@@ -6,17 +6,25 @@ import { describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import { WindowShell, type OpenBrowserWindow } from '../../src/core/infrastructure/shell/WindowShell.ts';
+import { holdBlueprintMap } from '../../src/mapEditor/core/blueprints/blueprintMaps.ts';
 import { CommandCatalog } from '../../src/mapEditor/core/commands/CommandCatalog.ts';
 import { CommandEditorRegistry } from '../../src/mapEditor/core/commands/CommandEditorRegistry.ts';
 import { registerBuiltInCommands } from '../../src/mapEditor/core/commands/builtin/builtInCommands.ts';
 import { PluginHeaderStore } from '../../src/mapEditor/core/commands/pluginHeaders/PluginHeaderLibrary.ts';
 import { DocumentHub } from '../../src/mapEditor/core/history/DocumentHub.ts';
+import { freshSavePages } from '../../src/mapEditor/core/locations/landingCheck.ts';
+import { LocationPicks } from '../../src/mapEditor/core/locations/LocationPicks.ts';
+import { TransferLandings } from '../../src/mapEditor/core/locations/TransferLandings.ts';
+import { PluginModuleRegistry } from '../../src/mapEditor/core/modules/PluginModuleRegistry.ts';
+import { WindowPreview } from '../../src/mapEditor/core/preview/WindowPreview.ts';
 import { MapEditorApp } from '../../src/mapEditor/MapEditorApp.tsx';
 import type { MapEditorServices } from '../../src/mapEditor/services/MapEditorServices.ts';
 import { MapEditorServicesProvider, useMapEditorServices } from '../../src/mapEditor/services/MapEditorServicesContext.tsx';
 import { documentLabel } from '../../src/mapEditor/views/documentLabels.ts';
 import type { MapEditorView } from '../../src/mapEditor/views/mapEditorViews.ts';
+import { holdBlueprints } from './support/blueprintFixtures.ts';
 import { buildMapJson } from './support/fixtures.ts';
+import { stampOf } from './support/stampFixtures.ts';
 
 // the workspace lays itself out with a docking engine a test page cannot measure; its own tests cover it.
 vi.mock('../../src/mapEditor/workspace/Workspace.tsx', () => ({
@@ -30,14 +38,18 @@ vi.mock('../../src/mapEditor/workspace/Workspace.tsx', () => ({
  *
  * Above every view it owes the author every conflict, visibly and at once: a document whose two copies disagree
  * (the file on disk and this window's, or another window's and this one's) is shown with both choices, and
- * nothing is settled until one is picked. A removed file offers nothing to take.
+ * nothing is settled until one is picked. A map whose file was deleted offers no choice at all, only the words that
+ * saving puts the file back, and a map is named as the map tree shows it.
+ *
+ * And whichever view it shows, it owes every editor in the window a picker for a place on a map, shown the moment
+ * an editor asks for one.
  */
 describe('MapEditorApp', () =>
 {
   /**
    * Renders the app for a view, over a real hub and a shell whose browser fallback is a spy.
    * @param {MapEditorView} view What the window shows.
-   * @returns {object} The window opener, the hub and the conflict settler.
+   * @returns {object} The window opener, the hub, the conflict settler and the window's asks for a place on a map.
    */
   const renderApp = (view: MapEditorView) =>
   {
@@ -49,8 +61,19 @@ describe('MapEditorApp', () =>
     const resolveConflict = vi.fn(() => true);
     const catalog = new CommandCatalog();
     registerBuiltInCommands(catalog);
+    const locationPicks = new LocationPicks();
 
-    // an event window's command list reads the catalog and editors; the window holds its map already, so it opens nothing.
+    // a location picker judges landings by the window's landings, which, with no server, never read another map.
+    const landings = new TransferLandings({
+      hub,
+      look: () => Promise.reject(new Error('no maps are read in this test')),
+      rules: () => [],
+      pages: () => freshSavePages(null, 0, null),
+      claims: () => false,
+    });
+
+    // an event window's command list reads the catalog and editors, and its sections the modules, none of them on here; the
+    // window holds its map already, so it opens nothing.
     const services = {
       view,
       shell,
@@ -60,6 +83,9 @@ describe('MapEditorApp', () =>
       commandEditors: new CommandEditorRegistry(),
       api: null,
       pluginHeaders: new PluginHeaderStore(),
+      locationPicks,
+      landings,
+      modules: new PluginModuleRegistry(new CommandCatalog()),
       loadCommandResources: async () => undefined,
     } as unknown as MapEditorServices;
     render(
@@ -67,7 +93,7 @@ describe('MapEditorApp', () =>
         <MapEditorApp/>
       </MapEditorServicesProvider>
     );
-    return { openWindow, hub, resolveConflict };
+    return { openWindow, hub, resolveConflict, locationPicks };
   };
 
   it('shows the workspace for a workspace view, and no conflict', () =>
@@ -108,6 +134,7 @@ describe('MapEditorApp', () =>
       commandEditors: new CommandEditorRegistry(),
       api: null,
       pluginHeaders: new PluginHeaderStore(),
+      locationPicks: new LocationPicks(),
       loadCommandResources: async () => undefined,
       resolveConflict: vi.fn(),
     } as unknown as MapEditorServices;
@@ -122,6 +149,51 @@ describe('MapEditorApp', () =>
     // Assert.
     expect([ screen.queryByText('Wait 30 frames') !== null, screen.queryByTestId('map-editor-workspace') ])
       .toStrictEqual([ true, null ]);
+  });
+
+  it('shows the switches and variables for a switches and variables view', () =>
+  {
+    // Arrange: a window holding System.json.
+    const hub = new DocumentHub({ clientId: 'window-a' });
+    hub.adopt('system', { switches: [ '', 'after the vampire' ], variables: [ '', 'Parries' ] });
+    const services = {
+      view: { kind: 'switches-variables' },
+      hub,
+      preview: new WindowPreview(),
+      modules: new PluginModuleRegistry(new CommandCatalog()),
+      api: null,
+      locationPicks: new LocationPicks(),
+      openDocument: vi.fn(),
+      resolveConflict: vi.fn(),
+    } as unknown as MapEditorServices;
+
+    // Act.
+    render(
+      <MapEditorServicesProvider services={services}>
+        <MapEditorApp/>
+      </MapEditorServicesProvider>
+    );
+
+    // Assert.
+    expect([ (screen.getByLabelText('Name of switch 1') as HTMLInputElement).value, screen.queryByTestId('map-editor-workspace') ])
+      .toStrictEqual([ 'after the vampire', null ]);
+  });
+
+  it('shows the location picker over the view the moment an editor in the window asks for a place on a map', () =>
+  {
+    // Arrange: an event window, which is where the transfer editor asks from.
+    const { locationPicks } = renderApp({ kind: 'event', mapId: 1, eventId: 3 });
+    const before = screen.queryByRole('dialog');
+
+    // Act.
+    act(() =>
+    {
+      locationPicks.pick({ mapId: 2, x: 1, y: 0 }).catch(() => undefined);
+    });
+
+    // Assert: the picker shows, starting where the ask starts, over the event window.
+    expect([ before, screen.getByRole('dialog', { name: 'Choose the destination' }) !== null, screen.getByText('Lands on 1, 0') !== null, screen.getByLabelText('Name') ])
+      .toStrictEqual([ null, true, true, expect.objectContaining({ value: 'Chest' }) ]);
   });
 
   it('shows a conflict with another window the moment it is flagged, and settles it only as the author picks', () =>
@@ -158,7 +230,7 @@ describe('MapEditorApp', () =>
       .toBeNull();
   });
 
-  it('offers only keeping this window\'s edits when the file was removed from disk', () =>
+  it('says a map\'s file was deleted and that saving puts it back, with nothing to choose, beside a changed file\'s choices', () =>
   {
     // Arrange.
     const { hub } = renderApp({ kind: 'workspace' });
@@ -170,12 +242,55 @@ describe('MapEditorApp', () =>
       hub.flagConflict('map:2', { kind: 'disk', content: buildMapJson() as never });
     });
 
+    // Assert: the deleted file's bar offers no button; the changed file's keeps both of its choices.
+    expect([ screen.getAllByTestId('document-conflict').map(alert => alert.textContent), screen.getAllByRole('button').map(button => button.textContent) ])
+      .toStrictEqual([
+        [ 'Map 1\'s file was deleted from disk. Save to put it back.', 'Map 2 changed on disk while it had unsaved edits here.Keep my editsLoad the version on disk' ],
+        [ 'Keep my edits', 'Load the version on disk' ],
+      ]);
+  });
+
+  it('names a map in a conflict as the map tree this window holds shows it, and by its label where the tree gives no name', () =>
+  {
+    // Arrange: the tree names map 1 and leaves map 2 unnamed.
+    const { hub } = renderApp({ kind: 'workspace' });
+    const row = (id: number, name: string) => ({ id, name, parentId: 0, order: id, expanded: false, scrollX: 0, scrollY: 0 });
+    act(() =>
+    {
+      hub.adopt('mapinfos', [ null, row(1, 'Bearcat Congregation'), row(2, '') ] as never);
+    });
+
+    // Act.
+    act(() =>
+    {
+      hub.flagConflict('map:1', { kind: 'disk', content: null });
+      hub.flagConflict('map:2', { kind: 'disk', content: null });
+    });
+
     // Assert.
     expect(screen.getAllByTestId('document-conflict').map(alert => alert.textContent))
       .toStrictEqual([
-        'Map 1 was removed from disk while it had unsaved edits here.Keep my edits',
-        'Map 2 changed on disk while it had unsaved edits here.Keep my editsLoad the version on disk',
+        'Bearcat Congregation\'s file was deleted from disk. Save to put it back.',
+        'Map 2\'s file was deleted from disk. Save to put it back.',
       ]);
+  });
+
+  it('names a blueprint\'s tab waiting for a choice by the blueprint\'s own name', () =>
+  {
+    // Arrange: the camp open as a map.
+    const { hub } = renderApp({ kind: 'workspace' });
+    act(() =>
+    {
+      holdBlueprints(hub, { k3x9q2mf: { name: 'Goblin camp', stamp: stampOf({ width: 2 }) } });
+      holdBlueprintMap(hub, 'k3x9q2mf');
+    });
+
+    // Act.
+    act(() => hub.flagConflict('blueprint-map:k3x9q2mf', { kind: 'disk', content: hub.committedContent('blueprint-map:k3x9q2mf') }));
+
+    // Assert.
+    expect(screen.getByTestId('document-conflict').textContent)
+      .toBe('"Goblin camp" changed on disk while it had unsaved edits here.Keep my editsLoad the version on disk');
   });
 
   it('names every kind of document in the author\'s words', () =>
@@ -183,12 +298,35 @@ describe('MapEditorApp', () =>
     // Arrange: one key of each kind, and an editor-data key it does not know.
 
     // Act.
-    const labels = [ 'map:12', 'mapinfos', 'tilesets', 'common-events', 'editor-data:blueprints', 'editor-data:tileset-marks', 'editor-data:layouts', 'editor-data:other' ]
-      .map(key => documentLabel(key as never));
+    const labels = [
+      'map:12',
+      'blueprint-map:k3x9q2mf',
+      'mapinfos',
+      'tilesets',
+      'common-events',
+      'system',
+      'editor-data:blueprints',
+      'editor-data:blueprint-uses',
+      'editor-data:tileset-marks',
+      'editor-data:layouts',
+      'editor-data:other',
+    ].map(key => documentLabel(key as never));
 
     // Assert.
     expect(labels)
-      .toStrictEqual([ 'Map 12', 'The map tree', 'The tilesets', 'The common events', 'Blueprints', 'Tileset marks', 'Saved layouts', 'other' ]);
+      .toStrictEqual([
+        'Map 12',
+        'A blueprint',
+        'The map tree',
+        'The tilesets',
+        'The common events',
+        'The switch and variable names',
+        'Blueprints',
+        'Blueprint placements',
+        'Tileset marks',
+        'Saved layouts',
+        'other',
+      ]);
   });
 
   it('refuses to hand out services outside their provider', () =>

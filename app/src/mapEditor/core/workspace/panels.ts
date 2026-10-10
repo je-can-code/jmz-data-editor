@@ -1,4 +1,5 @@
 import { mapHistoryKey, TREE_HISTORY_KEY, type HistoryKey } from '../history/historyKeys.ts';
+import { blueprintIdOfMap, isBlueprintMapId } from '../model/documentKeys.ts';
 import { isJsonObject, type JsonObject } from '../model/json.ts';
 
 /**
@@ -11,6 +12,7 @@ const PANEL_COMPONENTS = {
   history: 'history',
   properties: 'map-properties',
   palette: 'palette',
+  stamps: 'stamps',
   layers: 'layers',
   quick: 'quick-settings',
   events: 'events',
@@ -30,6 +32,7 @@ const SINGLE_PANEL_IDS = {
   history: 'history',
   properties: 'map-properties',
   palette: 'palette',
+  stamps: 'stamps',
   layers: 'layers',
   quick: 'quick-settings',
   events: 'events',
@@ -44,6 +47,7 @@ const SINGLE_PANEL_IDS = {
 const PANEL_MIN_WIDTHS: Readonly<Partial<Record<string, number>>> = {
   [PANEL_COMPONENTS.mapTree]: 240,
   [PANEL_COMPONENTS.palette]: 240,
+  [PANEL_COMPONENTS.stamps]: 240,
   [PANEL_COMPONENTS.layers]: 240,
   [PANEL_COMPONENTS.properties]: 300,
   [PANEL_COMPONENTS.quick]: 300,
@@ -105,7 +109,8 @@ const withPanelMinimums = (saved: JsonObject): JsonObject =>
 
 /**
  * What a map panel keeps in the layout: which map it shows, and whether its own palette is hidden while it is torn out
- * into a window of its own.
+ * into a window of its own. A blueprint opened as a map shows in a map panel too, named by the id below zero it takes as
+ * a map (see documentKeys' blueprintMapId).
  */
 type MapPanelParams = {
   readonly mapId: number;
@@ -130,7 +135,7 @@ const MAP_DRAG_TYPE = 'application/x-jmz-maps';
 /**
  * Reads a map panel's parameters, refusing anything else.
  * @param {unknown} params The panel's parameters.
- * @returns {boolean} True when they name a map.
+ * @returns {boolean} True when they name a map, or a blueprint opened as a map.
  */
 const isMapPanelParams = (params: unknown): params is MapPanelParams =>
 {
@@ -140,19 +145,21 @@ const isMapPanelParams = (params: unknown): params is MapPanelParams =>
   }
 
   const { mapId } = params as { mapId?: unknown };
-  return typeof mapId === 'number' && Number.isInteger(mapId) && mapId > 0;
+  return typeof mapId === 'number' && Number.isInteger(mapId) && (mapId > 0 || isBlueprintMapId(mapId));
 };
 
 /**
- * Names a new map panel, the map's own name first and a numbered one for each further view of the same map.
- * @param {number} mapId The map.
+ * Names a new map panel, the map's own name first and a numbered one for each further view of the same map. A blueprint
+ * opened as a map is named by the blueprint's id.
+ * @param {number} mapId The map, or the id a blueprint opened as a map takes.
  * @param {readonly string[]} takenIds Every panel id in use.
  * @returns {string} A free id.
  */
 const mapPanelId = (mapId: number, takenIds: readonly string[]): string =>
 {
   const taken = new Set(takenIds);
-  const first = `map-${mapId}`;
+  const blueprintId = blueprintIdOfMap(mapId);
+  const first = blueprintId === null ? `map-${mapId}` : `blueprint-${blueprintId}`;
   if (taken.has(first) === false)
   {
     return first;
@@ -223,8 +230,9 @@ const decodeDraggedMaps = (data: string): number[] =>
 /**
  * Works out which history a panel owns, which is what undo acts on while it has focus: a map panel its map's, the
  * tree the tree's, and the properties panel, the quick settings and the events list the history of the map they show,
- * since what they change, or point at, lives in that map. The history panel and the placeholders own none, so focusing
- * them leaves undo where it was.
+ * since what they change, or point at, lives in that map. A blueprint opened as a map owns the blueprint's own history
+ * (see historyKeys' mapHistoryKey). The history panel and the placeholders own none, so focusing them leaves undo where
+ * it was.
  * @param {string} component The panel's kind.
  * @param {unknown} params The panel's parameters.
  * @param {number | null} currentMapId The map the properties panel, the quick settings and the events list show, or

@@ -17,22 +17,58 @@ type SettingSwitch =
   | { readonly kind: 'animation'; readonly label: string };
 
 /**
- * The switches the bar offers, in the order it shows them: the overlays an author edits with, then the game look.
+ * The switches the bar can offer, in the order it shows them: the overlays an author edits with, then the game look.
+ * Animate starts and stops everything that moves in the game at once: water and waterfalls, a drifting parallax, the
+ * lights' flicker, pulse and glitch, and the weather. Lighting shows and hides everything plugin modules draw into the
+ * lighting layer, such as a light's reach and a map's darkness, and Weather everything they draw into the weather layer,
+ * such as a map's rain; each is offered only while some module draws there ({@link shownSwitches}).
  */
 const SETTING_SWITCHES: readonly SettingSwitch[] = [
   { kind: 'overlay', id: 'grid', label: 'Grid' },
   { kind: 'overlay', id: 'regions', label: 'Regions' },
   { kind: 'overlay', id: 'passability', label: 'Passability' },
-  { kind: 'animation', label: 'Animate water' },
+  { kind: 'animation', label: 'Animate' },
   { kind: 'layer', id: 'parallax', label: 'Parallax' },
   { kind: 'layer', id: 'events', label: 'Events' },
   { kind: 'layer', id: 'shadows', label: 'Shadows' },
+  { kind: 'layer', id: 'lighting', label: 'Lighting' },
+  { kind: 'layer', id: 'weather', label: 'Weather' },
 ];
 
 /**
  * The four tile layers, in the order the highlight picker lists them.
  */
 const TILE_LAYERS: readonly TileLayer[] = [ 'tiles1', 'tiles2', 'tiles3', 'tiles4' ];
+
+/**
+ * Lists the switches the bar shows: all of them, except Lighting while no plugin module draws into the lighting layer,
+ * and Weather while none draws into the weather layer, so a project without such a plugin is never offered a switch
+ * that does nothing.
+ * @param {boolean} drawsLighting Whether any active module draws into the lighting layer.
+ * @param {boolean} drawsWeather Whether any active module draws into the weather layer.
+ * @returns {SettingSwitch[]} The switches, in the bar's order.
+ */
+const shownSwitches = (drawsLighting: boolean, drawsWeather: boolean): SettingSwitch[] =>
+{
+  return SETTING_SWITCHES.filter(setting =>
+  {
+    if (setting.kind !== 'layer')
+    {
+      return true;
+    }
+
+    // each module-drawn layer's switch shows only while some module draws into it.
+    switch (setting.id)
+    {
+      case 'lighting':
+        return drawsLighting;
+      case 'weather':
+        return drawsWeather;
+      default:
+        return true;
+    }
+  });
+};
 
 /**
  * Reports whether a switch is on.
@@ -49,7 +85,7 @@ const isSwitchOn = (settings: MapViewSettings, setting: SettingSwitch): boolean 
     case 'layer':
       return settings.visibility.layers[setting.id];
     case 'animation':
-      return settings.visibility.animateWater;
+      return settings.visibility.animate;
   }
 };
 
@@ -84,7 +120,7 @@ const flipSwitch = (settings: MapViewSettings, setting: SettingSwitch): MapViewS
         overlays,
       };
     case 'animation':
-      return { visibility: { ...visibility, animateWater: visibility.animateWater === false }, overlays };
+      return { visibility: { ...visibility, animate: visibility.animate === false }, overlays };
   }
 };
 
@@ -112,5 +148,5 @@ const toggleHighlight = (settings: MapViewSettings, layer: TileLayer): MapViewSe
   return { visibility: { ...settings.visibility, highlighted }, overlays };
 };
 
-export { flipSwitch, isSwitchOn, SETTING_SWITCHES, TILE_LAYERS, toggleHighlight };
+export { flipSwitch, isSwitchOn, SETTING_SWITCHES, shownSwitches, TILE_LAYERS, toggleHighlight };
 export type { MapViewSettings, SettingSwitch };

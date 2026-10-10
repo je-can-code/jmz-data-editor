@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { BLUEPRINT_EVENTS_REMOVED } from '../../../../src/mapEditor/core/blueprints/blueprintShape.ts';
 import { EVENT_GONE_MESSAGE, PAGE_GONE_MESSAGE, targetHistory } from '../../../../src/mapEditor/core/eventWindow/eventWindowTarget.ts';
 import {
   addPage,
@@ -16,9 +17,11 @@ import {
   pastePages,
 } from '../../../../src/mapEditor/core/eventWindow/pageOperations.ts';
 import { mapHistoryKey } from '../../../../src/mapEditor/core/history/historyKeys.ts';
-import { createEventPage } from '../../../../src/mapEditor/core/model/eventModel.ts';
+import { createEventPage, createMapEvent } from '../../../../src/mapEditor/core/model/eventModel.ts';
 import type { RmmzMapEvent } from '../../../../src/mapEditor/core/model/rmmzTypes.ts';
+import { openedBlueprint } from '../../support/blueprintFixtures.ts';
 import { eventWindowHub, eventWindowMap, expectedMap, heldEvent, heldMap, markedPage, TARGET } from '../../support/eventWindowFixtures.ts';
+import { stampOf } from '../../support/stampFixtures.ts';
 
 /*
  * The event window's page operations: add, copy, paste, duplicate, delete, clear and move. Each change is one step in
@@ -377,6 +380,23 @@ describe('pageOperations', () =>
       // Assert.
       expect([ outcomes, heldMap(hub) ])
         .toStrictEqual([ [ { ok: false, message: PAGE_GONE_MESSAGE }, { ok: false, message: EVENT_GONE_MESSAGE } ], eventWindowMap() ]);
+    });
+
+    it('refuses to take the last page of a blueprint\'s event, which would take the event off every map, and takes another page', () =>
+    {
+      // Arrange: a blueprint opened as a map, its event 2 with one page and its event 4 with two.
+      const { hub, map, mapId } = openedBlueprint('k3x9q2mf', stampOf({
+        width: 3,
+        events: [ { ...createMapEvent(2, 0, 0), pages: [ markedPage(1) ] }, { ...createMapEvent(4, 2, 0), pages: [ markedPage(1), markedPage(2) ] } ],
+      }));
+
+      // Act.
+      const last = deletePageOrEvent(hub, { mapId, eventId: 2 }, 0);
+      const second = deletePageOrEvent(hub, { mapId, eventId: 4 }, 1);
+
+      // Assert.
+      expect([ last, second.ok && second.step?.label, map.event(2)?.pages.length, map.event(4)?.pages.length ])
+        .toStrictEqual([ { ok: false, message: BLUEPRINT_EVENTS_REMOVED }, 'Delete page 2', 1, 1 ]);
     });
   });
 

@@ -1,4 +1,4 @@
-import type { MapDocumentKey } from './documentKeys.ts';
+import { mapIdOfDocument, type MapDocumentKey } from './documentKeys.ts';
 import { DocumentListeners, type DocumentListener, type EditorDocument } from './EditorDocument.ts';
 import { cloneJson, isJsonObject, jsonEquals, type JsonValue } from './json.ts';
 import {
@@ -98,6 +98,11 @@ class MapDocument implements EditorDocument
 {
   readonly key: MapDocumentKey;
 
+  /**
+   * The map id the key names, read once, since tools ask for it at every turn and the key never changes.
+   */
+  #mapId: number;
+
   #root: MapRoot;
 
   #cells: Uint16Array;
@@ -114,6 +119,9 @@ class MapDocument implements EditorDocument
   constructor(key: MapDocumentKey, root: MapRoot, cells: Uint16Array)
   {
     this.key = key;
+
+    // a map document's key always names a map, so it always has a map id.
+    this.#mapId = mapIdOfDocument(key) as number;
     this.#root = root;
     this.#cells = cells;
   }
@@ -150,12 +158,12 @@ class MapDocument implements EditorDocument
   }
 
   /**
-   * The map id this document edits.
+   * The map id this document edits: a map's own, or, for a blueprint opened as a map, the id below zero that names it.
    * @returns {number} The id.
    */
   get mapId(): number
   {
-    return Number.parseInt(this.key.slice('map:'.length), 10);
+    return this.#mapId;
   }
 
   get revision(): number
@@ -428,6 +436,31 @@ class MapDocument implements EditorDocument
     });
 
     return file;
+  }
+
+  matches(content: JsonValue): boolean
+  {
+    if (isJsonObject(content) === false)
+    {
+      return false;
+    }
+
+    // the tile data lives apart from the rest, so each half is compared with its own half of the file.
+    const { data, ...rest } = content;
+    if (Array.isArray(data) === false || data.length !== this.#cells.length)
+    {
+      return false;
+    }
+
+    for (let index = 0; index < data.length; index++)
+    {
+      if (data[index] !== this.#cells[index])
+      {
+        return false;
+      }
+    }
+
+    return jsonEquals(this.#root, rest);
   }
 
   /**

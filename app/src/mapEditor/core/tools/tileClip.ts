@@ -1,10 +1,9 @@
 import type { MapCell } from '../renderer/camera.ts';
 import type { CellRect, GhostTile } from '../renderer/MapRenderer.ts';
-import { cellsToReshape, type CellPosition } from '../tiles/autotileRefresh.ts';
+import { reshapeCarried, type CellPosition } from '../tiles/autotileRefresh.ts';
 import { autotileShapeFor } from '../tiles/autotileShapes.ts';
 import type { LayerChoice, Shaping } from '../tiles/layering.ts';
 import { cellIndex, TileDraft, type CellChange, type TileGrid } from '../tiles/tileGrid.ts';
-import { autotileKind, isAutotile, makeAutotileId } from '../tiles/tileIds.ts';
 import { clipRect, rectContains } from './geometry.ts';
 
 /**
@@ -121,11 +120,10 @@ const clipValue = (clip: TileClip, layerIndex: number, dx: number, dy: number): 
 };
 
 /**
- * Reshapes, in a draft, the autotiles a placed clip affected. It is the autotile refresh's rule with one addition for
- * the tiles the clip carried: such a tile keeps the very shape it was lifted in whenever its new neighbours call for
- * the same shape its old ones did, so a shape drawn by hand (with Shift, in MZ) survives being moved or copied, and
- * only the tiles along the clip's edge, which meet new neighbours, are shaped afresh. Every other autotile the change
- * reached is reshaped only when what its neighbours call for changed.
+ * Reshapes, in a draft, the autotiles a placed clip affected, by the rule {@link reshapeCarried} keeps for any piece of
+ * map put down: a tile the clip carried keeps the very shape it was lifted in whenever its new neighbours call for the
+ * same shape its old ones did, which are read where it came from on the same map, so only the tiles along the clip's
+ * edge, which meet new neighbours, are shaped afresh.
  * @param {TileDraft} draft The map with the clip placed.
  * @param {readonly CellPosition[]} changed The cells written: where the clip landed, and where it was lifted from.
  * @param {number} mode The tileset's mode.
@@ -139,36 +137,13 @@ const reshapeFromOrigins = (
   originOf: (x: number, y: number, z: number) => MapCell | null,
 ): void =>
 {
-  cellsToReshape(draft, changed).forEach(([ x, y ]) =>
+  reshapeCarried(draft, changed, mode, (x, y, z, kind) =>
   {
-    for (let z = 0; z < 4; z++)
-    {
-      const tileId = draft.tileAt(x, y, z);
-      if (isAutotile(tileId) === false)
-      {
-        continue;
-      }
-
-      // the shape called for before: at the tile's origin for one the clip carried, here for any other.
-      const kind = autotileKind(tileId);
-      const after = autotileShapeFor(draft, x, y, kind, mode);
-      const origin = originOf(x, y, z);
-      let before = -1;
-      if (origin !== null)
-      {
-        before = autotileShapeFor(draft.base, origin.x, origin.y, kind, mode);
-      }
-      else if (draft.hasChanged(x, y, z) === false)
-      {
-        before = autotileShapeFor(draft.base, x, y, kind, mode);
-      }
-
-      const shaped = makeAutotileId(kind, after);
-      if (before !== after && shaped !== tileId)
-      {
-        draft.setTile(x, y, z, shaped);
-      }
-    }
+    // what the tile's neighbours called for at its origin, on the map as it stood before the clip moved.
+    const origin = originOf(x, y, z);
+    return origin === null
+      ? null
+      : autotileShapeFor(draft.base, origin.x, origin.y, kind, mode);
   });
 };
 

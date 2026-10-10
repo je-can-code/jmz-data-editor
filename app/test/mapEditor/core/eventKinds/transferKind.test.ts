@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { editQuickField } from '../../../../src/mapEditor/core/eventKinds/quickFields.ts';
 import { isTransfer, readTransfers, transferQuickModel } from '../../../../src/mapEditor/core/eventKinds/transferKind.ts';
 import { mapHistoryKey } from '../../../../src/mapEditor/core/history/historyKeys.ts';
+import type { JsonValue } from '../../../../src/mapEditor/core/model/json.ts';
 import { applyEdits, command, event, eventIn, hubWith, page, text, transferPage } from '../../support/eventKindFixtures.ts';
 
 /*
@@ -15,7 +16,8 @@ import { applyEdits, command, event, eventIn, hubWith, page, text, transferPage 
  * talk on its own page, and a door whose other page is a battler.
  *
  * The panel edits each transfer's map, tile, facing and fade, rewriting only the Transfer Player, as one step one
- * undo takes back. Several transfers that each hold one share their settings whatever page it sits on.
+ * undo takes back; the map and tile can also be picked together on the map, as one place. Several transfers that each
+ * hold one share their settings whatever page it sits on.
  */
 describe('transferKind', () =>
 {
@@ -126,7 +128,7 @@ describe('transferKind', () =>
 
   describe('transferQuickModel', () =>
   {
-    it('offers the map, tile, facing and fade of a transfer', () =>
+    it('offers the map, tile, the two picked together on the map, facing and fade of a transfer', () =>
     {
       // Arrange.
       const door = event(1, [ transferPage([ 0, 20, 14, 7, 2, 1 ]) ]);
@@ -135,14 +137,15 @@ describe('transferKind', () =>
       const model = transferQuickModel(door);
 
       // Assert.
-      expect([ model.fields.map(field => [ field.key, field.label, field.section, field.value ]), model.actions ])
+      expect([ model.fields.map(field => [ field.key, field.label, field.section, field.control.kind, field.value ]), model.actions ])
         .toStrictEqual([
           [
-            [ 'transfer.0.map', 'Map', '', 20 ],
-            [ 'transfer.0.x', 'X', '', 14 ],
-            [ 'transfer.0.y', 'Y', '', 7 ],
-            [ 'transfer.0.direction', 'Facing', '', 2 ],
-            [ 'transfer.0.fade', 'Fade', '', 1 ],
+            [ 'transfer.0.map', 'Map', '', 'map', 20 ],
+            [ 'transfer.0.x', 'X', '', 'number', 14 ],
+            [ 'transfer.0.y', 'Y', '', 'number', 7 ],
+            [ 'transfer.0.place', 'Pick on the map', '', 'place', { mapId: 20, x: 14, y: 7 } ],
+            [ 'transfer.0.direction', 'Facing', '', 'select', 2 ],
+            [ 'transfer.0.fade', 'Fade', '', 'select', 1 ],
           ],
           [],
         ]);
@@ -179,7 +182,14 @@ describe('transferKind', () =>
       // Arrange.
       const door = event(1, [ transferPage([ 0, 20, 14, 7, 2, 1 ]) ]);
       const { fields } = transferQuickModel(door);
-      const values: Record<string, number> = { 'transfer.0.map': 33, 'transfer.0.x': 4, 'transfer.0.y': 9, 'transfer.0.direction': 8, 'transfer.0.fade': 2 };
+      const values: Record<string, JsonValue> = {
+        'transfer.0.map': 33,
+        'transfer.0.x': 4,
+        'transfer.0.y': 9,
+        'transfer.0.place': { mapId: 5, x: 3, y: 2 },
+        'transfer.0.direction': 8,
+        'transfer.0.fade': 2,
+      };
 
       // Act.
       const written = fields.map(field => applyEdits(door, field.write(values[field.key])).pages[0].list);
@@ -190,6 +200,7 @@ describe('transferKind', () =>
           [ 3, 250, [ 0, 33, 14, 7, 2, 1 ], 0 ],
           [ 3, 250, [ 0, 20, 4, 7, 2, 1 ], 0 ],
           [ 3, 250, [ 0, 20, 14, 9, 2, 1 ], 0 ],
+          [ 3, 250, [ 0, 5, 3, 2, 2, 1 ], 0 ],
           [ 3, 250, [ 0, 20, 14, 7, 8, 1 ], 0 ],
           [ 3, 250, [ 0, 20, 14, 7, 2, 2 ], 0 ],
         ]);

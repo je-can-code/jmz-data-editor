@@ -16,8 +16,8 @@ import (
 // way a browser would and expects it refused without a byte of the file it aimed at. A plain `..`
 // never reaches a handler at all, because the router redirects to the cleaned path first.
 
-// TestGetImageServesTheImage covers an ordinary image, and a name with the punctuation character
-// sheets really use.
+// TestGetImageServesTheImage covers an ordinary image, a name with the punctuation character sheets
+// really use, and a picture from img/weather, where J-Weather keeps what its particles are drawn with.
 func TestGetImageServesTheImage(t *testing.T) {
 	cases := []struct {
 		target  string
@@ -25,6 +25,7 @@ func TestGetImageServesTheImage(t *testing.T) {
 	}{
 		{target: "/api/img/characters/Actor1", content: "\x89PNG-actor"},
 		{target: "/api/img/faces/%21%24Door%20%28open%29", content: "\x89PNG-door"},
+		{target: "/api/img/weather/Rain_01A", content: "\x89PNG-rain"},
 	}
 
 	for _, testCase := range cases {
@@ -212,6 +213,47 @@ func TestListImagesListsWhatTheImageRouteServes(t *testing.T) {
 	}
 }
 
+// TestListAudioListsWhatTheAudioRouteServes covers the sound pickers' list: every plain .ogg in the folder, by the name
+// the audio route takes, sorted; never a file of another kind or a folder.
+func TestListAudioListsWhatTheAudioRouteServes(t *testing.T) {
+	// Arrange- beside the fixture's sound, another sound, a picture and a folder.
+	current := newProject(t)
+	sounds := filepath.Join(current.root, "audio", "se")
+	for _, name := range []string{"Open1.ogg", "Open1.png"} {
+		if err := os.WriteFile(filepath.Join(sounds, name), []byte("OggS"), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Mkdir(filepath.Join(sounds, "folder.ogg"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act.
+	response := current.call(t, http.MethodGet, "/api/audio/se", "")
+
+	// Assert.
+	assertStatus(t, response, http.StatusOK)
+	var names []string
+	if err := json.Unmarshal(readEnvelope(t, response).Data, &names); err != nil {
+		t.Fatal(err)
+	}
+	if expected := []string{"Cursor", "Open1"}; reflect.DeepEqual(names, expected) == false {
+		t.Errorf("listed %q, expected %q", names, expected)
+	}
+}
+
+// TestListAudioRefusesAFolderOffTheList covers a folder MZ never plays sounds from.
+func TestListAudioRefusesAFolderOffTheList(t *testing.T) {
+	// Arrange.
+	current := newProject(t)
+
+	// Act.
+	response := current.call(t, http.MethodGet, "/api/audio/voice", "")
+
+	// Assert.
+	assertRefused(t, response, http.StatusBadRequest)
+}
+
 // TestListImagesListsNothingForAMissingFolder covers an image folder the project has not made yet.
 func TestListImagesListsNothingForAMissingFolder(t *testing.T) {
 	// Arrange.
@@ -246,7 +288,7 @@ func TestListImagesRefusesAFolderOffTheList(t *testing.T) {
 
 // TestAssetRoutesNeedAProjectRoot covers a server started without one.
 func TestAssetRoutesNeedAProjectRoot(t *testing.T) {
-	targets := []string{"/api/img/characters/Actor1", "/api/img/faces", "/api/audio/se/Cursor", "/api/plugin-source/Hello"}
+	targets := []string{"/api/img/characters/Actor1", "/api/img/faces", "/api/audio/se/Cursor", "/api/audio/se", "/api/plugin-source/Hello"}
 
 	for _, target := range targets {
 		t.Run(target, func(t *testing.T) {

@@ -9,6 +9,7 @@ import {
   withMoveType,
   type EventMovementFields,
 } from '../../core/eventPage/eventMovement.ts';
+import type { RouteSetting } from '../../core/moveRoutes/routeStart.ts';
 import { EditorStack, FieldRow, SelectField } from '../commandEditors/editorFields.tsx';
 import { MoveRouteEditor } from '../commandEditors/MoveRouteEditor.tsx';
 
@@ -25,6 +26,11 @@ type MovementSettingsProps = {
    * Hands back the fields after every change.
    */
   readonly onChange: (value: EventMovementFields) => void;
+
+  /**
+   * Where the page's own route runs, for the map showing where it goes; left out, or null, where there is no map.
+   */
+  readonly setting?: RouteSetting | null;
 };
 
 /**
@@ -37,7 +43,7 @@ type MovementSettingsProps = {
  */
 const MovementSettings = (props: MovementSettingsProps) =>
 {
-  const { value, onChange } = props;
+  const { value, onChange, setting = null } = props;
   return (
     <EditorStack>
       <FieldRow>
@@ -49,7 +55,7 @@ const MovementSettings = (props: MovementSettingsProps) =>
           onChange={moveFrequency => onChange(withMoveFrequency(value, moveFrequency))}/>
       </FieldRow>
       {usesCustomRoute(value.moveType)
-        ? <MoveRouteEditor mode={'page'} route={value.moveRoute} onChange={moveRoute => onChange(withMoveRoute(value, moveRoute))}/>
+        ? <MoveRouteEditor mode={'page'} route={value.moveRoute} setting={setting} onChange={moveRoute => onChange(withMoveRoute(value, moveRoute))}/>
         : null}
     </EditorStack>
   );

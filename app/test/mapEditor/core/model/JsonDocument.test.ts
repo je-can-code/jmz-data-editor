@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createDocument } from '../../../../src/mapEditor/core/model/createDocument.ts';
 import type { JsonValue } from '../../../../src/mapEditor/core/model/json.ts';
-import { JsonDocument, MapInfosDocument, TilesetsDocument } from '../../../../src/mapEditor/core/model/JsonDocument.ts';
+import { JsonDocument, MapInfosDocument, SystemDocument, TilesetsDocument } from '../../../../src/mapEditor/core/model/JsonDocument.ts';
 import { MapDocument } from '../../../../src/mapEditor/core/model/MapDocument.ts';
 import { PatchConflictError } from '../../../../src/mapEditor/core/model/patches.ts';
 import { buildMapJson } from '../../support/fixtures.ts';
@@ -37,6 +37,19 @@ describe('JsonDocument', () =>
     // Assert.
     expect(document.toJson())
       .toStrictEqual({ names: [ 'a', 'b' ] });
+  });
+
+  it('holds exactly the content it was built from, whatever its keys\' order, and nothing differing by one value', () =>
+  {
+    // Arrange.
+    const document = new JsonDocument('editor-data:layouts', { width: 1, height: 2 });
+
+    // Act.
+    const found = [ document.matches({ height: 2, width: 1 }), document.matches({ width: 1, height: 3 }), document.matches({ width: 1 }) ];
+
+    // Assert.
+    expect(found)
+      .toStrictEqual([ true, false, false ]);
   });
 
   it('applies a set and tells its listeners', () =>
@@ -174,6 +187,22 @@ describe('JsonDocument', () =>
     });
   });
 
+  describe('SystemDocument', () =>
+  {
+    it('reads the switches\' names and the variables\' names, each by id', () =>
+    {
+      // Arrange: the settings, with a title beside the two lists.
+      const document = new SystemDocument('system', { gameTitle: 'Chef Adventure', switches: [ '', 'Door open' ], variables: [ '', 'Gold', 'Parries' ] });
+
+      // Act.
+      const names = [ document.names('switches'), document.names('variables'), document.system['gameTitle'] ];
+
+      // Assert.
+      expect(names)
+        .toStrictEqual([ [ '', 'Door open' ], [ '', 'Gold', 'Parries' ], 'Chef Adventure' ]);
+    });
+  });
+
   describe('createDocument', () =>
   {
     it('builds the kind of document each key names', () =>
@@ -187,12 +216,13 @@ describe('JsonDocument', () =>
         createDocument('mapinfos', buildInfos()),
         createDocument('tilesets', []),
         createDocument('common-events', [ null ]),
+        createDocument('system', { switches: [ '' ], variables: [ '' ] }),
         createDocument('editor-data:blueprints', {}),
       ];
 
       // Assert.
       expect(documents.map(document => document.constructor))
-        .toStrictEqual([ MapDocument, MapInfosDocument, TilesetsDocument, JsonDocument, JsonDocument ]);
+        .toStrictEqual([ MapDocument, MapInfosDocument, TilesetsDocument, JsonDocument, SystemDocument, JsonDocument ]);
     });
   });
 });

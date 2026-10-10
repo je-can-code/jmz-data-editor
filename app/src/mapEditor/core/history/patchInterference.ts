@@ -216,6 +216,21 @@ const gridInterference = (earlier: TilesPatch | ResizePatch, later: TilesPatch |
 };
 
 /**
+ * Reports whether a patch only adds or takes away empty slots at a place in a list, holding nothing of its own: the room
+ * a new event's id needs when it lies past the end of the map's list, made before the event is put in it. Taking such a
+ * patch back out only shortens the list, so where an edit after it stands further along, the slots can stay as they are,
+ * empty, rather than move that edit to another id.
+ * @param {Patch} patch The patch.
+ * @returns {boolean} True for a splice whose every item, taken out or put in, is an empty slot.
+ */
+const isSlotSplice = (patch: Patch): boolean =>
+{
+  return patch.kind === 'splice'
+    && patch.removed.length + patch.inserted.length > 0
+    && [ ...patch.removed, ...patch.inserted ].every(item => item === null);
+};
+
+/**
  * Relates two patches on one document, the later one applied after the earlier. This is the whole test for taking
  * a step back out from under later edits: the patches of each step it passes still find their data where they left
  * it, so both can be undone later in either order, while every patch it catches would write to the wrong place or
@@ -243,5 +258,5 @@ const patchInterference = (earlier: Patch, later: Patch): Interference | null =>
   return jsonInterference(footprintOf(earlier), footprintOf(later));
 };
 
-export { patchInterference };
+export { isSlotSplice, patchInterference };
 export type { Interference };

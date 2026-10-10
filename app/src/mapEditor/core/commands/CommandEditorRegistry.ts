@@ -1,6 +1,19 @@
 import type { ComponentType } from 'react';
+import type { DocumentKey } from '../model/documentKeys.ts';
+import type { PatchPath } from '../model/patches.ts';
 import type { RmmzEventCommand } from '../model/rmmzTypes.ts';
 import type { CommandCatalogEntry } from './catalogTypes.ts';
+
+/**
+ * Where a command sits, as the list holding it knows: the document, the list's path in it (an event page's list on a
+ * map, or a common event's), and every command before it in that list. An editor whose command depends on what came
+ * before it, such as a move route that starts where earlier routes left its walker, reads it from here.
+ */
+type CommandWhereabouts = {
+  readonly documentKey: DocumentKey;
+  readonly listPath: PatchPath;
+  readonly before: readonly RmmzEventCommand[];
+};
 
 /**
  * A whole block, handed to an editor that changes the block's structure rather than one command: Show Choices
@@ -34,6 +47,11 @@ type CommandEditorProps = {
    * The whole block, for the editors that change a block's structure; absent for every other command.
    */
   readonly block?: CommandBlockEdit;
+
+  /**
+   * Where the command sits, when a list is showing it; absent for an editor shown on its own.
+   */
+  readonly whereabouts?: CommandWhereabouts;
 };
 
 /**
@@ -97,4 +115,4 @@ class CommandEditorRegistry<TEditor = CommandEditor>
 }
 
 export { CommandEditorRegistry };
-export type { CommandBlockEdit, CommandEditor, CommandEditorProps };
+export type { CommandBlockEdit, CommandEditor, CommandEditorProps, CommandWhereabouts };

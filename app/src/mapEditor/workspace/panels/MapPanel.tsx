@@ -1,11 +1,14 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Box, Button, Chip, CircularProgress, Divider, IconButton, Stack, Tooltip, Typography } from '@mui/material';
 import Palette from '@mui/icons-material/Palette';
 import PaletteOutlined from '@mui/icons-material/PaletteOutlined';
 import type { IDockviewPanelProps } from 'dockview-react';
-import { mapDocumentKey, TILESETS_KEY } from '../../core/model/documentKeys.ts';
+import { BLUEPRINTS_DOCUMENT } from '../../core/blueprints/blueprints.ts';
+import type { DocumentHub } from '../../core/history/DocumentHub.ts';
+import { isBlueprintMapId, mapDocumentKey, TILESETS_KEY } from '../../core/model/documentKeys.ts';
 import type { RmmzTileset } from '../../core/model/rmmzTypes.ts';
 import type { WindowPaint } from '../../core/tools/WindowPaint.ts';
+import { takesKeysOnArrival } from '../../core/workspace/mapKeys.ts';
 import type { MapPanelParams } from '../../core/workspace/panels.ts';
 import { documentLabel } from '../../views/documentLabels.ts';
 import { usePanelVisible, usePanelWindow } from '../windowScope.tsx';
@@ -35,8 +38,34 @@ type PaletteToggle = {
 };
 
 /**
+ * Says what a blueprint's tab waits for, when it waits: the author's choice between its own changes and a version of the
+ * blueprint found on disk, or their choice about the blueprints themselves, changed elsewhere while a change to one was
+ * being written. Nothing of the blueprint is written meanwhile, and the choice is offered at the foot of the window.
+ * @param {Pick<DocumentHub, 'isConflicted'>} hub The window's documents.
+ * @param {number} mapId The map, or the id a blueprint opened as a map takes.
+ * @returns {string | null} The words, or null for a map, or a blueprint waiting for nothing.
+ */
+const blueprintWaitWords = (hub: Pick<DocumentHub, 'isConflicted'>, mapId: number): string | null =>
+{
+  if (isBlueprintMapId(mapId) === false)
+  {
+    return null;
+  }
+
+  if (hub.isConflicted(mapDocumentKey(mapId)))
+  {
+    return 'Changed on disk: choose below which to keep';
+  }
+
+  return hub.isConflicted(BLUEPRINTS_DOCUMENT)
+    ? 'Blueprints changed elsewhere: choose below'
+    : null;
+};
+
+/**
  * The strip across the top of a map panel: the map's name and size, its tileset, and what is going on with it, and, in
- * a torn-out window, the toggle for the map's own palette.
+ * a torn-out window, the toggle for the map's own palette. A blueprint opened as a map says it is one, and what it waits
+ * for when it waits for the author's choice (see {@link blueprintWaitWords}).
  * @param {{ mapId: number, held: HeldMap, focusEventId: number | null, palette: PaletteToggle | null }} props The map,
  * what is known about it, the event picked out, and the palette's toggle, or null in the main window.
  * @returns {React.JSX.Element} The strip.
@@ -45,7 +74,8 @@ const MapStatus = (props: { mapId: number; held: HeldMap; focusEventId: number |
 {
   const { mapId, held, focusEventId, palette } = props;
   const { hub } = useWorkspace().services;
-  const { row, map, dirty } = held;
+  const { name, map, dirty } = held;
+  const waiting = blueprintWaitWords(hub, mapId);
   const tileset = map !== null && hub.has(TILESETS_KEY)
     ? (hub.document(TILESETS_KEY).valueAt([ map.tilesetId ]) as RmmzTileset | null | undefined) ?? null
     : null;
@@ -64,26 +94,37 @@ const MapStatus = (props: { mapId: number; held: HeldMap; focusEventId: number |
         </Tooltip>
       )}
       <Typography variant={'body2'} noWrap sx={{ fontWeight: 600 }}>
-        {row?.name ?? documentLabel(mapDocumentKey(mapId))}
+        {name ?? documentLabel(mapDocumentKey(mapId))}
       </Typography>
+      {isBlueprintMapId(mapId) && <Chip size={'small'} label={'Blueprint'} color={'primary'} variant={'outlined'}/>}
       <Typography variant={'caption'} color={'text.secondary'} noWrap>
         {size}
       </Typography>
       {dirty && <Chip size={'small'} label={'Unsaved'} color={'warning'} variant={'outlined'}/>}
+      {waiting !== null && <Chip size={'small'} label={waiting} color={'warning'} data-testid={'blueprint-waiting'}/>}
       {focusEventId !== null && <Chip size={'small'} label={`Event ${focusEventId} picked`} color={'secondary'} variant={'outlined'}/>}
     </Stack>
   );
 };
 
 /**
+ * What a panel says of a map it has nothing to draw for, by whether it is a blueprint opened as a map: that it is gone and
+ * where an undo brings it back, or that it could not be opened.
+ */
+const ABSENT_WORDS = {
+  map: { gone: 'This map was deleted.', back: 'Undo in the map tree brings it back here.', failed: 'This map could not be opened.' },
+  blueprint: { gone: 'This blueprint was deleted.', back: 'Undo in its history brings it back here.', failed: 'This blueprint could not be opened.' },
+} as const;
+
+/**
  * What fills a map panel when there is no map to draw: a spinner while it opens, or why there is none.
- * @param {{ held: HeldMap, onClose: () => void }} props What is known, and how to close the panel.
+ * @param {{ mapId: number, held: HeldMap, onClose: () => void }} props The map, what is known, and how to close the panel.
  * @returns {React.JSX.Element} The message.
  */
-const MapAbsent = (props: { held: HeldMap; onClose: () => void }) =>
+const MapAbsent = (props: { mapId: number; held: HeldMap; onClose: () => void }) =>
 {
-  const { held, onClose } = props;
-  if (held.row !== null && held.failure === null)
+  const { mapId, held, onClose } = props;
+  if (held.gone === false && held.failure === null)
   {
     return (
       <Box sx={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center' }}>
@@ -92,13 +133,14 @@ const MapAbsent = (props: { held: HeldMap; onClose: () => void }) =>
     );
   }
 
+  const words = ABSENT_WORDS[isBlueprintMapId(mapId) ? 'blueprint' : 'map'];
   return (
     <Stack spacing={1} alignItems={'center'} justifyContent={'center'} sx={{ position: 'absolute', inset: 0, p: 2, color: 'text.secondary' }}>
       <Typography variant={'body1'}>
-        {held.failure === null ? 'This map was deleted.' : 'This map could not be opened.'}
+        {held.failure === null ? words.gone : words.failed}
       </Typography>
       <Typography variant={'body2'} align={'center'}>
-        {held.failure ?? 'Undo in the map tree brings it back here.'}
+        {held.failure ?? words.back}
       </Typography>
       <Button size={'small'} onClick={onClose}>
         Close
@@ -143,6 +185,11 @@ const MapPaletteDock = (props: { readonly mapId: number; readonly paint: WindowP
  * open, side by side, stacked, or torn out into their own windows, and every one shows the same live map; only the
  * ones on screen hold a GPU context to draw with.
  *
+ * A blueprint opens in a map panel too, as the small map it lays out as, with the blueprint's tileset: painted, its
+ * layers chosen, its events moved and edited, and its events' windows opened, as a map's are, every change one step in
+ * the blueprint's own history. Its tab reads the blueprint's name, marked while it has unsaved changes, which stay held
+ * in the window when the tab closes, as a map's do.
+ *
  * Each window paints on its own. Docked in the main window, the map paints with what the workspace's palette and layers
  * panel pick. Torn out, it carries its own palette and layers panel beside it, picking for its window alone, so painting
  * there needs nothing from the main window; a toggle on the panel's strip hides both, and the layout remembers.
@@ -158,7 +205,34 @@ const MapPanel = (props: IDockviewPanelProps<MapPanelParams>) =>
   const held = useHeldMap(mapId);
   const focus = useWorkspaceState(state => state.eventFocus[mapId] ?? null);
   const focusEventId = focus === null ? null : focus.eventId;
+  const cellFocus = useWorkspaceState(state => state.cellFocus[mapId] ?? null);
   const visible = usePanelVisible(api);
+
+  // a map brought forward, by its tab or by another tab closing, takes the keys from wherever they sat only by accident
+  // of that, so a paste goes to the map in view without a click on it first. The check waits for the click that brought
+  // the tab forward to finish putting the keys on the tab.
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  const [ keysRequest, setKeysRequest ] = useState(0);
+  useEffect(() =>
+  {
+    const subscription = api.onDidActiveChange(event =>
+    {
+      if (event.isActive === false)
+      {
+        return;
+      }
+
+      api.getWindow().setTimeout(() =>
+      {
+        const panel = panelRef.current;
+        if (panel !== null && takesKeysOnArrival(panel.ownerDocument.activeElement, panel))
+        {
+          setKeysRequest(current => current + 1);
+        }
+      }, 0);
+    });
+    return () => subscription.dispose();
+  }, [ api ]);
 
   // the panel's window decides what it paints with: the page's own paint in the main window, its own anywhere else.
   const paint = paints.forWindow(usePanelWindow());
@@ -169,9 +243,10 @@ const MapPanel = (props: IDockviewPanelProps<MapPanelParams>) =>
     : null;
 
   // the tab reads the map's name, marked while it has unsaved edits.
-  const title = held.row === null
-    ? `${documentLabel(mapDocumentKey(mapId))} (deleted)`
-    : `${held.row.name}${held.dirty ? ' *' : ''}`;
+  const unnamed = isBlueprintMapId(mapId) ? 'Blueprint' : documentLabel(mapDocumentKey(mapId));
+  const title = held.gone
+    ? `${unnamed} (deleted)`
+    : `${held.name ?? unnamed}${held.dirty ? ' *' : ''}`;
   useEffect(() =>
   {
     if (api.title !== title)
@@ -181,21 +256,24 @@ const MapPanel = (props: IDockviewPanelProps<MapPanelParams>) =>
   }, [ api, title ]);
 
   return (
-    <Box sx={{ height: '100%', display: 'flex', bgcolor: 'background.default' }}>
+    <Box ref={panelRef} sx={{ height: '100%', display: 'flex', bgcolor: 'background.default' }}>
       {ownWindow && paletteShown && <MapPaletteDock mapId={mapId} paint={paint}/>}
       <Box sx={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
         <MapStatus mapId={mapId} held={held} focusEventId={focusEventId} palette={palette}/>
         <Box sx={{ flex: 1, position: 'relative', minHeight: 0 }}>
           {held.map === null
-            ? <MapAbsent held={held} onClose={() => api.close()}/>
+            ? <MapAbsent mapId={mapId} held={held} onClose={() => api.close()}/>
             : (
               <MapSurface
                 document={held.map}
                 focusEventId={focusEventId}
                 focusRequest={focus === null ? 0 : focus.request}
+                focusCell={cellFocus === null ? null : cellFocus.cell}
+                focusCellRequest={cellFocus === null ? 0 : cellFocus.request}
                 visible={visible}
                 selection={controller.selection}
                 paint={paint}
+                keysRequest={keysRequest}
                 onNotice={(text, severity) => controller.notify(text, severity)}
               />
             )}

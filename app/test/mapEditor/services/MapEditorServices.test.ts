@@ -1,11 +1,22 @@
 import { describe, expect, it, vi } from 'vitest';
 import { WindowShell } from '../../../src/core/infrastructure/shell/WindowShell.ts';
+import { blueprintMapContent } from '../../../src/mapEditor/core/blueprints/blueprintMaps.ts';
+import { BLUEPRINTS_DOCUMENT } from '../../../src/mapEditor/core/blueprints/blueprints.ts';
 import type { CloseTarget } from '../../../src/mapEditor/core/closeGuard.ts';
 import { BUILT_IN_ENTRIES } from '../../../src/mapEditor/core/commands/builtin/builtInCommands.ts';
-import { mapHistoryKey } from '../../../src/mapEditor/core/history/historyKeys.ts';
+import { blueprintHistoryKey, mapHistoryKey } from '../../../src/mapEditor/core/history/historyKeys.ts';
+import { blueprintMapId } from '../../../src/mapEditor/core/model/documentKeys.ts';
 import { createMapEvent } from '../../../src/mapEditor/core/model/eventModel.ts';
-import { createMapEditorServices, type MapEditorEnvironment } from '../../../src/mapEditor/services/MapEditorServices.ts';
+import type { JsonValue } from '../../../src/mapEditor/core/model/json.ts';
+import type { RmmzMapEvent } from '../../../src/mapEditor/core/model/rmmzTypes.ts';
+import type { MapEditorApi } from '../../../src/mapEditor/core/api/MapEditorApi.ts';
+import type { ViewStore } from '../../../src/mapEditor/core/preview/RememberedView.ts';
+import { renameEntry } from '../../../src/mapEditor/core/system/systemNames.ts';
+import { createMapEditorServices, type MapEditorEnvironment, type MapEditorServices } from '../../../src/mapEditor/services/MapEditorServices.ts';
+import { projectNamesOf } from '../../../src/mapEditor/views/commandList/commandListResources.ts';
+import { storedBlueprints } from '../support/blueprintFixtures.ts';
 import { buildMapJson } from '../support/fixtures.ts';
+import { stampOf } from '../support/stampFixtures.ts';
 import { envelope, FakeEventSource, MemoryChannelNetwork, stubFetch } from '../support/standIns.ts';
 
 /*
@@ -19,8 +30,23 @@ import { envelope, FakeEventSource, MemoryChannelNetwork, stubFetch } from '../s
  * other live window holds exactly this window's unsaved state, and a closing window says goodbye at once, so no
  * window keeps counting it. Conflicts settle only the way the author chooses. And a stop leaves nothing listening.
  * A started window reads js/plugins.js and switches on the modules whose plugins it enables; one that cannot read it
- * keeps the core's kinds alone. A started window's painting tools paint with what the palette and the layer strip
+ * keeps the core's kinds alone. It reads the modules' configs again whenever one of them changes on disk, and when the
+ * stream comes back after dropping, so a config fixed by hand shows at once. A started window's painting tools paint with what the palette and the layer strip
  * pick, and any other window the page draws into, a torn-out map's, paints with a paint of its own.
+ *
+ * A window has one clock. It starts where the game does once a module offering it switches on, follows the game's
+ * starting time while the author leaves it be, and keeps the hour the author picks however often the modules switch on
+ * afresh.
+ *
+ * Once something asks, a window counts every blueprint's copies from every map's notes, and counts them again whenever a
+ * map changes on disk or the stream comes back, never before it is asked and never for a file that is no map.
+ *
+ * A window with a server marks every transfer whose landing fails, and judges every landing afresh whenever what it is
+ * judged by changes: the modules' rules and kinds, the page rule, or the clock; once stopped, it judges nothing afresh.
+ *
+ * A window with a server writes every transfer pair to both its maps in one act as it moves, asks before closing while
+ * one is on its way, and opens a map from its file only once those have landed; its transfers start from the default
+ * picture and sounds, and keep each choice the author makes.
  */
 describe('MapEditorServices', () =>
 {
@@ -51,21 +77,42 @@ describe('MapEditorServices', () =>
    * @param {MemoryChannelNetwork} network The channel network.
    * @param {string} clientId The window's id.
    * @param {string | null} apiBase The server, or null for none.
+   * @param {Readonly<Record<string, JsonValue>>} editorData The editor-only documents the server holds, by name, in their
+   * stored form; every other read answers the map file.
    * @returns {object} The environment and the stand-ins behind it.
    */
-  const buildEnvironment = (network: MemoryChannelNetwork, clientId: string, apiBase: string | null = 'http://api') =>
+  const buildEnvironment = (
+    network: MemoryChannelNetwork,
+    clientId: string,
+    apiBase: string | null = 'http://api',
+    editorData: Readonly<Record<string, JsonValue>> = {},
+  ) =>
   {
     const sources: FakeEventSource[] = [];
     let files = buildMapJson();
     const { fetch, requests } = stubFetch(request =>
     {
+      // a blueprint's change, and a transfer pair, are written in an act of their own, which the map file never takes whole.
+      if (request.method === 'PUT' && (request.url.endsWith('/api/blueprint-changes') || request.url.endsWith('/api/map-changes')))
+      {
+        return new Response(null, { status: 204 });
+      }
+
       if (request.method === 'PUT')
       {
         files = JSON.parse(request.body as string);
         return new Response(null, { status: 204 });
       }
 
-      return envelope(files);
+      if (request.url.endsWith('/api/event-notes'))
+      {
+        return envelope({ notes: [] });
+      }
+
+      const name = /\/api\/editor-data\/([a-z0-9-]+)$/u.exec(request.url)?.[1];
+      return name !== undefined && Object.hasOwn(editorData, name)
+        ? envelope(editorData[name])
+        : envelope(files);
     });
     const window = buildWindowTarget();
     const environment: MapEditorEnvironment = {
@@ -131,6 +178,22 @@ describe('MapEditorServices', () =>
   {
     setTimeout(resolve, 0);
   });
+
+  /**
+   * Waits until a window can change a blueprint: its copies counted, the other windows heard from.
+   * @param {MemoryChannelNetwork} network The channel network.
+   * @param {MapEditorServices} services The window.
+   * @param {string} blueprintId The blueprint.
+   * @returns {Promise<void>} Settles once it can.
+   */
+  const whenBlueprintCanChange = async (network: MemoryChannelNetwork, services: MapEditorServices, blueprintId: string): Promise<void> =>
+  {
+    await pump(network, vi.waitFor(() =>
+    {
+      expect(services.copyMaps.readiness(blueprintId))
+        .toBeNull();
+    }, { timeout: 2000 }));
+  };
 
   /**
    * A window started on the network, holding the map it opened from the file, renamed and unsaved.
@@ -235,6 +298,268 @@ describe('MapEditorServices', () =>
     services.stop();
   });
 
+  it('switches the modules on afresh when a config one of them reads changes on disk, or the stream comes back', async () =>
+  {
+    // Arrange: a project enabling J-Lighting whose config's light colour is no colour, so J-Lighting says so.
+    let lightColor = 'white';
+    const { fetch, requests } = stubFetch(request =>
+    {
+      if (request.url.endsWith('/api/plugin-metadata'))
+      {
+        return new Response('var $plugins = [\n{"name":"j/lighting/J-Lighting","status":true,"description":"","parameters":{}}\n];');
+      }
+
+      // the server serves every effect, as its model declares.
+      const tuning = { depth: 0.2, period: 40, chance: 0, variance: 0.18 };
+      const effects = { flicker: tuning, pulse: tuning, glitch: tuning };
+      return request.url.endsWith('/api/config/lighting')
+        ? envelope({ light: { radius: 5, color: lightColor, intensity: 0, effects }, ambient: { color: '#000000' } })
+        : envelope({});
+    });
+    const { environment, sources } = buildEnvironment(new MemoryChannelNetwork(), 'window-a');
+    const services = createMapEditorServices({ ...environment, fetch });
+    services.start();
+    await vi.waitFor(() =>
+    {
+      expect(services.modules.notices().length)
+        .toBe(1);
+    });
+    const configReads = () => requests.filter(request => request.url.endsWith('/api/config/lighting')).length;
+    const readsBefore = configReads();
+
+    // Act: another file changes, then the config is fixed and its change announced.
+    sources[0].emitChange({ path: 'data/Map001.json', kind: 'write', client: '' });
+    await settle();
+    const readsAfterMap = configReads();
+    lightColor = '#ffbb73';
+    sources[0].emitChange({ path: 'data/config.lighting.json', kind: 'write', client: '' });
+    await vi.waitFor(() =>
+    {
+      expect(services.modules.notices().length)
+        .toBe(0);
+    });
+
+    // Assert: a map's change read no config; the config's change read it again; the stream coming back reads it too.
+    sources[0].emit('error');
+    sources[0].emit('open');
+    await vi.waitFor(() =>
+    {
+      expect(configReads())
+        .toBe(readsBefore + 2);
+    });
+    expect(readsAfterMap)
+      .toBe(readsBefore);
+    services.stop();
+  });
+
+  it('judges quest-gated pages again when the quest config changes on disk, telling the page rule\'s listeners', async () =>
+  {
+    // Arrange: a project enabling J-OMNI-Quests whose delivery has objectives 0 to 2, and a page waiting for objective 2
+    // to be inactive, which on a fresh save it is.
+    let objectives = [ { id: 0 }, { id: 1 }, { id: 2 } ];
+    const { fetch } = stubFetch(request =>
+    {
+      if (request.url.endsWith('/api/plugin-metadata'))
+      {
+        return new Response('var $plugins = [\n{"name":"j/omni/ext/J-OMNI-Quests","status":true,"description":"","parameters":{}}\n];');
+      }
+
+      return request.url.endsWith('/api/config/quest')
+        ? envelope({ quests: [ { name: 'Herbalist Delivery', key: 'herbalist_delivery', objectives } ], tags: [], categories: [] })
+        : envelope({});
+    });
+    const { environment, sources } = buildEnvironment(new MemoryChannelNetwork(), 'window-a');
+    const services = createMapEditorServices({ ...environment, fetch });
+    const waiting = { ...createMapEvent(4, 0, 0).pages[0], list: [ { code: 108, indent: 0, parameters: [ '<pageQuestCondition:[herbalist_delivery, 2, inactive]>' ] } ] };
+    const judge = () => services.pages.rule().conditions.flatMap(condition =>
+    {
+      const test = condition.read(waiting);
+      return test === null ? [] : [ test.holds({ timeOfDay: 0 }), ...test.words ];
+    });
+    services.start();
+    await vi.waitFor(() =>
+    {
+      expect(services.modules.isActive('quest'))
+        .toBe(true);
+    });
+    const before = judge();
+    let told = 0;
+    const stop = services.pages.subscribe(() =>
+    {
+      told += 1;
+    });
+
+    // Act: objective 2 is taken out of the delivery, and the file's change announced.
+    objectives = [ { id: 0 }, { id: 1 } ];
+    sources[0].emitChange({ path: 'data/config.quest.json', kind: 'write', client: '' });
+    await vi.waitFor(() =>
+    {
+      expect(told)
+        .toBe(1);
+    });
+
+    // Assert: shown before, held back after, and saying why.
+    expect([ before, judge() ])
+      .toStrictEqual([
+        [ true, 'while objective 2 of "Herbalist Delivery" is inactive' ],
+        [ false, 'while objective 2 of "Herbalist Delivery" is inactive (no such objective)' ],
+      ]);
+    stop();
+    services.stop();
+  });
+
+  it('starts the window\'s clock where the game does once J-TIME\'s module offers one, keeping the author\'s hour after', async () =>
+  {
+    // Arrange: a project enabling J-Lighting, J-Lighting-Time and J-TIME, whose game starts at the hour the test says;
+    // J-TIME's module offers the clock, the lighting module casting its sky by it.
+    let startingHour = '14';
+    const { fetch } = stubFetch(request =>
+    {
+      if (request.url.endsWith('/api/plugin-metadata'))
+      {
+        const time = `{"name":"j/time/J-TIME","status":true,"description":"","parameters":{"useRealTime":"false","startingHour":"${startingHour}","startingMinute":"0"}}`;
+        return new Response(`var $plugins = [\n{"name":"j/lighting/J-Lighting","status":true,"description":"","parameters":{}},\n`
+          + `{"name":"j/lighting/ext/J-Lighting-Time","status":true,"description":"","parameters":{}},\n${time}\n];`);
+      }
+
+      // the server serves every effect, and the curve, as its models declare.
+      const tuning = { depth: 0.2, period: 40, chance: 0, variance: 0.18 };
+      const night = { tone: [ -34, -14, 40, 95 ], darkness: 0.55 };
+      return request.url.endsWith('/api/config/lighting')
+        ? envelope({ light: { radius: 5, color: '#ffffff', intensity: 0, effects: { flicker: tuning, pulse: tuning, glitch: tuning } }, ambient: { color: '#000000' } })
+        : envelope({ phases: { Night: night }, sequence: [ 'Night', 'Night', 'Night', 'Night', 'Night', 'Night', 'Night' ] });
+    });
+    const { environment, sources } = buildEnvironment(new MemoryChannelNetwork(), 'window-a');
+    const services = createMapEditorServices({ ...environment, fetch });
+    const before = services.clock.time();
+
+    // Act: started; then the game made to start at 9:00, after the author moved the clock to 22:00.
+    services.start();
+    await vi.waitFor(() =>
+    {
+      expect(services.modules.clockOffer())
+        .not.toBeNull();
+    });
+    const started = services.clock.time();
+    services.clock.set(1320);
+    startingHour = '9';
+    sources[0].emitChange({ path: 'js/plugins.js', kind: 'write', client: '' });
+    sources[0].emitChange({ path: 'data/config.lighting-time.json', kind: 'write', client: '' });
+    await vi.waitFor(() =>
+    {
+      expect(services.modules.clockOffer()?.startsAt)
+        .toBe(540);
+    });
+
+    // Assert: midnight before the modules switched on, the game's 14:00 once they did, and the author's 22:00 kept.
+    expect([ before, started, services.clock.time() ])
+      .toStrictEqual([ 0, 840, 1320 ]);
+    services.stop();
+  });
+
+  it('reads the party a new game seats once started, again when System.json or Actors.json changes, and when the stream comes back', async () =>
+  {
+    // Arrange: a project whose new game seats whoever the test says, counting its reads.
+    let party = [ 1, 2 ];
+    let reads = 0;
+    const { fetch } = stubFetch(request =>
+    {
+      if (request.url.endsWith('/api/new-game'))
+      {
+        reads += 1;
+        return envelope({ party });
+      }
+
+      return request.url.endsWith('/api/plugin-metadata') ? new Response('var $plugins = [];') : envelope({});
+    });
+    const { environment, sources } = buildEnvironment(new MemoryChannelNetwork(), 'window-a');
+    const services = createMapEditorServices({ ...environment, fetch });
+    const before = services.pages.save;
+
+    // Act: started; then System.json changes seating Rupert alone, a map changes, Actors.json changes, and the stream
+    // drops and comes back.
+    services.start();
+    await vi.waitFor(() =>
+    {
+      expect(services.pages.save)
+        .toStrictEqual({ party: [ 1, 2 ] });
+    });
+    party = [ 2 ];
+    sources[0].emitChange({ path: 'data/System.json', kind: 'write', client: '' });
+    await vi.waitFor(() =>
+    {
+      expect(services.pages.save)
+        .toStrictEqual({ party: [ 2 ] });
+    });
+    sources[0].emitChange({ path: 'data/Map001.json', kind: 'write', client: '' });
+    sources[0].emitChange({ path: 'data/Actors.json', kind: 'write', client: '' });
+    sources[0].emit('error');
+    sources[0].emit('open');
+
+    // Assert: nobody before starting; one read to start, one as the window takes the stream (whatever changed while
+    // nobody watched it went unannounced), one per new-game file changed and none for the map, and one for the stream
+    // coming back.
+    await vi.waitFor(() =>
+    {
+      expect(reads)
+        .toBe(5);
+    });
+    expect(before)
+      .toStrictEqual({ party: [] });
+    services.stop();
+  });
+
+  it('counts the blueprints\' copies from every map\'s notes once asked, again when a map changes on disk or the stream comes back', async () =>
+  {
+    // Arrange: a project with one copy of blueprint aa on map 3, counting the reads of every map's notes.
+    let reads = 0;
+    const { fetch } = stubFetch(request =>
+    {
+      if (request.url.endsWith('/api/event-notes'))
+      {
+        reads += 1;
+        return envelope({ notes: [ { mapId: 3, eventId: 2, note: '<blueprint:[aa, 1]>' } ] });
+      }
+
+      return request.url.endsWith('/api/plugin-metadata') ? new Response('var $plugins = [];') : envelope({});
+    });
+    const { environment, sources } = buildEnvironment(new MemoryChannelNetwork(), 'window-a');
+    const services = createMapEditorServices({ ...environment, fetch });
+    services.start();
+    await settle();
+    const beforeAsked = reads;
+
+    // Act: the Blueprints section asks; then a map changes on disk, then System.json, then the stream drops and comes back.
+    services.blueprintCopies.subscribe(() => undefined);
+    await vi.waitFor(() =>
+    {
+      expect(services.blueprintCopies.countOf('aa'))
+        .toStrictEqual({ total: 1, maps: [ { mapId: 3, copies: 1 } ] });
+    });
+    const asked = reads;
+    sources[0].emitChange({ path: 'data/Map003.json', kind: 'write', client: '' });
+    await vi.waitFor(() =>
+    {
+      expect(reads)
+        .toBe(asked + 1);
+    });
+    sources[0].emitChange({ path: 'data/System.json', kind: 'write', client: '' });
+    await services.blueprintCopies.settled();
+    const afterSystem = reads;
+    sources[0].emit('error');
+    sources[0].emit('open');
+
+    // Assert: nothing read before the section asked, and no read for System.json.
+    await vi.waitFor(() =>
+    {
+      expect(reads)
+        .toBe(asked + 2);
+    });
+    expect([ beforeAsked, afterSystem - asked ])
+      .toStrictEqual([ 0, 1 ]);
+    services.stop();
+  });
+
   it('keeps the core\'s kinds alone when js/plugins.js cannot be read', async () =>
   {
     // Arrange: a server that answers the plugin list with an error.
@@ -275,6 +600,402 @@ describe('MapEditorServices', () =>
     expect([ document.toJson(), again === document ])
       .toStrictEqual([ buildMapJson(), true ]);
     services.stop();
+  });
+
+  describe('opening a blueprint as a map', () =>
+  {
+    /**
+     * The blueprints the server holds: the camp, two cells wide, with a goblin standing in it.
+     * @returns {JsonValue} The blueprints document, in its stored form.
+     */
+    const blueprintsOnDisk = (): JsonValue => storedBlueprints({
+      k3x9q2mf: { name: 'Camp', stamp: stampOf({ width: 2, events: [ { ...createMapEvent(4, 1, 0), name: 'Goblin' } ] }) },
+    }) as JsonValue;
+
+    it('lays it out from the blueprints, held first, when no other window holds it, and never asks for a file of it', async () =>
+    {
+      // Arrange.
+      const network = new MemoryChannelNetwork();
+      const { environment, requests } = buildEnvironment(network, 'window-a', 'http://api', { blueprints: blueprintsOnDisk() });
+      const services = createMapEditorServices(environment);
+      services.start();
+
+      // Act.
+      const document = await pump(network, services.openDocument('blueprint-map:k3x9q2mf'));
+
+      // Assert.
+      const goblin = document.valueAt([ 'events', 4 ]) as unknown as RmmzMapEvent | null;
+      expect([
+        goblin === null ? null : [ goblin.name, goblin.x, goblin.y ],
+        services.hub.has(BLUEPRINTS_DOCUMENT),
+        services.hub.isDirty('blueprint-map:k3x9q2mf'),
+        requests.filter(request => request.url.includes('/api/maps/')).length,
+      ])
+        .toStrictEqual([ [ 'Goblin', 1, 0 ], true, false, 0 ]);
+      services.stop();
+    });
+
+    it('takes the live copy from the window holding it, changes and all, rather than laying it out afresh', async () =>
+    {
+      // Arrange: the first window holds the camp with the goblin moved.
+      const network = new MemoryChannelNetwork();
+      const first = createMapEditorServices(buildEnvironment(network, 'window-a', 'http://api', { blueprints: blueprintsOnDisk() }).environment);
+      first.start();
+      await pump(network, first.openDocument('blueprint-map:k3x9q2mf'));
+      await whenBlueprintCanChange(network, first, 'k3x9q2mf');
+      first.hub.edit('Move event', [ mapHistoryKey(blueprintMapId('k3x9q2mf')) ], tx => tx.set('blueprint-map:k3x9q2mf', [ 'events', 4, 'x' ], 0));
+      network.flush();
+      const second = createMapEditorServices(buildEnvironment(network, 'window-b', 'http://api', { blueprints: blueprintsOnDisk() }).environment);
+      second.start();
+
+      // Act.
+      const document = await pump(network, second.openDocument('blueprint-map:k3x9q2mf'));
+
+      // Assert: the move came with its history.
+      const goblin = document.valueAt([ 'events', 4 ]) as unknown as RmmzMapEvent | null;
+      expect([ goblin === null ? null : goblin.x, second.hub.history(mapHistoryKey(blueprintMapId('k3x9q2mf'))).rows.map(row => row.label) ])
+        .toStrictEqual([ 0, [ 'Move event' ] ]);
+      first.stop();
+      second.stop();
+    });
+
+    it('keeps a blueprint it opens to its size and its events, refusing a change to either, and letting its events move', async () =>
+    {
+      // Arrange.
+      const network = new MemoryChannelNetwork();
+      const services = createMapEditorServices(buildEnvironment(network, 'window-a', 'http://api', { blueprints: blueprintsOnDisk() }).environment);
+      services.start();
+      await pump(network, services.openDocument('blueprint-map:k3x9q2mf'));
+      await whenBlueprintCanChange(network, services, 'k3x9q2mf');
+      const refusals: string[] = [];
+      services.hub.subscribe(event => (event.type === 'refused' ? refusals.push(event.message) : undefined));
+      const history = mapHistoryKey(blueprintMapId('k3x9q2mf'));
+
+      // Act.
+      const moved = services.hub.edit('Move event', [ history ], tx => tx.set('blueprint-map:k3x9q2mf', [ 'events', 4, 'x' ], 0));
+      const removed = services.hub.edit('Delete event', [ history ], tx => tx.set('blueprint-map:k3x9q2mf', [ 'events', 4 ], null));
+
+      // Assert.
+      expect([ moved?.label, removed, refusals ])
+        .toStrictEqual([ 'Move event', null, [ 'Events can\'t be removed from a blueprint: removing one would delete events on every map.' ] ]);
+      services.stop();
+    });
+
+    it('asks before the window closes while a change to a blueprint is on its way to disk, and not once it has landed', async () =>
+    {
+      // Arrange: the camp opened, nothing changed yet.
+      const network = new MemoryChannelNetwork();
+      const { environment, window, requests } = buildEnvironment(network, 'window-a', 'http://api', { blueprints: blueprintsOnDisk() });
+      const services = createMapEditorServices(environment);
+      services.start();
+      await pump(network, services.openDocument('blueprint-map:k3x9q2mf'));
+      await whenBlueprintCanChange(network, services, 'k3x9q2mf');
+      const history = mapHistoryKey(blueprintMapId('k3x9q2mf'));
+      const untouched = window.fire('beforeunload');
+
+      // Act.
+      services.hub.edit('Move event', [ history ], tx => tx.set('blueprint-map:k3x9q2mf', [ 'events', 4, 'x' ], 0));
+      const changed = window.fire('beforeunload');
+      await services.blueprintWriter?.whenWritten();
+
+      // Assert: written in one act, after which nothing is left to lose.
+      expect([ untouched, changed, window.fire('beforeunload'), requests.filter(request => request.url.endsWith('/api/blueprint-changes')).length, services.hub.isDirty('blueprint-map:k3x9q2mf') ])
+        .toStrictEqual([ false, true, false, 1, false ]);
+      services.stop();
+    });
+
+    it('opens a map from its file only once the changes to a blueprint on their way to disk have landed, so it opens with them', async () =>
+    {
+      // Arrange: a change to the camp made, its write still waiting for the run of changes to settle.
+      const network = new MemoryChannelNetwork();
+      const { environment, requests } = buildEnvironment(network, 'window-a', 'http://api', { blueprints: blueprintsOnDisk() });
+      const services = createMapEditorServices(environment);
+      services.start();
+      await pump(network, services.openDocument('blueprint-map:k3x9q2mf'));
+      await whenBlueprintCanChange(network, services, 'k3x9q2mf');
+      services.hub.edit('Move event', [ mapHistoryKey(blueprintMapId('k3x9q2mf')) ], tx => tx.set('blueprint-map:k3x9q2mf', [ 'events', 4, 'x' ], 0));
+
+      // Act.
+      await pump(network, services.openDocument('map:1'));
+
+      // Assert: the change went to disk before the map's file was read.
+      const order = requests.map(request => request.url).filter(url => url.endsWith('/api/blueprint-changes') || url.endsWith('/api/maps/1'));
+      expect(order)
+        .toStrictEqual([ 'http://api/api/blueprint-changes', 'http://api/api/maps/1' ]);
+      services.stop();
+    });
+
+    /**
+     * The blueprints a version of their file found on disk holds: the camp's goblin renamed Orc there.
+     * @returns {JsonValue} The blueprints document, in its stored form.
+     */
+    const orcOnDisk = (): JsonValue => storedBlueprints({
+      k3x9q2mf: { name: 'Camp', stamp: stampOf({ width: 2, events: [ { ...createMapEvent(4, 1, 0), name: 'Orc' } ] }) },
+    }) as JsonValue;
+
+    /**
+     * Reads the camp's one event as its tab shows it: its name and column.
+     * @param {MapEditorServices} services The window.
+     * @returns {[ string, number ] | null} The name and column, or null when it shows none.
+     */
+    const goblinInTab = (services: MapEditorServices): [ string, number ] | null =>
+    {
+      const event = services.hub.document('blueprint-map:k3x9q2mf').valueAt([ 'events', 4 ]) as unknown as RmmzMapEvent | null;
+      return event === null ? null : [ event.name, event.x ];
+    };
+
+    it('lays its tab out afresh from a version of the blueprints found on disk, and writes the next edit on top of it', async () =>
+    {
+      // Arrange: the camp open, then its file changed on disk, the goblin renamed there.
+      const network = new MemoryChannelNetwork();
+      const editorData: Record<string, JsonValue> = { blueprints: blueprintsOnDisk() };
+      const { environment, requests, sources } = buildEnvironment(network, 'window-a', 'http://api', editorData);
+      const services = createMapEditorServices(environment);
+      services.start();
+      await pump(network, services.openDocument('blueprint-map:k3x9q2mf'));
+      await whenBlueprintCanChange(network, services, 'k3x9q2mf');
+      editorData['blueprints'] = orcOnDisk();
+
+      // Act: the change reaches the window, then the event is moved in the tab.
+      sources[0].emitChange({ path: 'jmz-editor/blueprints.json', kind: 'write', client: '' });
+      await pump(network, vi.waitFor(() =>
+      {
+        expect(goblinInTab(services))
+          .toStrictEqual([ 'Orc', 1 ]);
+      }, { timeout: 2000 }));
+      services.hub.edit('Move event', [ mapHistoryKey(blueprintMapId('k3x9q2mf')) ], tx => tx.set('blueprint-map:k3x9q2mf', [ 'events', 4, 'x' ], 0));
+      await services.blueprintWriter?.whenWritten();
+
+      // Assert: one act, writing the orc moved, so the name found on disk stayed.
+      const acts = requests.filter(request => request.url.endsWith('/api/blueprint-changes')).map(request => JSON.parse(request.body as string) as { blueprints: { data: { blueprints: Record<string, { stamp: { events: RmmzMapEvent[] } }> } } });
+      expect(acts.map(act => act.blueprints.data.blueprints['k3x9q2mf'].stamp.events.map(event => [ event.name, event.x ])))
+        .toStrictEqual([ [ [ 'Orc', 0 ] ] ]);
+      services.stop();
+    });
+
+    /**
+     * A window with the camp open and its goblin moved in the tab, the move not yet written, when the blueprints' file
+     * changes on disk, the goblin renamed Orc there: the window waits for the author's choice about the blueprints.
+     * @returns {Promise<object>} The window, what it asked of the server, and what its tab and writer showed while waiting.
+     */
+    const movedWhenDiskChanged = async () =>
+    {
+      const network = new MemoryChannelNetwork();
+      const editorData: Record<string, JsonValue> = { blueprints: blueprintsOnDisk() };
+      const { environment, requests, sources } = buildEnvironment(network, 'window-a', 'http://api', editorData);
+      const services = createMapEditorServices(environment);
+      services.start();
+      await pump(network, services.openDocument('blueprint-map:k3x9q2mf'));
+      await whenBlueprintCanChange(network, services, 'k3x9q2mf');
+      services.hub.edit('Move event', [ mapHistoryKey(blueprintMapId('k3x9q2mf')) ], tx => tx.set('blueprint-map:k3x9q2mf', [ 'events', 4, 'x' ], 0));
+      editorData['blueprints'] = orcOnDisk();
+      sources[0].emitChange({ path: 'jmz-editor/blueprints.json', kind: 'write', client: '' });
+      await pump(network, vi.waitFor(() =>
+      {
+        expect(services.hub.isConflicted(BLUEPRINTS_DOCUMENT))
+          .toBe(true);
+      }, { timeout: 2000 }));
+      const acts = () => requests.filter(request => request.url.endsWith('/api/blueprint-changes'))
+        .map(request => (JSON.parse(request.body as string) as { blueprints: { data: { blueprints: Record<string, { stamp: { events: RmmzMapEvent[] } }> } } }).blueprints.data.blueprints['k3x9q2mf'].stamp.events.map(event => [ event.name, event.x ]));
+      const waiting = [ goblinInTab(services), services.blueprintWriter?.hasUnwritten(), acts() ];
+      return { services, acts, waiting };
+    };
+
+    it('takes back a change in its tab not yet written when the blueprints change on disk, and writes it once the author keeps theirs', async () =>
+    {
+      // Arrange: the move waiting for the author's choice.
+      const { services, acts, waiting } = await movedWhenDiskChanged();
+
+      // Act: the author keeps their own version.
+      services.resolveConflict(BLUEPRINTS_DOCUMENT, 'mine');
+      await services.blueprintWriter?.whenWritten();
+
+      // Assert: nothing was written while it waited; kept, the move came back and was written.
+      expect([ waiting, goblinInTab(services), acts() ])
+        .toStrictEqual([ [ [ 'Goblin', 1 ], true, [] ], [ 'Goblin', 0 ], [ [ [ 'Goblin', 0 ] ] ] ]);
+      services.stop();
+    });
+
+    it('drops a change in its tab not yet written once the author takes the version of the blueprints on disk, the tab following it', async () =>
+    {
+      // Arrange: the move waiting for the author's choice.
+      const { services, acts, waiting } = await movedWhenDiskChanged();
+
+      // Act: the author takes the version on disk.
+      services.resolveConflict(BLUEPRINTS_DOCUMENT, 'theirs');
+      await services.blueprintWriter?.whenWritten();
+
+      // Assert.
+      expect([ waiting, goblinInTab(services), services.blueprintWriter?.hasUnwritten(), acts() ])
+        .toStrictEqual([ [ [ 'Goblin', 1 ], true, [] ], [ 'Orc', 1 ], false, [] ]);
+      services.stop();
+    });
+
+    it('settles its tab\'s wait for a choice by keeping the tab as it is, the blueprints then holding it', async () =>
+    {
+      // Arrange: the camp's tab waiting for a choice about a version of it found on disk.
+      const network = new MemoryChannelNetwork();
+      const services = createMapEditorServices(buildEnvironment(network, 'window-a', 'http://api', { blueprints: blueprintsOnDisk() }).environment);
+      services.start();
+      await pump(network, services.openDocument('blueprint-map:k3x9q2mf'));
+      services.hub.flagConflict('blueprint-map:k3x9q2mf', { kind: 'disk', content: blueprintMapContent(stampOf({ width: 2, events: [ { ...createMapEvent(4, 1, 0), name: 'Orc' } ] })) as unknown as JsonValue });
+
+      // Act.
+      const settled = services.resolveConflict('blueprint-map:k3x9q2mf', 'mine');
+
+      // Assert: the tab keeps its goblin, and waits no longer.
+      expect([ settled, goblinInTab(services), services.hub.isConflicted('blueprint-map:k3x9q2mf') ])
+        .toStrictEqual([ true, [ 'Goblin', 1 ], false ]);
+      services.stop();
+    });
+
+    it('settles its tab\'s wait for a choice by laying it out from the version on disk the author takes', async () =>
+    {
+      // Arrange: the camp's tab waiting for a choice about a version of it found on disk.
+      const network = new MemoryChannelNetwork();
+      const services = createMapEditorServices(buildEnvironment(network, 'window-a', 'http://api', { blueprints: blueprintsOnDisk() }).environment);
+      services.start();
+      await pump(network, services.openDocument('blueprint-map:k3x9q2mf'));
+      services.hub.flagConflict('blueprint-map:k3x9q2mf', { kind: 'disk', content: blueprintMapContent(stampOf({ width: 2, events: [ { ...createMapEvent(4, 1, 0), name: 'Orc' } ] })) as unknown as JsonValue });
+
+      // Act.
+      const settled = services.resolveConflict('blueprint-map:k3x9q2mf', 'theirs');
+
+      // Assert.
+      expect([ settled, goblinInTab(services), services.hub.isConflicted('blueprint-map:k3x9q2mf') ])
+        .toStrictEqual([ true, [ 'Orc', 1 ], false ]);
+      services.stop();
+    });
+
+    it('leaves its tab waiting when the author keeps a version of a blueprint the blueprints no longer hold', async () =>
+    {
+      // Arrange: the camp's tab waiting for a choice, the camp since taken out of the blueprints.
+      const network = new MemoryChannelNetwork();
+      const services = createMapEditorServices(buildEnvironment(network, 'window-a', 'http://api', { blueprints: blueprintsOnDisk() }).environment);
+      services.start();
+      await pump(network, services.openDocument('blueprint-map:k3x9q2mf'));
+      services.hub.flagConflict('blueprint-map:k3x9q2mf', { kind: 'disk', content: null });
+      services.hub.edit('Delete', [ blueprintHistoryKey('k3x9q2mf') ], tx => tx.set(BLUEPRINTS_DOCUMENT, [ 'data', 'blueprints', 'k3x9q2mf' ], undefined));
+
+      // Act.
+      const settled = services.resolveConflict('blueprint-map:k3x9q2mf', 'mine');
+
+      // Assert.
+      expect([ settled, services.hub.isConflicted('blueprint-map:k3x9q2mf') ])
+        .toStrictEqual([ false, true ]);
+      services.stop();
+    });
+
+    it('refuses a blueprint the blueprints no longer hold, in words for the author', async () =>
+    {
+      // Arrange.
+      const network = new MemoryChannelNetwork();
+      const services = createMapEditorServices(buildEnvironment(network, 'window-a', 'http://api', { blueprints: blueprintsOnDisk() }).environment);
+      services.start();
+
+      // Act.
+      const opening = pump(network, services.openDocument('blueprint-map:aaaa'));
+
+      // Assert.
+      await expect(opening)
+        .rejects.toThrow('That blueprint is no longer there.');
+      services.stop();
+    });
+  });
+
+  describe('transfer pairs', () =>
+  {
+    /**
+     * Places a stand-in for a pair: one step changing maps 1 and 2, held here, as placing a door and its way out does.
+     * @param {MapEditorServices} services The window.
+     */
+    const placePair = (services: MapEditorServices) =>
+    {
+      services.hub.edit('Place door pair', [ mapHistoryKey(1) ], tx =>
+      {
+        tx.set('map:1', [ 'displayName' ], 'Outside');
+        tx.set('map:2', [ 'displayName' ], 'Inside');
+        tx.join([ mapHistoryKey(2) ]);
+      });
+    };
+
+    it('asks before the window closes while a pair is on its way to disk, writes both maps in one act, and asks no more once it lands', async () =>
+    {
+      // Arrange: maps 1 and 2 opened, nothing changed yet.
+      const network = new MemoryChannelNetwork();
+      const { environment, window, requests } = buildEnvironment(network, 'window-a');
+      const services = createMapEditorServices(environment);
+      services.start();
+      await pump(network, services.openDocument('map:1'));
+      await pump(network, services.openDocument('map:2'));
+      const untouched = window.fire('beforeunload');
+
+      // Act.
+      placePair(services);
+      const placed = window.fire('beforeunload');
+      await services.pairWriter?.whenWritten();
+
+      // Assert: one act naming both maps, after which both read as saved and nothing is left to lose.
+      const acts = requests.filter(request => request.url.endsWith('/api/map-changes')).map(request => (JSON.parse(request.body as string) as { maps: { map: number }[] }).maps.map(each => each.map));
+      expect([ untouched, placed, window.fire('beforeunload'), acts, services.hub.dirtyKeys() ])
+        .toStrictEqual([ false, true, false, [ [ 1, 2 ] ], [] ]);
+      services.stop();
+    });
+
+    it('opens a map from its file only once the pairs on their way to disk have landed, so it opens with them', async () =>
+    {
+      // Arrange: map 1 opened, and a pair on its way to map 2 nobody holds, written through.
+      const network = new MemoryChannelNetwork();
+      const { environment, requests } = buildEnvironment(network, 'window-a');
+      const services = createMapEditorServices(environment);
+      services.start();
+      await pump(network, services.openDocument('map:1'));
+      services.hub.edit('Place door pair', [ mapHistoryKey(1) ], tx =>
+      {
+        tx.set('map:1', [ 'displayName' ], 'Outside');
+        tx.writeThrough('map:2', { kind: 'set', path: [ 'displayName' ], before: 'Test Town', after: 'Inside' });
+        tx.join([ mapHistoryKey(2) ]);
+      });
+
+      // Act.
+      await pump(network, services.openDocument('map:2'));
+
+      // Assert: the pair went to disk before map 2's file was read.
+      const order = requests.map(request => request.url).filter(url => url.endsWith('/api/map-changes') || url.endsWith('/api/maps/2'));
+      expect(order)
+        .toStrictEqual([ 'http://api/api/map-changes', 'http://api/api/maps/2' ]);
+      services.stop();
+    });
+
+    it('starts the door picture, the creak and the sound of passing through from their defaults, then keeps each choice', () =>
+    {
+      // Arrange.
+      const network = new MemoryChannelNetwork();
+      const { environment } = buildEnvironment(network, 'window-a');
+      const services = createMapEditorServices(environment);
+      const fresh = services.pairChoices.current();
+
+      // Act.
+      services.pairChoices.remember({ movementSound: 'Move1' });
+
+      // Assert.
+      expect([ fresh, services.pairChoices.current() ])
+        .toStrictEqual([ { doorLook: null, doorSound: 'Open1', movementSound: '' }, { doorLook: null, doorSound: 'Open1', movementSound: 'Move1' } ]);
+    });
+
+    it('writes no pair in a window with no server, which reaches no file', () =>
+    {
+      // Arrange: a window with no server.
+      const network = new MemoryChannelNetwork();
+      const { environment } = buildEnvironment(network, 'window-a', null);
+
+      // Act.
+      const services = createMapEditorServices(environment);
+
+      // Assert.
+      expect(services.pairWriter)
+        .toBeNull();
+    });
   });
 
   it('gives a window that opened a moment ago the live copy, not the stale file, before anyone has answered it', async () =>
@@ -473,6 +1194,66 @@ describe('MapEditorServices', () =>
     });
   });
 
+  it('gives transfers the marks of failing landings in a window with a server, and none in one without', () =>
+  {
+    // Arrange: one window over a server, one over none.
+    const served = buildEnvironment(new MemoryChannelNetwork(), 'window-a');
+    const serverless = buildEnvironment(new MemoryChannelNetwork(), 'window-b', null);
+
+    // Act.
+    const windows = [ createMapEditorServices(served.environment), createMapEditorServices(serverless.environment) ];
+
+    // Assert.
+    const marks = windows.map(services => services.modules.overlays().map(overlay => overlay.id));
+    expect(marks)
+      .toStrictEqual([ [ 'core.landings' ], [] ]);
+  });
+
+  it('judges every landing afresh once the clock moves or the page rule changes, and no more once stopped', () =>
+  {
+    // Arrange: a started window, and what it judged landings by at first.
+    const { environment } = buildEnvironment(new MemoryChannelNetwork(), 'window-a');
+    const services = createMapEditorServices(environment);
+    services.start();
+    const first = services.landings.judge;
+
+    // Act: the clock moves; then the new game seats another party; then the window stops and the clock moves again.
+    services.clock.set(1200);
+    const afterClock = services.landings.judge;
+    services.pages.setSave({ party: [ 1, 2 ] });
+    const afterParty = services.landings.judge;
+    services.stop();
+    services.clock.set(300);
+
+    // Assert.
+    expect([ afterClock === first, afterParty === afterClock, services.landings.judge === afterParty ])
+      .toStrictEqual([ false, false, true ]);
+  });
+
+  it('judges every landing afresh once the modules switch on, by their rules and their kinds', async () =>
+  {
+    // Arrange: a project enabling J-RegionEffects.
+    const { fetch } = stubFetch(request => (request.url.endsWith('/api/plugin-metadata')
+      ? new Response('var $plugins = [\n{"name":"j/regions/J-RegionEffects","status":true,"description":"","parameters":{"globalAllowRegions":"[]","globalDenyRegions":"[\\"10\\"]","globalDenyTerrainTags":"[\\"1\\"]"}}\n];')
+      : envelope({})));
+    const { environment } = buildEnvironment(new MemoryChannelNetwork(), 'window-a');
+    const services = createMapEditorServices({ ...environment, fetch });
+    const before = services.landings.judge.rules;
+
+    // Act.
+    services.start();
+    await vi.waitFor(() =>
+    {
+      expect(services.modules.isActive('regions'))
+        .toBe(true);
+    });
+
+    // Assert: no rule before, J-RegionEffects' after.
+    expect([ before, services.landings.judge.rules.map(rule => rule.id) ])
+      .toStrictEqual([ [], [ 'regions.passage' ] ]);
+    services.stop();
+  });
+
   it('works without a server: no stream, and a hub that cannot load files', async () =>
   {
     // Arrange.
@@ -524,6 +1305,215 @@ describe('MapEditorServices', () =>
     // Assert.
     expect([ whileStarted, painting.settings.strip ])
       .toStrictEqual([ 2, 2 ]);
+  });
+
+  describe('the preview, the clock and the names', () =>
+  {
+    /**
+     * One machine's storage, by project, shared by every window on it: each window's store hears every other's writes to
+     * its project, never its own.
+     * @returns {{ open: (projectRoot: string) => ViewStore, texts: Map<string, string | null> }} The opener every window
+     * is handed, and what each project keeps.
+     */
+    const buildMachine = () =>
+    {
+      const texts = new Map<string, string | null>();
+      const listeners = new Map<ViewStore, { projectRoot: string; listener: (text: string | null) => void }>();
+      const open = (projectRoot: string): ViewStore =>
+      {
+        const store: ViewStore = {
+          read: () => texts.get(projectRoot) ?? null,
+          write: text =>
+          {
+            texts.set(projectRoot, text);
+            [ ...listeners ]
+              .filter(([ other, heard ]) => other !== store && heard.projectRoot === projectRoot)
+              .forEach(([ , heard ]) => heard.listener(text));
+          },
+          subscribe: listener =>
+          {
+            listeners.set(store, { projectRoot, listener });
+            return () => listeners.delete(store);
+          },
+        };
+        return store;
+      };
+
+      return { open, texts };
+    };
+
+    /**
+     * A server serving one project, its System.json naming what the test says, counting its reads of System.json.
+     * @param {string | null} projectRoot Where the project lives, as the health route says; empty for none, and null for
+     * a health route that fails.
+     * @returns {{ fetch: typeof fetch, systemReads: () => number, rename: (name: string) => void }} The server.
+     */
+    const buildServer = (projectRoot: string | null) =>
+    {
+      let systemReads = 0;
+      let castle = 'suspicious castle';
+      const { fetch } = stubFetch(request =>
+      {
+        if (request.url.endsWith('/api/health'))
+        {
+          return projectRoot === null
+            ? new Response('down', { status: 500 })
+            : envelope({ ok: true, projectRoot, projectRootOk: projectRoot !== '' });
+        }
+
+        if (request.url.endsWith('/api/system'))
+        {
+          systemReads += 1;
+          return envelope({ switches: [ '', 'partner-visible', castle ], variables: [ '' ] });
+        }
+
+        return request.url.endsWith('/api/plugin-metadata') ? new Response('var $plugins = [];') : envelope({});
+      });
+      const rename = (name: string) =>
+      {
+        castle = name;
+      };
+
+      return { fetch, systemReads: () => systemReads, rename };
+    };
+
+    /**
+     * A started window on a machine, serving a project.
+     * @param {MemoryChannelNetwork} network The channel network.
+     * @param {string} clientId The window's id.
+     * @param {ReturnType<typeof buildMachine>} machine The machine.
+     * @param {ReturnType<typeof buildServer>} server The server.
+     * @returns {{ services: MapEditorServices, sources: FakeEventSource[] }} The window.
+     */
+    const startWindow = (network: MemoryChannelNetwork, clientId: string, machine: ReturnType<typeof buildMachine>, server: ReturnType<typeof buildServer>) =>
+    {
+      const { environment, sources, window } = buildEnvironment(network, clientId);
+      const services = createMapEditorServices({ ...environment, fetch: server.fetch, rememberedView: machine.open });
+      services.start();
+      return { services, sources, window };
+    };
+
+    it('asks before the window renaming switches closes with the names unsaved, and never in a window only following them', async () =>
+    {
+      // Arrange: the Switches & Variables window holding System.json with switch 2 renamed, and an event window following.
+      const network = new MemoryChannelNetwork();
+      const machine = buildMachine();
+      const server = buildServer('/games/chef-adventure');
+      const names = startWindow(network, 'window-names', machine, server);
+      const event = startWindow(network, 'window-event', machine, server);
+      await pump(network, names.services.openDocument('system'));
+      renameEntry(names.services.hub, 'switches', 2, 'after the vampire');
+      network.flush();
+      const followed = projectNamesOf(event.services.api as MapEditorApi);
+      await vi.waitFor(() =>
+      {
+        network.flush();
+        expect(followed.names()?.switches[2])
+          .toBe('after the vampire');
+      });
+
+      // Act: each window asked whether it may close.
+      const asks = [ names.window.fire('beforeunload'), event.window.fire('beforeunload') ];
+
+      // Assert.
+      expect([ asks, event.services.hub.has('system') ])
+        .toStrictEqual([ [ true, false ], false ]);
+      names.services.stop();
+      event.services.stop();
+    });
+
+    it('brings back the clock, its season, its sky and the preview the project left, and shares every change with every other window', async () =>
+    {
+      // Arrange: a window turning switch 147 on, moving the clock to 22:00, picking Summer and picking heavy rain, on a
+      // machine serving Chef Adventure.
+      const network = new MemoryChannelNetwork();
+      const machine = buildMachine();
+      const server = buildServer('/games/chef-adventure');
+      const first = startWindow(network, 'window-a', machine, server);
+      first.services.preview.setSwitch(147, true);
+      first.services.clock.set(1320);
+      first.services.clock.chooseSeason(1);
+      first.services.clock.chooseSky({ condition: 'rain', strength: 'heavy' });
+      const rain = '"sky":{"condition":"rain","strength":"heavy"}';
+      await vi.waitFor(() =>
+      {
+        expect(machine.texts.get('/games/chef-adventure'))
+          .toBe(`{"version":1,"clock":1320,"season":1,${rain},"preview":{"switch":{"147":true}}}`);
+      });
+
+      // Act: a second window opens, then goes back to a fresh save.
+      const second = startWindow(network, 'window-b', machine, server);
+      await vi.waitFor(() =>
+      {
+        expect(second.services.preview.preview().switchesOn())
+          .toStrictEqual([ 147 ]);
+      });
+      const opened = [ second.services.clock.time(), second.services.clock.moved, second.services.clock.season(), second.services.clock.sky() ];
+      second.services.preview.reset();
+
+      // Assert: the season and the sky stay as the author picked them when the preview goes back to a fresh save.
+      expect([ opened, first.services.preview.preview().isFresh, machine.texts.get('/games/chef-adventure') ])
+        .toStrictEqual([
+          [ 1320, true, 1, { condition: 'rain', strength: 'heavy' } ],
+          true,
+          `{"version":1,"clock":1320,"season":1,${rain},"preview":{}}`,
+        ]);
+      first.services.stop();
+      second.services.stop();
+    });
+
+    it('remembers nothing for a server serving no project, one that cannot say, or a window gone before it says', async () =>
+    {
+      // Arrange: a window on a server with no project, one on a server whose health route fails, and one on a project's
+      // server stopped at once.
+      const network = new MemoryChannelNetwork();
+      const machine = buildMachine();
+      const lost = startWindow(network, 'window-a', machine, buildServer(''));
+      const unsure = startWindow(network, 'window-c', machine, buildServer(null));
+      const gone = startWindow(network, 'window-b', machine, buildServer('/games/chef-adventure'));
+      gone.services.stop();
+      await settle();
+      await settle();
+
+      // Act: a switch turned on in each.
+      [ lost, unsure, gone ].forEach(window => window.services.preview.setSwitch(9, true));
+
+      // Assert.
+      expect([ ...machine.texts.keys() ])
+        .toStrictEqual([]);
+      lost.services.stop();
+      unsure.services.stop();
+    });
+
+    it('reads the switch and variable names afresh when System.json changes on disk, and when the stream comes back', async () =>
+    {
+      // Arrange: a window following the names, nobody holding System.json, its file renamed on disk.
+      const network = new MemoryChannelNetwork();
+      const server = buildServer('/games/chef-adventure');
+      const window = startWindow(network, 'window-a', buildMachine(), server);
+      const names = projectNamesOf(window.services.api as MapEditorApi);
+      await settle();
+      const before = server.systemReads();
+      server.rename('castle, renamed on disk');
+
+      // Act: the file's change heard; then the stream drops and comes back.
+      window.sources[0].emitChange({ path: 'data/System.json', kind: 'write', client: '' });
+      await vi.waitFor(() =>
+      {
+        expect(names.names()?.switches[2])
+          .toBe('castle, renamed on disk');
+      });
+      window.sources[0].emit('error');
+      window.sources[0].emit('open');
+
+      // Assert: nothing read until the file changed, then once for it and once for the stream coming back.
+      await vi.waitFor(() =>
+      {
+        expect([ before, server.systemReads() ])
+          .toStrictEqual([ 0, 2 ]);
+      });
+      window.services.stop();
+    });
   });
 
   it('paints in the page\'s own window with the paint it started, and in any other window with one of that window\'s own', () =>

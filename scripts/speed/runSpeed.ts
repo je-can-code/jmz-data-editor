@@ -3,18 +3,28 @@
  * The map editor's speed script: opens the heavy fixture maps in the real map editor page, in headless chromium on
  * the machine's real GPU (spike S3's recipe), and fails on any speed budget from the plan's D3.
  *
- *   bun run speed [--runs 3] [--seconds 5] [--maps 102,361] [--ui-port 18200] [--api-port 18201]
- *                 [--scratch <base folder>] [--project <game>] [--json <file>]
+ *   bun run speed [--runs 3] [--seconds 5] [--maps 102,361] [--time 22:00] [--sky snow:heavy] [--ui-port 18200]
+ *                 [--api-port 18201] [--scratch <base folder>] [--project <game>] [--json <file>]
  *
  * Each invocation builds the editor afresh in a folder of its own inside the base folder (the system's temporary
  * folder unless --scratch names another), so it always times the code as it stands and never shares a build or a
  * mirror with another run; the folder is removed when the run ends.
  *
- * Every map in every run gets a fresh browser, so every open is cold. Per map it measures, with the game look and
- * every overlay on:
+ * Every map in every run gets a fresh browser, so every open is cold. With --time, every map is opened at that hour of
+ * the window's clock, from its first frame, so a map whose lights show only at night is measured with them on show;
+ * left out, the clock stands where the game starts. With --sky, the weather is measured under a sky in that condition at
+ * that strength, picked beside the clock as an author picks one, which the page draws as J-Weather-Time hands its sky to
+ * J-Weather: an outdoor map naming no look of its own shows the face the condition wears at the clock's hour and season,
+ * and one naming its own shows it at the sky's strength, so a heavy look can be put on a map that names none; each map's
+ * report says what weather it drew and how many particles that came to at the view it opened with. Per map it measures,
+ * with the game look and every overlay on:
  *   - the cold open: navigation start to the first frame that showed the map complete, sprites and parallax loaded;
- *   - three camera paths driven from the page's own frame clock: a pan at zoom 1, a zoom sweep from 2x out to the
- *     whole map and back, and the whole map held on screen and drifting;
+ *   - five paths driven from the page's own frame clock: a pan at zoom 1, a zoom sweep from 2x out to the whole map
+ *     and back, the whole map held on screen and drifting, the whole map held still while the window's clock sweeps
+ *     the whole day every eight seconds, so the sky is drawn again at every hour it passes, the clock put back once it
+ *     stops, and the map held still at the game's scale while the first slider a plugin module adds to Map Properties
+ *     (a map's darkness, with J-Lighting on) is dragged up and down its track a step a frame, the drag let go once it
+ *     stops;
  *   - a brush stroke: real pointer moves with the left button held, one cell apart, each painting a fresh 3x3 patch
  *     of ground with the map view's own pen, through the layering engine and the autotile refresh, matched to the
  *     frames that drew them; and the same again with a stand-in for a plugin module's overlay (two rings around every
@@ -57,6 +67,8 @@ type Options = {
   runs: number;
   seconds: number;
   maps: number[];
+  time: string | undefined;
+  sky: { condition: string; strength: string } | null;
   uiPort: number;
   apiPort: number;
   scratch: string;
@@ -90,11 +102,17 @@ type PathResult = {
 type MapResult = {
   map: number;
   run: number;
+  time: string;
   loadBefore: number;
   loadAfter: number;
   report: GpuReport;
   pageGpu: string;
   info: unknown;
+
+  /**
+   * The weather the map drew while it was measured, in words, with its particles per layer at the view it opened with.
+   */
+  weather: string;
   coldOpenMs: number;
   timings: Record<string, number>;
   paths: Record<string, PathResult>;
@@ -154,11 +172,17 @@ type PageHooks = {
   screenOfCell: (x: number, y: number) => { x: number; y: number };
   startPath: (kind: string) => void;
   stopPath: () => void;
+  time: () => number;
   enablePaint: (settings: Record<string, unknown>) => number | null;
   disablePaint: () => void;
   enableModuleRings: () => void;
   paintState: () => { steps: number; redrawnFrames: number };
   enableEveryOverlay: () => void;
+  weather: {
+    pick: (sky: { condition: string; strength: string } | null) => void;
+    sky: () => { preset: string; intensity: string; type: string } | null;
+    describe: () => ({ weather: { preset: string; intensity: string } | null; layers: { asset: string | null; stats: { count: number } }[] } | null)[];
+  };
   openMap: (mapId: number) => Promise<{ ms: number }>;
   showAgain: () => Promise<{ ms: number; hidden: string; shown: string }>;
   events: {
@@ -173,9 +197,19 @@ type PageHooks = {
 };
 
 /**
- * The camera paths, in the order they are recorded.
+ * The paths, in the order they are recorded: the camera's three, then the clock's sweep and a slider's.
  */
-const PATHS = [ 'pan', 'zoom', 'zoomedout' ];
+const PATHS = [ 'pan', 'zoom', 'zoomedout', 'clock', 'slider' ];
+
+/**
+ * A time of day as --time takes it: hours and minutes on a 24-hour clock.
+ */
+const TIME_OPTION = /^([01]?\d|2[0-3]):[0-5]\d$/u;
+
+/**
+ * A sky as --sky takes it: the name of a condition the sky can be in, a colon, and its strength.
+ */
+const SKY_OPTION = /^([a-zA-Z][a-zA-Z0-9_-]*):(light|moderate|heavy)$/u;
 
 /**
  * How many pointer moves a stroke makes, 4 ms apart, as a hand dragging a pen would.
@@ -239,10 +273,25 @@ const parseOptions = (argv: string[]): Options =>
   });
 
   const gpu = flags.get('gpu') ?? process.env['JMZ_SPEED_GPU'] ?? DEFAULT_GPU;
+  const time = flags.get('time');
+  if (time !== undefined && TIME_OPTION.test(time) === false)
+  {
+    throw new Error(`--time takes an hour and minutes on a 24-hour clock, such as 22:00, not ${time}`);
+  }
+
+  const sky = flags.get('sky');
+  const skyMatch = sky === undefined ? null : SKY_OPTION.exec(sky);
+  if (sky !== undefined && skyMatch === null)
+  {
+    throw new Error(`--sky takes a condition and its strength, such as rain:heavy, not ${sky}`);
+  }
+
   return {
     runs: Number(flags.get('runs') ?? 3),
     seconds: Number(flags.get('seconds') ?? 5),
     maps: (flags.get('maps') ?? '102,361').split(',').map(Number),
+    time,
+    sky: skyMatch === null ? null : { condition: skyMatch[1], strength: skyMatch[2] },
     uiPort: Number(flags.get('ui-port') ?? 18200),
     apiPort: Number(flags.get('api-port') ?? 18201),
     scratch: flags.get('scratch') ?? tmpdir(),
@@ -828,7 +877,8 @@ const measureMap = async (options: Options, uiBase: string, mapId: number, run: 
   {
     const page = await newSpeedPage(browser);
     await addFrameRecorder(page);
-    await page.goto(`${uiBase}/map.html?map=${mapId}&speed=1&quick=1`);
+    const atTime = options.time === undefined ? '' : `&time=${options.time}`;
+    await page.goto(`${uiBase}/map.html?map=${mapId}&speed=1&quick=1${atTime}`);
     await page.waitForFunction(() =>
     {
       const hooks = (window as unknown as { __jmzMapView?: PageHooks }).__jmzMapView;
@@ -846,7 +896,31 @@ const measureMap = async (options: Options, uiBase: string, mapId: number, run: 
     const timings = await page.evaluate(() => ({ ...(window as unknown as HookWindow).__jmzMapView.timings }));
     const coldOpenMs = timings['drawnAt'] ?? -1;
     await page.evaluate(() => (window as unknown as HookWindow).__jmzMapView.enableEveryOverlay());
+
+    // the sky asked for, if any, is picked beside the clock and falls on the map before anything is measured, so every
+    // path draws it: the page reads the project's sky to work out its face, then draws it.
+    await page.evaluate(sky => (window as unknown as HookWindow).__jmzMapView.weather.pick(sky), options.sky);
+    if (options.sky !== null)
+    {
+      await page.waitForFunction(() => (window as unknown as HookWindow).__jmzMapView.weather.sky() !== null, null, { timeout: 15_000 });
+    }
+
     await page.waitForTimeout(1000);
+    const weather = await page.evaluate(() =>
+    {
+      const [ drawn ] = (window as unknown as HookWindow).__jmzMapView.weather.describe();
+      if (drawn === undefined || drawn === null || drawn.weather === null)
+      {
+        return 'none';
+      }
+
+      const counts = drawn.layers.map(layer => `${layer.stats.count} ${layer.asset}`);
+      return `${drawn.weather.preset} ${drawn.weather.intensity}: ${counts.join(' + ')} particles`;
+    });
+
+    // the hour everything after is measured at, read once the plugin modules have surely switched on.
+    const minutes = await page.evaluate(() => (window as unknown as HookWindow).__jmzMapView.time());
+    const time = `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`;
 
     const paths: Record<string, PathResult> = {};
     for (const kind of PATHS)
@@ -898,11 +972,13 @@ const measureMap = async (options: Options, uiBase: string, mapId: number, run: 
     return {
       map: mapId,
       run,
+      time,
       loadBefore,
       loadAfter: await loadAverage(),
       report,
       pageGpu,
       info,
+      weather,
       coldOpenMs,
       timings,
       paths,
@@ -948,7 +1024,8 @@ const verdictText = (verdict: Verdict): string =>
  */
 const printMap = (result: MapResult): void =>
 {
-  console.log(`Map${result.map} run ${result.run}: load ${result.loadBefore.toFixed(2)} -> ${result.loadAfter.toFixed(2)}`);
+  console.log(`Map${result.map} run ${result.run} at ${result.time}: load ${result.loadBefore.toFixed(2)} -> ${result.loadAfter.toFixed(2)}`);
+  console.log(`  weather ${result.weather}`);
   console.log(`  cold open ${cell(result.coldOpenMs, 1)} ms  ${verdictText(result.verdicts['coldOpen'])}`);
   console.log(`  warm open ${cell(result.warmOpenMs, 1)} ms  ${verdictText(result.verdicts['warmOpen'])}`);
   console.log(`  shown again ${cell(result.shownAgainMs, 1)} ms  ${verdictText(result.verdicts['shownAgain'])}`);

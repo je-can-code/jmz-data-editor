@@ -4,44 +4,164 @@
  * draws each fixture map view by view, and the editor draws the same views; the two are compared pixel by pixel inside
  * the map.
  *
- *   bun run parity [--maps 102,31,94,316] [--mode game|snapshot|both] [--scratch <base folder>] [--project <game>]
- *                  [--ui-port 18200] [--api-port 18201] [--display :90] [--nw <binary>]
+ *   bun run parity [--maps 102,31,94,316] [--sky 337@22:00,337@14:00] [--pages 20,21] [--weather 65,102,309@22:00]
+ *                  [--sky-weather 337:rain:heavy@winter@12:00,56:rain:heavy@winter@12:00]
+ *                  [--seasons summer@22:00,spring@05:00] [--mode game|snapshot|both] [--scratch <base folder>]
+ *                  [--shots <folder>] [--project <game>] [--ui-port 18200] [--api-port 18201] [--display :90]
+ *                  [--nw <binary>]
  *
  * Each invocation works in a folder of its own inside the base folder (the system's temporary folder unless --scratch
  * names another), builds the editor afresh there, and leaves its pictures and report there; it prints where.
  *
- * Two passes per view. The tiles pass hides every character on both sides, so what remains is the parallax and the
- * tiles: it must match, within 2 per channel for compositing rounding. The events pass draws events as each side draws
- * them; the editor shows every event's first page, as MZ's own editor does, while the game shows whichever page's
- * conditions hold, so every differing cell there is either explained by an event the game shows differently (another
- * page, or hidden) or listed as unexplained. Any cell left unexplained, in either pass, fails the check.
+ * Two passes per view, and a third on a dark map. The tiles pass hides every character on both sides, so what remains
+ * is the parallax and the tiles: it must match, within 2 per channel for compositing rounding. The events pass draws
+ * events as each side draws them, at the hour the game's clock read when it arrived on the map: the editor shows each
+ * event's page as a fresh save would at that hour, while the game, started new straight onto the map, shows whichever
+ * page its own state gives, so every differing cell there is either explained by an event the game shows differently
+ * (another page, hidden, or drawn otherwise than its page) or listed as unexplained. The events whose pages differ are
+ * counted too, the page rule's own measure. The dark pass, on a map whose note declares darkness, draws the tiles alone
+ * again under J-Lighting's light mask on both sides, the editor showing only what the game shows of its lighting: a
+ * differing cell there is explained only by a light the game shows from another page than the editor's. Any cell left
+ * unexplained, in any pass, fails the check.
+ *
+ * A map drawn at a time of day (--sky; Map337 at 22:00 and at 14:00 unless told otherwise) is arrived at with the game's
+ * clock set to that time and stopped, so every event shows the page that hour gives it and the sky is already there. Its
+ * events pass is drawn at that hour, and its sky pass draws its tiles with the screen's tone over them and the light
+ * mask multiplied over that; the editor draws the same views at the same hour, its sky's tone and its dark the only
+ * lighting it shows. A differing cell is explained as in the dark pass, by a light the game shows from another page at
+ * that hour.
+ *
+ * A map read for its weather (--weather; one map for each look Chef Adventure uses, and a snowy dark map at night,
+ * unless told otherwise) is compared by its numbers, never its pixels, since every particle is rolled at random on both
+ * sides: the game, with J-Weather-Time's sky held off so a tagged map resolves as J-Weather alone resolves it, reports
+ * the weather it resolved, where its plane sits against the tone and the dark, and every layer on it, the layer as
+ * resolved, its pictures, count, tint, blend and the spread of its particles; the editor, its view lined up with the
+ * game's screen and its weather started over, reports the same of its own; each check prints with both sides' numbers.
+ * Both sides' whole pictures are saved side by side, the game's on the left, for an eye to judge, into --shots.
+ *
+ * A map read under a sky (--sky-weather; Map337, an outdoor map naming no weather, under every condition and face Chef
+ * Adventure's sky has, a map naming its own look under a heavy and a light sky, and a <noToneChange> and a <noWeather>
+ * map under heavy rain, unless told otherwise) is read the same way, after the others, with J-Weather-Time made to hold
+ * that sky: the game's clock is set to the date the editor's clock moves the game's start to for the fixture's season,
+ * and the fixture's hour, and J-Weather-Time's forecast to the condition and strength, then pushed as the plugin pushes
+ * it, so the plugin picks the face; the editor, on a page of its own, picks the same sky, season and hour on its clock.
+ * Each side's sky, the face J-Weather is told, is compared exactly, then the weather by its numbers, and both pictures
+ * are saved side by side as sky-*.png. A game without J-TIME, J-Weather and J-Weather-Time enabled has no sky to read.
+ *
+ * Every map holding an event with a quest-gated page (or the maps --pages names instead, none for an empty list) is
+ * visited too, after the drawn maps and before the skies, and compared by its pages alone, nothing drawn: on arrival
+ * the game records how it judges each page of each event, every plugin's condition included, and the editor judges the
+ * same pages by its own rule at the hour the game's clock read, J-OMNI-Quests' tags against the quests a new game starts
+ * with. Each such map prints how many events both show on the same page and how many pages both judge alike, the
+ * quest-gated ones counted apart, and a quest-gated page judged differently fails the check.
+ *
+ * Every map holding a time-gated page is visited once more, after those, and its pages judged at moments rather than
+ * drawn (--seasons; Summer's date at 02:00, 10:00, 17:00 and 22:00, Spring's at 05:00 and Autumn's at 16:00 unless told
+ * otherwise): each season's date is the one the editor's clock moves the game's start to, and the game's clock is set
+ * to that date and hour, judged there, and put back. The editor judges the same pages at the same season and hour, by
+ * its own rule. A game may ship no page asking for the date, as Chef Adventure ships none, so the game copy alone also
+ * gets a date fixture, a blank map of its own whose events each ask for the date one way, a near miss on each side of
+ * every season's date among them, judged at the same moments. Each moment prints how many time-gated pages, and how
+ * many of the fixture's, both sides judge alike, and a time-gated page judged differently fails the check.
  *
  * Maps with water or waterfalls are compared at all four animation steps. The game draws on SwiftShader, which is
  * fine for pictures and meaningless for timing. The game runs from a copy in the run's folder, muted, on a virtual
- * display; nothing here writes to the game's own folder.
+ * display, its lights held steady in the copy's config so that every frame of it is the same frame; nothing here
+ * writes to the game's own folder.
  *
  * The snapshot mode is the cheaper day-to-day comparator: ca/tools/mapgen/snapshot.js draws each map whole, and the
  * editor draws it whole too; the differences the engine predicts against snapshot.js (star tiles drawn last, table
  * legs and edges) are counted apart from the rest.
  */
-import { mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import type { Page } from 'playwright-core';
+import type { Browser, Page } from 'playwright-core';
+import type { JsonValue } from '../../app/src/mapEditor/core/model/json.ts';
+import type { RmmzMap } from '../../app/src/mapEditor/core/model/rmmzTypes.ts';
+import type { PageRule } from '../../app/src/mapEditor/core/pageRule/pageRule.ts';
+import { newMapRow } from '../../app/src/mapEditor/core/tree/treePlans.ts';
+import { startingDateOf, TIME_PLUGIN } from '../../app/src/mapEditor/modules/time/timeParameters.ts';
+import { SEASON_NAMES, type GameDate } from '../../app/src/mapEditor/modules/time/timeSnapshot.ts';
+import { dateWords } from '../../app/src/mapEditor/modules/time/timeWords.ts';
+import { pluginBasename, readPluginEntries } from '../../app/src/services/plugins/PluginsJsReader.ts';
 import { startEditorStack } from '../speed/editorStack.ts';
 import { openSpeedBrowser } from '../speed/gpuChromium.ts';
 import { createRunFolder } from '../speed/runFolder.ts';
-import { comparePictures, decodePng, differencePicture, writePng, type CellDifference, type Comparison } from './compareImages.ts';
-import type { ProbeCapture, ProbeReport } from './probeTypes.ts';
+import { comparePictures, decodePng, differencePicture, sideBySide, writePng, type CellDifference, type Comparison } from './compareImages.ts';
+import type { ProbeCapture, ProbeMoment, ProbeReport, WeatherLayerProbe, WeatherProbe } from './probeTypes.ts';
 import { runHeadlessGame } from './headlessGame.ts';
-import { explainCell, gameParityHolds, probeMapFor, snapshotPredictions, TILE, type MapFile } from './parityRules.ts';
+import {
+  compareSky,
+  compareWeather,
+  darkLightsOf,
+  dateFixtureMap,
+  editorPagesOf,
+  editorWeatherDepth,
+  eventsKeyOf,
+  explainCell,
+  explainDarkCell,
+  gameParityHolds,
+  gameWeatherDepth,
+  pageDifferencesOf,
+  pagesProbeMapFor,
+  pagesWords,
+  parityPageRule,
+  parseSeasonFixtures,
+  parseSkyWeatherFixtures,
+  parseWeatherFixtures,
+  probeMapFor,
+  questGatedPagesOf,
+  SEASON_FIXTURES,
+  seasonMomentOf,
+  seasonProbeMapFor,
+  SKY_WEATHER_FIXTURES,
+  skyProbeMapFor,
+  skyWeatherKeyOf,
+  skyWeatherProbeMapFor,
+  snapshotPredictions,
+  startingPartyOf,
+  steadyLighting,
+  tallyPages,
+  TILE,
+  timeGatedPagesOf,
+  timeOfCapture,
+  verdictWords,
+  WEATHER_FIXTURES,
+  weatherProbeMapFor,
+  type EditorPages,
+  type EditorWeatherDepth,
+  type LightingConfigFile,
+  type MapFile,
+  type PageDifference,
+  type PagesTally,
+  type SeasonFixture,
+  type SkyWeatherFixture,
+  type WeatherCheck,
+  type WeatherFixture,
+} from './parityRules.ts';
 
 /**
- * The script's settings.
+ * One map to draw under its sky, and the time of day to draw it at, in minutes past midnight.
+ */
+type SkyFixture = {
+  mapId: number;
+  time: number;
+};
+
+/**
+ * The script's settings. The maps compared by their pages alone are null until worked out from the game, which is then
+ * every map holding a quest-gated event.
  */
 type Options = {
   maps: number[];
+  sky: SkyFixture[];
+  pages: number[] | null;
+  weather: WeatherFixture[];
+  skyWeather: SkyWeatherFixture[];
+  seasons: SeasonFixture[];
   mode: 'game' | 'snapshot' | 'both';
   scratch: string;
+  shots: string;
   project: string;
   uiPort: number;
   apiPort: number;
@@ -61,15 +181,131 @@ type ViewResult = {
 };
 
 /**
+ * How the pages of one map's events compared at one hour: how many events the game had on the map, and those it showed
+ * on another page than the editor.
+ */
+type PageComparison = {
+  events: number;
+  differ: PageDifference[];
+};
+
+/**
+ * How the game and the editor judged the pages of one map holding quest-gated events, at the hour the game's clock read
+ * on arrival, under the key the probe keeps its events by.
+ */
+type QuestPages = {
+  key: string;
+  tally: PagesTally;
+};
+
+/**
+ * What the season pass judges: each season fixture and the moment the game's clock is set to for it, the season's date
+ * as the editor's clock moves the game's start; every map holding a time-gated page; and the date fixture, a blank map
+ * of events asking for the date, which goes into the game copy alone under the first id no map of the game holds.
+ */
+type SeasonPlan = {
+  fixtures: SeasonFixture[];
+  moments: ProbeMoment[];
+  mapIds: number[];
+  fixtureId: number;
+  fixture: RmmzMap;
+};
+
+/**
+ * How the game and the editor judged every time-gated page at one season fixture: the date it brought, each map's
+ * tally, the time-gated pages counted apart, and the date fixture's.
+ */
+type SeasonPages = {
+  fixture: SeasonFixture;
+  date: string;
+  maps: { mapId: number; tally: PagesTally }[];
+  dateFixture: PagesTally;
+};
+
+/**
+ * A sky as the editor's clock picks it: a condition and a strength, by the plugin's own names.
+ */
+type SkyPick = {
+  condition: string;
+  strength: string;
+};
+
+/**
+ * How the check asks the page to draw a map: with its events or without, at an animation step and engine frame, with
+ * the game's lighting and weather or without, and at the hour, the season and under the sky the game's clock was set to.
+ */
+type ParityOptions = {
+  events: boolean;
+  step: number;
+  frames: number;
+  lighting?: boolean;
+  weather?: boolean;
+  time?: number;
+  season?: number;
+  sky?: SkyPick | null;
+};
+
+/**
  * The page's hooks, as far as the check calls them.
  */
 type HookWindow = {
   __jmzMapView?: {
     ready: () => boolean;
-    info: () => { stats: { loadingImages: number } };
-    prepareParity: (options: { events: boolean; step: number; frames: number }) => void;
+    info: () => { stats: { loadingImages: number }; view: { width: number; height: number } };
+    setCamera: (x: number, y: number, zoom: number) => void;
+    prepareParity: (options: ParityOptions) => void;
     extract: (rect: { x: number; y: number; width: number; height: number }) => Promise<string>;
+    weather: {
+      describe: () => (EditorWeather | null)[];
+      reset: () => void;
+      depth: () => EditorWeatherDepth;
+      sky: () => { preset: string; intensity: string; type: string } | null;
+    };
   };
+};
+
+/**
+ * What the editor's weather drawing says it shows, as far as the check reads it.
+ */
+type EditorWeather = {
+  weather: { preset: string; intensity: string } | null;
+  problem: string;
+  layers: (WeatherLayerProbe & { problem: string })[];
+};
+
+/**
+ * One map's weather compared: the fixture, what each side read, every check, and where each side draws it.
+ */
+type WeatherResult = {
+  fixture: WeatherFixture;
+  game: WeatherProbe;
+  editor: EditorWeather;
+  checks: WeatherCheck[];
+  gameDepth: { holds: boolean; words: string };
+  editorDepth: { holds: boolean; words: string };
+};
+
+/**
+ * One map's weather compared under a sky: the fixture, what each side read, the sky the editor told its renderer, every
+ * check, the sky's first, and where each side draws it.
+ */
+type SkyWeatherResult = {
+  fixture: SkyWeatherFixture;
+  game: WeatherProbe;
+  editor: EditorWeather;
+  editorSky: unknown;
+  checks: WeatherCheck[];
+  gameDepth: { holds: boolean; words: string };
+  editorDepth: { holds: boolean; words: string };
+};
+
+/**
+ * What the sky pass reads: the maps and skies, and the date a new game starts on, which each season's date is moved
+ * from.
+ */
+type SkyWeatherPlan = {
+  fixtures: SkyWeatherFixture[];
+  start: GameDate;
 };
 
 /**
@@ -80,12 +316,92 @@ const FIXTURES: Record<number, string> = {
   31: 'table tiles, which spike S6 saw differ from snapshot.js, under a looping, scrolling parallax',
   94: 'the most waterfalls, 110, beside water, under a still parallax',
   316: 'the most star tiles, 1,123, under a still parallax',
+  4: 'dark: a cave at 85%, seven torches alike, kept from the clock by <noToneChange>',
+  6: 'dark: a cave at 85%, torches and ghosts of three looks, one of them lit only behind a switch',
+  337: 'under the sky: an outdoor map with no darkness of its own, 36 lamps lit only from 18:00 to 05:00 by <hourRangePage>,'
+    + ' and 16 creatures out only by day or only by night',
+};
+
+/**
+ * The maps drawn under their sky, and when: night, when the sky is deepest and every light shows, and the afternoon the
+ * game starts in, whose faint dusk still earns a mask.
+ */
+const SKY_FIXTURES = '337@22:00,337@14:00';
+
+/**
+ * A map and a time of day as --sky takes them: the map's id, an at sign, then hours and minutes on a 24-hour clock.
+ */
+const SKY_FIXTURE = /^(\d+)@([01]?\d|2[0-3]):([0-5]\d)$/u;
+
+/**
+ * Reads --sky's list of maps and times.
+ * @param {string} list The list, such as {@code 337@22:00,337@14:00}; empty for none.
+ * @returns {SkyFixture[]} The maps and times, in the order given.
+ */
+const parseSkyFixtures = (list: string): SkyFixture[] =>
+{
+  return list.split(',').filter(entry => entry !== '').map(entry =>
+  {
+    const match = SKY_FIXTURE.exec(entry);
+    if (match === null)
+    {
+      throw new Error(`--sky takes a map and a time, such as 337@22:00, not ${entry}`);
+    }
+
+    const [ , mapId, hours, minutes ] = match;
+    return { mapId: Number(mapId), time: (Number(hours) * 60) + Number(minutes) };
+  });
+};
+
+/**
+ * Words a time of day as a 24-hour clock writes it.
+ * @param {number} time The time of day, in minutes past midnight.
+ * @returns {string} The time, such as 22:00.
+ */
+const clockOf = (time: number): string =>
+{
+  return `${String(Math.floor(time / 60)).padStart(2, '0')}:${String(time % 60).padStart(2, '0')}`;
+};
+
+/**
+ * Holds the game copy's lights steady for the run: every effect's depth in its config.lighting.json goes to 0, so each
+ * frame of the game shows every light at full strength, as the editor draws them while effects do not animate. The copy
+ * gets a fresh file of its own, so not even a link could lead the write back to the game's.
+ * @param {string} copy The game copy.
+ */
+const holdLightsSteady = (copy: string): void =>
+{
+  const file = `${copy}/data/config.lighting.json`;
+  if (existsSync(file) === false)
+  {
+    return;
+  }
+
+  const steady = steadyLighting(JSON.parse(readFileSync(file, 'utf8')) as LightingConfigFile);
+  rmSync(file);
+  writeFileSync(file, JSON.stringify(steady, null, 2));
 };
 
 /**
  * How far a colour may drift and still match: compositing rounds premultiplied alpha differently in the two pipelines.
  */
 const TOLERANCE = 2;
+
+/**
+ * Reads --pages's list of maps compared by their pages alone.
+ * @param {string | undefined} list The list, such as {@code 20,21}; empty for none; left out, to be worked out from the
+ * game.
+ * @returns {number[] | null} The maps, in the order given, or null to work them out.
+ */
+const parsePageMaps = (list: string | undefined): number[] | null =>
+{
+  if (list === undefined)
+  {
+    return null;
+  }
+
+  return list === '' ? [] : list.split(',').map(Number);
+};
 
 /**
  * Reads the settings from the command line.
@@ -105,9 +421,15 @@ const parseOptions = (argv: string[]): Options =>
   });
 
   return {
-    maps: (flags.get('maps') ?? Object.keys(FIXTURES).join(',')).split(',').map(Number),
+    maps: (flags.get('maps') ?? '102,31,94,316,4,6').split(',').filter(entry => entry !== '').map(Number),
+    sky: parseSkyFixtures(flags.get('sky') ?? SKY_FIXTURES),
+    pages: parsePageMaps(flags.get('pages')),
+    weather: parseWeatherFixtures(flags.get('weather') ?? WEATHER_FIXTURES),
+    skyWeather: parseSkyWeatherFixtures(flags.get('sky-weather') ?? SKY_WEATHER_FIXTURES),
+    seasons: parseSeasonFixtures(flags.get('seasons') ?? SEASON_FIXTURES),
     mode: (flags.get('mode') ?? 'both') as Options['mode'],
     scratch: flags.get('scratch') ?? tmpdir(),
+    shots: flags.get('shots') ?? '',
     project: flags.get('project') ?? process.env['JMZ_PROJECT_ROOT'] ?? '',
     uiPort: Number(flags.get('ui-port') ?? 18200),
     apiPort: Number(flags.get('api-port') ?? 18201),
@@ -125,6 +447,130 @@ const parseOptions = (argv: string[]): Options =>
 const readMap = async (project: string, mapId: number): Promise<MapFile> =>
 {
   return Bun.file(`${project}/data/Map${String(mapId).padStart(3, '0')}.json`).json() as Promise<MapFile>;
+};
+
+/**
+ * Reads the page rule the editor shows the game by, from the game's own files: its plugins, for J-TIME's and
+ * J-OMNI-Quests' page tags; its quest config, for the quests a new game starts with, when it has one; and its starting
+ * party.
+ * @param {string} project The game.
+ * @returns {Promise<PageRule>} The rule.
+ */
+const readPageRule = async (project: string): Promise<PageRule> =>
+{
+  const plugins = readPluginEntries(await Bun.file(`${project}/js/plugins.js`).text());
+  const system = await Bun.file(`${project}/data/System.json`).json() as { partyMembers: number[] };
+  const actors = await Bun.file(`${project}/data/Actors.json`).json() as (object | null)[];
+  const questFile = `${project}/data/config.quest.json`;
+  const configs = new Map<string, JsonValue | null>(existsSync(questFile) ? [ [ 'quest', await Bun.file(questFile).json() as JsonValue ] ] : []);
+  return parityPageRule(plugins, startingPartyOf(system.partyMembers, actors), configs);
+};
+
+/**
+ * Finds every map of the game holding an event with a gated page, such as a quest-gated or a time-gated one.
+ * @param {string} project The game.
+ * @param {(map: MapFile) => ReadonlyMap<number, readonly number[]>} gatedOf Lists a map's gated pages, by event.
+ * @returns {Promise<number[]>} The maps' ids, in order.
+ */
+const gatedMapIds = async (project: string, gatedOf: (map: MapFile) => ReadonlyMap<number, readonly number[]>): Promise<number[]> =>
+{
+  const files = readdirSync(`${project}/data`).filter(name => /^Map\d{3,}\.json$/u.test(name)).sort();
+  const mapIds: number[] = [];
+  for (const file of files)
+  {
+    const map = await Bun.file(`${project}/data/${file}`).json() as MapFile;
+    if (gatedOf(map).size > 0)
+    {
+      mapIds.push(Number.parseInt(file.slice('Map'.length), 10));
+    }
+  }
+
+  return mapIds;
+};
+
+/**
+ * Plans the season pass from the game's own files: the moment each season fixture brings, its date the one the editor's
+ * clock moves the game's start to; every map holding a time-gated page; and the date fixture, judged on those dates,
+ * under the first map id the game's map list leaves free. A game that does not enable J-TIME has no date to move, and no
+ * season pass.
+ * @param {Options} options The settings.
+ * @returns {Promise<SeasonPlan | null>} The plan, or null for no season pass.
+ */
+const seasonPlanOf = async (options: Options): Promise<SeasonPlan | null> =>
+{
+  const plugins = readPluginEntries(await Bun.file(`${options.project}/js/plugins.js`).text());
+  const time = plugins.find(plugin => plugin.status && pluginBasename(plugin.name) === TIME_PLUGIN);
+  if (options.seasons.length === 0 || time === undefined)
+  {
+    return null;
+  }
+
+  const start = startingDateOf(time, new Date());
+  const moments = options.seasons.map(fixture => seasonMomentOf(start, fixture));
+  const mapIds = await gatedMapIds(options.project, timeGatedPagesOf);
+
+  // the fixture asks for each date once, however many hours it is judged at.
+  const dates = new Map<string, GameDate>(moments.map(({ seconds, days, months, years }) => [ `${years}-${months}-${days}`, { seconds, days, months, years } ]));
+  const infos = await Bun.file(`${options.project}/data/MapInfos.json`).json() as unknown[];
+  const tilesetId = mapIds.length === 0 ? 1 : (await readMap(options.project, mapIds[0])).tilesetId;
+  return { fixtures: options.seasons, moments, mapIds, fixtureId: infos.length, fixture: dateFixtureMap([ ...dates.values() ], tilesetId) };
+};
+
+/**
+ * Plans the sky pass from the game's own files: the maps and skies asked for, and the date a new game starts on, which
+ * the editor's clock moves for each season. A game without J-TIME, J-Weather and J-Weather-Time enabled has no sky to
+ * read, and no sky pass.
+ * @param {Options} options The settings.
+ * @returns {Promise<SkyWeatherPlan | null>} The plan, or null for no sky pass.
+ */
+const skyWeatherPlanOf = async (options: Options): Promise<SkyWeatherPlan | null> =>
+{
+  const plugins = readPluginEntries(await Bun.file(`${options.project}/js/plugins.js`).text());
+  const enabled = (name: string) => plugins.find(plugin => plugin.status && pluginBasename(plugin.name) === name);
+  const time = enabled(TIME_PLUGIN);
+  if (options.skyWeather.length === 0 || time === undefined || enabled('J-Weather') === undefined || enabled('J-Weather-Time') === undefined)
+  {
+    return null;
+  }
+
+  return { fixtures: options.skyWeather, start: startingDateOf(time, new Date()) };
+};
+
+/**
+ * Writes the date fixture into the game copy, never the game: its map file, and its row in the copy's map list, which
+ * the copy gets as a fresh file of its own, so not even a link could lead the write back to the game's. A map file
+ * already there under the fixture's id is refused rather than written over.
+ * @param {string} copy The game copy.
+ * @param {SeasonPlan} plan The season pass.
+ */
+const writeDateFixture = (copy: string, plan: SeasonPlan): void =>
+{
+  const mapFile = `${copy}/data/Map${String(plan.fixtureId).padStart(3, '0')}.json`;
+  if (existsSync(mapFile))
+  {
+    throw new Error(`the date fixture's id, ${plan.fixtureId}, is already a map of the game`);
+  }
+
+  writeFileSync(mapFile, JSON.stringify(plan.fixture));
+  const infosFile = `${copy}/data/MapInfos.json`;
+  const infos = JSON.parse(readFileSync(infosFile, 'utf8')) as unknown[];
+  infos[plan.fixtureId] = newMapRow(plan.fixtureId, 'Date fixture');
+  rmSync(infosFile);
+  writeFileSync(infosFile, JSON.stringify(infos));
+};
+
+/**
+ * Names the page the editor shows each of a capture's map's events, at the hour the capture is drawn at; a game with no
+ * clock has no hour to give, and then its rule holds no tag that reads one, so any hour answers alike.
+ * @param {ProbeCapture} capture The capture.
+ * @param {MapFile} map The map.
+ * @param {ProbeReport} report The probe's report.
+ * @param {PageRule} rule The rule the editor shows the game by.
+ * @returns {EditorPages} Each event's page, -1 for none.
+ */
+const editorPagesFor = (capture: ProbeCapture, map: MapFile, report: ProbeReport, rule: PageRule): EditorPages =>
+{
+  return editorPagesOf(map, rule, { timeOfDay: timeOfCapture(capture, report.clocks) ?? 0 });
 };
 
 /**
@@ -153,20 +599,20 @@ const openEditorMap = async (page: Page, uiBase: string, mapId: number): Promise
 };
 
 /**
- * Draws one of the game's captures in the editor.
+ * Draws one of the game's captures in the editor, at the hour the capture was drawn at in the game.
  * @param {Page} page The page, on the capture's map.
  * @param {ProbeCapture} capture The game's capture.
- * @param {{ width: number, height: number }} screen The screen size.
+ * @param {ProbeReport} report The probe's report.
  * @param {string} file Where to write the editor's picture.
  */
-const drawInEditor = async (page: Page, capture: ProbeCapture, screen: { width: number; height: number }, file: string): Promise<void> =>
+const drawInEditor = async (page: Page, capture: ProbeCapture, report: ProbeReport, file: string): Promise<void> =>
 {
-  const url = await page.evaluate(async ({ pass, step, rect }) =>
+  const url = await page.evaluate(async ({ pass, step, time, rect }) =>
   {
     const hooks = (window as unknown as HookWindow).__jmzMapView;
-    hooks?.prepareParity({ events: pass === 'events', step, frames: 0 });
+    hooks?.prepareParity({ events: pass === 'events', step, frames: 0, lighting: pass === 'dark' || pass === 'sky', time: time ?? undefined });
     return hooks?.extract(rect) ?? '';
-  }, { pass: capture.pass, step: capture.step, rect: { x: capture.display.x * TILE, y: capture.display.y * TILE, ...screen } });
+  }, { pass: capture.pass, step: capture.step, time: timeOfCapture(capture, report.clocks), rect: { x: capture.display.x * TILE, y: capture.display.y * TILE, ...report.screen } });
   await saveDataUrl(url, file);
 };
 
@@ -175,10 +621,11 @@ const drawInEditor = async (page: Page, capture: ProbeCapture, screen: { width: 
  * @param {ProbeCapture} capture The capture.
  * @param {MapFile} map The map.
  * @param {ProbeReport} report The probe's report.
+ * @param {PageRule} rule The rule the editor shows the game by.
  * @param {string} folder Where the pictures are.
  * @returns {Promise<ViewResult>} What it came to.
  */
-const compareCapture = async (capture: ProbeCapture, map: MapFile, report: ProbeReport, folder: string): Promise<ViewResult> =>
+const compareCapture = async (capture: ProbeCapture, map: MapFile, report: ProbeReport, rule: PageRule, folder: string): Promise<ViewResult> =>
 {
   const game = await decodePng(`${folder}/${capture.file}`);
   const editor = await decodePng(`${folder}/${capture.file.replace(/^game-/u, 'editor-')}`);
@@ -190,13 +637,28 @@ const compareCapture = async (capture: ProbeCapture, map: MapFile, report: Probe
     await writePng(differencePicture(game, editor, TOLERANCE), `${folder}/${capture.file.replace(/^game-/u, 'diff-')}`);
   }
 
-  const events = report.events[capture.mapId] ?? [];
+  const events = report.events[eventsKeyOf(capture)] ?? [];
+  const editorPages = editorPagesFor(capture, map, report, rule);
+  const lights = darkLightsOf(map, editorPages);
   const explained: CellDifference[] = [];
   const unexplained: CellDifference[] = [];
   const reasons = new Set<string>();
+  const explain = (cell: CellDifference): string | null =>
+  {
+    switch (capture.pass)
+    {
+      case 'events':
+        return explainCell(cell, events, editorPages);
+      case 'dark':
+      case 'sky':
+        return explainDarkCell(cell, lights, events);
+      case 'tiles':
+        return null;
+    }
+  };
   comparison.cells.forEach(cell =>
   {
-    const reason = capture.pass === 'events' ? explainCell(cell, events) : null;
+    const reason = explain(cell);
     if (reason === null)
     {
       unexplained.push(cell);
@@ -211,6 +673,380 @@ const compareCapture = async (capture: ProbeCapture, map: MapFile, report: Probe
 };
 
 /**
+ * Reads one map's weather in the editor where the game read it: the view grown or shrunk until it is exactly the game's
+ * screen, lined up on the game's display at the game's scale, drawn as the game draws (events, lighting and weather,
+ * held still) at the hour the game's clock read, the weather started over as on arriving, and read once its pictures are
+ * in; then the same stretch is drawn into a picture.
+ * @param {Page} page The page.
+ * @param {string} uiBase The UI's origin.
+ * @param {WeatherProbe} probe What the game read on the map.
+ * @param {number} mapId The map.
+ * @param {{ width: number, height: number }} screen The game's screen.
+ * @param {string} file Where to write the editor's picture.
+ * @returns {Promise<{ weather: EditorWeather, depth: EditorWeatherDepth }>} What the editor read.
+ */
+const readEditorWeather = async (
+  page: Page,
+  uiBase: string,
+  probe: WeatherProbe,
+  mapId: number,
+  screen: { width: number; height: number },
+  file: string): Promise<{ weather: EditorWeather; depth: EditorWeatherDepth }> =>
+{
+  await openEditorMap(page, uiBase, mapId);
+
+  // the page's bars take some of the window, so the window grows by them until the map's view is the game's screen.
+  await fitViewToScreen(page, screen);
+
+  // the game's sky is held off for these, so the editor's is too.
+  const rect = { x: probe.display.x * TILE, y: probe.display.y * TILE, ...screen };
+  await page.evaluate(({ at, time }) =>
+  {
+    const hooks = (window as unknown as HookWindow).__jmzMapView;
+    hooks?.setCamera(at.x, at.y, 1);
+    hooks?.prepareParity({ events: true, step: 0, frames: 0, lighting: true, weather: true, time: time >= 0 ? time : undefined, sky: null });
+    hooks?.weather.reset();
+  }, { at: rect, time: probe.clock });
+
+  // the weather settles in the next frame, and draws once its pictures have come, or a layer says why they cannot.
+  await page.waitForFunction(() =>
+  {
+    const [ drawn ] = (window as unknown as HookWindow).__jmzMapView?.weather.describe() ?? [];
+    return drawn !== undefined && drawn !== null && drawn.layers.every(layer => layer.pictureSize !== null || layer.problem !== '');
+  }, null, { timeout: 30_000 });
+  const read = await page.evaluate(() =>
+  {
+    const hooks = (window as unknown as HookWindow).__jmzMapView;
+    const [ weather ] = hooks?.weather.describe() ?? [];
+    return { weather: weather as EditorWeather, depth: hooks?.weather.depth() as EditorWeatherDepth };
+  });
+  const url = await page.evaluate(stretch => (window as unknown as HookWindow).__jmzMapView?.extract(stretch) ?? '', rect);
+  await saveDataUrl(url, file);
+  return read;
+};
+
+/**
+ * Lines a page's map view up with the game's screen: the window grown or shrunk by the page's bars until the view is
+ * exactly the game's screen.
+ * @param {Page} page The page, on a map.
+ * @param {{ width: number, height: number }} screen The game's screen.
+ */
+const fitViewToScreen = async (page: Page, screen: { width: number; height: number }): Promise<void> =>
+{
+  const view = await page.evaluate(() => (window as unknown as HookWindow).__jmzMapView?.info().view ?? { width: 0, height: 0 });
+  const size = page.viewportSize() ?? screen;
+  await page.setViewportSize({ width: size.width + screen.width - view.width, height: size.height + screen.height - view.height });
+  await page.waitForFunction(wanted =>
+  {
+    const shown = (window as unknown as HookWindow).__jmzMapView?.info().view;
+    return shown?.width === wanted.width && shown.height === wanted.height;
+  }, screen, { timeout: 30_000 });
+};
+
+/**
+ * Reads one map's weather in the editor under a sky, where the game read it, on a page of its own, so nothing a page
+ * remembered of an earlier fixture's clock reaches it: the view lined up with the game's screen, drawn as the game draws
+ * (events, lighting and weather, held still), the clock at the fixture's hour and season and the sky picked on it as an
+ * author picks it. Once the page has read the project's sky and told the renderer, the weather is started over as on
+ * arriving and read once its pictures are in, or, where the game shows none, once it has had time to draw any; then
+ * the same stretch is drawn into a picture.
+ * @param {Browser} browser The browser.
+ * @param {string} uiBase The UI's origin.
+ * @param {WeatherProbe} probe What the game read on the map.
+ * @param {SkyWeatherFixture} fixture The map, the sky, the season and the hour.
+ * @param {{ width: number, height: number }} screen The game's screen.
+ * @param {string} file Where to write the editor's picture.
+ * @returns {Promise<{ weather: EditorWeather, depth: EditorWeatherDepth, sky: unknown }>} What the editor read.
+ */
+const readEditorSkyWeather = async (
+  browser: Browser,
+  uiBase: string,
+  probe: WeatherProbe,
+  fixture: SkyWeatherFixture,
+  screen: { width: number; height: number },
+  file: string): Promise<{ weather: EditorWeather; depth: EditorWeatherDepth; sky: unknown }> =>
+{
+  const page = await browser.newPage({ viewport: screen, deviceScaleFactor: 1 });
+  try
+  {
+    await openEditorMap(page, uiBase, fixture.mapId);
+    await fitViewToScreen(page, screen);
+    const rect = { x: probe.display.x * TILE, y: probe.display.y * TILE, ...screen };
+    const pick = { condition: fixture.condition, strength: fixture.strength };
+    await page.evaluate(({ at, time, season, sky }) =>
+    {
+      const hooks = (window as unknown as HookWindow).__jmzMapView;
+      hooks?.setCamera(at.x, at.y, 1);
+      hooks?.prepareParity({ events: true, step: 0, frames: 0, lighting: true, weather: true, time, season, sky });
+    }, { at: rect, time: fixture.time, season: fixture.season, sky: pick });
+
+    // the sky reaches the renderer once the page has read the project's sky; the weather then starts over as on arriving.
+    await page.waitForFunction(() => (window as unknown as HookWindow).__jmzMapView?.weather.sky() !== null, null, { timeout: 30_000 });
+    await page.evaluate(() => (window as unknown as HookWindow).__jmzMapView?.weather.reset());
+    if (probe.current === null)
+    {
+      await page.waitForTimeout(1000);
+    }
+    else
+    {
+      await page.waitForFunction(() =>
+      {
+        const [ drawn ] = (window as unknown as HookWindow).__jmzMapView?.weather.describe() ?? [];
+        return drawn !== undefined && drawn !== null && drawn.layers.every(layer => layer.pictureSize !== null || layer.problem !== '');
+      }, null, { timeout: 30_000 });
+    }
+
+    const read = await page.evaluate(() =>
+    {
+      const hooks = (window as unknown as HookWindow).__jmzMapView;
+      const [ weather ] = hooks?.weather.describe() ?? [];
+      return { weather: (weather ?? null) as EditorWeather | null, depth: hooks?.weather.depth() as EditorWeatherDepth, sky: hooks?.weather.sky() ?? null };
+    });
+    const url = await page.evaluate(stretch => (window as unknown as HookWindow).__jmzMapView?.extract(stretch) ?? '', rect);
+    await saveDataUrl(url, file);
+
+    // a map the sky does not reach has no drawing at all, which is no weather and no layers.
+    const weather = read.weather ?? { weather: null, problem: '', layers: [] };
+    return { weather, depth: read.depth, sky: read.sky };
+  }
+  finally
+  {
+    await page.close();
+  }
+};
+
+/**
+ * Names a sky picture after its map, its sky, its season and its hour.
+ * @param {SkyWeatherFixture} fixture The fixture.
+ * @returns {string} The file's name, such as {@code sky-Map337-clear-moderate-winter-2200.png}.
+ */
+const skyShotName = (fixture: SkyWeatherFixture): string =>
+{
+  const season = SEASON_NAMES[fixture.season].toLowerCase();
+  return `sky-Map${String(fixture.mapId).padStart(3, '0')}-${fixture.condition}-${fixture.strength}-${season}-${clockOf(fixture.time).replace(':', '')}.png`;
+};
+
+/**
+ * Reads every sky fixture in the editor, compares each with what the game read, the sky first, and lays both sides'
+ * pictures side by side for an eye, the game's on the left.
+ * @param {Browser} browser The browser.
+ * @param {string} uiBase The UI's origin.
+ * @param {SkyWeatherPlan} plan The sky pass.
+ * @param {ProbeReport} report The probe's report.
+ * @param {{ width: number, height: number }} screen The game's screen.
+ * @param {string} folder Where the pictures are.
+ * @param {string} shots Where the side-by-side pictures go.
+ * @returns {Promise<SkyWeatherResult[]>} Every map's comparison.
+ */
+const compareSkyWeathers = async (
+  browser: Browser,
+  uiBase: string,
+  plan: SkyWeatherPlan,
+  report: ProbeReport,
+  screen: { width: number; height: number },
+  folder: string,
+  shots: string): Promise<SkyWeatherResult[]> =>
+{
+  const results: SkyWeatherResult[] = [];
+  for (const fixture of plan.fixtures)
+  {
+    const game = (report.weather ?? {})[skyWeatherKeyOf(fixture)];
+    if (game === undefined)
+    {
+      throw new Error(`the game's probe read no weather on Map${String(fixture.mapId).padStart(3, '0')} under ${skyWeatherKeyOf(fixture)}`);
+    }
+
+    const editorFile = `${folder}/${game.file.replace(/^game-/u, 'editor-')}`;
+    const { weather, depth, sky } = await readEditorSkyWeather(browser, uiBase, game, fixture, screen, editorFile);
+    const checks = [ compareSky(game.sky ?? null, sky), ...compareWeather(game, { current: weather.weather, layers: weather.layers }) ];
+    results.push({ fixture, game, editor: weather, editorSky: sky, checks, gameDepth: gameWeatherDepth(game.depth), editorDepth: editorWeatherDepth(depth) });
+
+    mkdirSync(shots, { recursive: true });
+    const together = sideBySide(await decodePng(`${folder}/${game.file}`), await decodePng(editorFile), 16);
+    await writePng(together, `${shots}/${skyShotName(fixture)}`);
+  }
+
+  return results;
+};
+
+/**
+ * Prints every map's weather under a sky: the sky each side handed J-Weather, the weather, each side's count per layer,
+ * where each side draws it, and every check that does not hold, with both sides' numbers.
+ * @param {readonly SkyWeatherResult[]} results The comparisons.
+ * @returns {boolean} True when every check held and both sides draw the weather where they should.
+ */
+const printSkyWeather = (results: readonly SkyWeatherResult[]): boolean =>
+{
+  if (results.length === 0)
+  {
+    return true;
+  }
+
+  console.log('Weather under the sky, J-Weather-Time held in each condition, compared by its numbers (game | editor):');
+  results.forEach(({ fixture, game, editor, editorSky, checks, gameDepth, editorDepth }) =>
+  {
+    const map = `Map${String(fixture.mapId).padStart(3, '0')}`;
+    const at = `${fixture.condition} ${fixture.strength} in ${SEASON_NAMES[fixture.season]} at ${clockOf(fixture.time)}`;
+    const look = game.current === null ? 'no weather' : `${game.current.preset} ${game.current.intensity}`;
+    const failed = checks.filter(check => check.holds === false);
+    const verdict = failed.length === 0 && gameDepth.holds && editorDepth.holds ? 'MATCH' : `DIFFER in ${failed.length} checks`;
+    const skyWords = (sky: unknown): string => (sky === null || sky === undefined ? 'none' : JSON.stringify(sky));
+    console.log(`  ${map} under ${at}: ${look}, ${checks.length} checks  ${verdict}`);
+    console.log(`    sky: ${skyWords(game.sky)} | ${skyWords(editorSky)}`);
+    game.layers.forEach((layer, index) =>
+    {
+      const mine = editor.layers[index];
+      const stats = (side: WeatherLayerProbe | undefined): string => (side === undefined
+        ? 'none'
+        : `${side.stats.count} x ${side.asset}, down ${side.stats.velocityY.mean.toFixed(2)}, across ${side.stats.velocityX.mean.toFixed(2)},`
+          + ` size ${side.stats.scaleX.mean.toFixed(3)}, strength ${side.stats.opacity.mean.toFixed(1)}, on screen ${side.stats.onScreen.toFixed(2)}`);
+      console.log(`    layer ${index + 1}: ${stats(layer)} | ${stats(mine)}`);
+    });
+    failed.forEach(check => console.log(`    ${check.name}: ${check.game} | ${check.editor}`));
+    if (gameDepth.holds === false || editorDepth.holds === false)
+    {
+      console.log(`    game depth: ${gameDepth.words}`);
+      console.log(`    editor depth: ${editorDepth.words}`);
+    }
+  });
+
+  return results.every(result => result.checks.every(check => check.holds) && result.gameDepth.holds && result.editorDepth.holds);
+};
+
+/**
+ * Reads every weather fixture in the editor, compares each with what the game read, and lays both sides' pictures side
+ * by side for an eye: the game's on the left.
+ * @param {Page} page A page of its own, whose window the reading resizes.
+ * @param {string} uiBase The UI's origin.
+ * @param {Options} options The settings.
+ * @param {ProbeReport} report The probe's report.
+ * @param {{ width: number, height: number }} screen The game's screen.
+ * @param {string} folder Where the pictures are.
+ * @returns {Promise<WeatherResult[]>} Every map's comparison.
+ */
+const compareWeathers = async (
+  page: Page,
+  uiBase: string,
+  options: Options,
+  report: ProbeReport,
+  screen: { width: number; height: number },
+  folder: string): Promise<WeatherResult[]> =>
+{
+  const results: WeatherResult[] = [];
+  for (const fixture of options.weather)
+  {
+    const game = (report.weather ?? {})[String(fixture.mapId)];
+    if (game === undefined)
+    {
+      throw new Error(`the game's probe read no weather on Map${String(fixture.mapId).padStart(3, '0')}`);
+    }
+
+    const editorFile = `${folder}/${game.file.replace(/^game-/u, 'editor-')}`;
+    const { weather, depth } = await readEditorWeather(page, uiBase, game, fixture.mapId, screen, editorFile);
+    const checks = compareWeather(game, { current: weather.weather, layers: weather.layers });
+    results.push({ fixture, game, editor: weather, checks, gameDepth: gameWeatherDepth(game.depth), editorDepth: editorWeatherDepth(depth) });
+
+    // both sides side by side, the game on the left, named by the map and its look, for an eye to judge.
+    const look = game.current === null ? 'none' : `${game.current.preset}-${game.current.intensity}`;
+    const hour = fixture.time === undefined ? '' : `-${clockOf(fixture.time).replace(':', '')}`;
+    const shots = options.shots === '' ? folder : options.shots;
+    mkdirSync(shots, { recursive: true });
+    const together = sideBySide(await decodePng(`${folder}/${game.file}`), await decodePng(editorFile), 16);
+    await writePng(together, `${shots}/weather-Map${String(fixture.mapId).padStart(3, '0')}-${look}${hour}.png`);
+  }
+
+  return results;
+};
+
+/**
+ * Prints every map's weather comparison: the look, each side's count per layer, where each side draws it, and every
+ * check, those that hold summed up in a line per layer and those that do not spelled out with both sides' numbers.
+ * @param {readonly WeatherResult[]} results The comparisons.
+ * @returns {boolean} True when every check held and both sides draw the weather where they should.
+ */
+const printWeather = (results: readonly WeatherResult[]): boolean =>
+{
+  if (results.length === 0)
+  {
+    return true;
+  }
+
+  console.log('Weather, compared by its numbers (game | editor):');
+  results.forEach(({ fixture, game, editor, checks, gameDepth, editorDepth }) =>
+  {
+    const map = `Map${String(fixture.mapId).padStart(3, '0')}`;
+    const at = fixture.time === undefined ? `at ${clockOf(Math.max(game.clock, 0))}` : `at ${clockOf(fixture.time)}`;
+    const look = game.current === null ? 'no weather' : `${game.current.preset} ${game.current.intensity}`;
+    const failed = checks.filter(check => check.holds === false);
+    const verdict = failed.length === 0 && gameDepth.holds && editorDepth.holds ? 'MATCH' : `DIFFER in ${failed.length} checks`;
+    console.log(`  ${map} ${look} ${at}: ${checks.length} checks  ${verdict}`);
+    game.layers.forEach((layer, index) =>
+    {
+      const mine = editor.layers[index];
+      const stats = (side: WeatherLayerProbe | undefined): string => (side === undefined
+        ? 'none'
+        : `${side.stats.count} x ${side.asset}, down ${side.stats.velocityY.mean.toFixed(2)}, across ${side.stats.velocityX.mean.toFixed(2)},`
+          + ` size ${side.stats.scaleX.mean.toFixed(3)}, strength ${side.stats.opacity.mean.toFixed(1)}, on screen ${side.stats.onScreen.toFixed(2)}`);
+      console.log(`    layer ${index + 1}: ${stats(layer)} | ${stats(mine)}`);
+    });
+    failed.forEach(check => console.log(`    ${check.name}: ${check.game} | ${check.editor}`));
+    console.log(`    game depth ${gameDepth.holds ? 'as expected' : 'UNEXPECTED'}: ${gameDepth.words}`);
+    console.log(`    editor depth ${editorDepth.holds ? 'as expected' : 'UNEXPECTED'}: ${editorDepth.words}`);
+  });
+
+  return results.every(result => result.checks.every(check => check.holds) && result.gameDepth.holds && result.editorDepth.holds);
+};
+
+/**
+ * Draws and reads in the editor everything the game's probe drew and read: every view of every drawn map, then each
+ * map's weather on a page of its own, since lining its view up with the game's screen resizes the window, then each
+ * map's weather under a sky, each on a page of its own, its clock and its sky its own. The editor draws on SwiftShader
+ * reached as the game reaches it, so its light pictures rasterise as the game's do.
+ * @param {Options} options The settings.
+ * @param {ProbeReport} report The probe's report.
+ * @param {SkyWeatherPlan | null} skies The sky pass, or null for none.
+ * @param {readonly number[]} mapIds The maps drawn view by view.
+ * @param {{ width: number, height: number }} screen The game's screen.
+ * @param {string} folder Where the pictures are.
+ * @returns {Promise<{ weathers: WeatherResult[], skyWeathers: SkyWeatherResult[] }>} The weather compared, held off and
+ * under each sky.
+ */
+const readEditorSide = async (
+  options: Options,
+  report: ProbeReport,
+  skies: SkyWeatherPlan | null,
+  mapIds: readonly number[],
+  screen: { width: number; height: number },
+  folder: string): Promise<{ weathers: WeatherResult[]; skyWeathers: SkyWeatherResult[] }> =>
+{
+  const stack = await startEditorStack({ projectRoot: options.project, scratch: `${options.scratch}/editor`, uiPort: options.uiPort, apiPort: options.apiPort });
+  const { browser } = await openSpeedBrowser({ mode: 'swiftshader-as-game' });
+  try
+  {
+    const page = await browser.newPage({ viewport: screen, deviceScaleFactor: 1 });
+    for (const mapId of mapIds)
+    {
+      await openEditorMap(page, stack.uiBase, mapId);
+      for (const capture of report.captures.filter(each => each.mapId === mapId))
+      {
+        await drawInEditor(page, capture, report, `${folder}/${capture.file.replace(/^game-/u, 'editor-')}`);
+      }
+    }
+
+    const weatherPage = await browser.newPage({ viewport: screen, deviceScaleFactor: 1 });
+    const weathers = options.weather.length === 0 ? [] : await compareWeathers(weatherPage, stack.uiBase, options, report, screen, folder);
+    const shots = options.shots === '' ? folder : options.shots;
+    const skyWeathers = skies === null ? [] : await compareSkyWeathers(browser, stack.uiBase, skies, report, screen, folder, shots);
+    return { weathers, skyWeathers };
+  }
+  finally
+  {
+    await browser.close();
+    await stack.stop();
+  }
+};
+
+/**
  * Runs the game and the editor over the fixtures and compares every view.
  * @param {Options} options The settings.
  * @returns {Promise<boolean>} True when every tiles pass matched.
@@ -221,64 +1057,295 @@ const runGameParity = async (options: Options): Promise<boolean> =>
   mkdirSync(folder, { recursive: true });
   const screen = { width: 1920, height: 1080 };
   const maps = new Map<number, MapFile>();
-  for (const mapId of options.maps)
+  const mapIds = [ ...new Set([ ...options.maps, ...options.sky.map(fixture => fixture.mapId) ]) ];
+
+  // the maps compared by their pages alone: those holding quest-gated events, unless the run names others, leaving out
+  // any already drawn, whose pages are judged with the rest of what is drawn there.
+  const pageMapIds = (options.pages ?? await gatedMapIds(options.project, questGatedPagesOf)).filter(mapId => mapIds.includes(mapId) === false);
+  const seasons = await seasonPlanOf(options);
+  const seasonMapIds = seasons === null ? [] : seasons.mapIds;
+  const skies = await skyWeatherPlanOf(options);
+  const skyMapIds = skies === null ? [] : skies.fixtures.map(fixture => fixture.mapId);
+  for (const mapId of [ ...mapIds, ...pageMapIds, ...seasonMapIds, ...options.weather.map(fixture => fixture.mapId), ...skyMapIds ])
   {
     maps.set(mapId, await readMap(options.project, mapId));
   }
 
-  const probeMaps = options.maps.map(mapId => probeMapFor(mapId, maps.get(mapId) as MapFile, screen));
+  // the date fixture lives in the game copy alone, so the editor judges the file built for it.
+  if (seasons !== null)
+  {
+    maps.set(seasons.fixtureId, seasons.fixture);
+  }
+
+  // the skies come after the maps drawn as they are, so the game has always arrived somewhere before its clock is set
+  // for one; the maps compared by their pages alone come before them, so their pages are judged at the game's own hour,
+  // and the maps judged at each season's date after those, each putting the clock back as it found it. The weather comes
+  // last of all, since the probe holds the sky's weather off from the first map read for it on, and a page waiting on the
+  // weather must not be judged under a sky held off: those read at the hour the clock was left at first, then those read
+  // at a time of day, the clock set like a sky's, then those read under a sky, each on the date and at the hour of its
+  // own.
+  const weatherAt = (timed: boolean) => options.weather
+    .filter(fixture => (fixture.time !== undefined) === timed)
+    .map(fixture => weatherProbeMapFor(fixture, maps.get(fixture.mapId) as MapFile, screen));
+  const seasonMaps = seasons === null ? [] : [ ...seasons.mapIds, seasons.fixtureId ].map(mapId => seasonProbeMapFor(mapId, seasons.moments));
+  const skyMaps = skies === null ? [] : skies.fixtures.map(fixture => skyWeatherProbeMapFor(fixture, maps.get(fixture.mapId) as MapFile, screen, skies.start));
+  const probeMaps = [
+    ...options.maps.map(mapId => probeMapFor(mapId, maps.get(mapId) as MapFile, screen)),
+    ...pageMapIds.map(pagesProbeMapFor),
+    ...seasonMaps,
+    ...options.sky.map(fixture => skyProbeMapFor(fixture.mapId, maps.get(fixture.mapId) as MapFile, screen, fixture.time)),
+    ...weatherAt(false),
+    ...weatherAt(true),
+    ...skyMaps,
+  ];
   const report = await runHeadlessGame(
-    { projectRoot: options.project, scratch: options.scratch, display: options.display, nwBinary: options.nw, timeoutMs: 10 * 60_000 },
+    {
+      projectRoot: options.project,
+      scratch: options.scratch,
+      display: options.display,
+      nwBinary: options.nw,
+      timeoutMs: 10 * 60_000,
+      prepare: copy =>
+      {
+        holdLightsSteady(copy);
+        if (seasons !== null)
+        {
+          writeDateFixture(copy, seasons);
+        }
+      },
+    },
     { outDir: folder, maps: probeMaps, tickLimit: 6000 });
   if (report.phase !== 'done')
   {
     throw new Error(`the game's probe ended in "${report.phase}": ${report.errors.join('; ')}`);
   }
 
-  const stack = await startEditorStack({ projectRoot: options.project, scratch: `${options.scratch}/editor`, uiPort: options.uiPort, apiPort: options.apiPort });
-  const { browser } = await openSpeedBrowser({ mode: 'swiftshader' });
-  try
-  {
-    const page = await browser.newPage({ viewport: screen, deviceScaleFactor: 1 });
-    for (const mapId of options.maps)
-    {
-      await openEditorMap(page, stack.uiBase, mapId);
-      for (const capture of report.captures.filter(each => each.mapId === mapId))
-      {
-        await drawInEditor(page, capture, report.screen, `${folder}/${capture.file.replace(/^game-/u, 'editor-')}`);
-      }
-    }
-  }
-  finally
-  {
-    await browser.close();
-    await stack.stop();
-  }
-
+  const { weathers, skyWeathers } = await readEditorSide(options, report, skies, mapIds, screen, folder);
+  const rule = await readPageRule(options.project);
   const results: ViewResult[] = [];
+  const pages = new Map<string, PageComparison>();
   for (const capture of report.captures)
   {
-    results.push(await compareCapture(capture, maps.get(capture.mapId) as MapFile, report, folder));
+    const map = maps.get(capture.mapId) as MapFile;
+    results.push(await compareCapture(capture, map, report, rule, folder));
+
+    // the pages are compared once for each map and hour, whichever capture comes to them first.
+    const key = eventsKeyOf(capture);
+    if (pages.has(key) === false)
+    {
+      const events = report.events[key];
+      pages.set(key, { events: events.length, differ: pageDifferencesOf(events, editorPagesFor(capture, map, report, rule)) });
+    }
   }
 
-  await Bun.write(`${options.scratch}/parity-game.json`, JSON.stringify({ report, results }, null, 2));
-  return printGameParity(options.maps, results);
+  const quests = questPagesOf(report, maps, pageMapIds, rule);
+  const seasonPages = seasons === null ? [] : seasonPagesOf(report, maps, seasons, rule);
+  await Bun.write(`${options.scratch}/parity-game.json`, JSON.stringify({ report, results, pages: Object.fromEntries(pages), quests, seasonPages, weathers, skyWeathers }, null, 2));
+  const drawn = printGameParity(mapIds, results, pages);
+  const questsAlike = printQuestPages(quests);
+  const seasonsAlike = printSeasonPages(seasonPages);
+  if (report.freshSky !== undefined)
+  {
+    console.log(`The sky on the fresh save, held off for the weather: ${JSON.stringify(report.freshSky)}`);
+  }
+
+  if (skies === null && options.skyWeather.length > 0)
+  {
+    console.log('No weather was read under a sky: the game does not enable J-TIME, J-Weather and J-Weather-Time.');
+  }
+
+  const weatherAlike = printWeather(weathers);
+  return printSkyWeather(skyWeathers) && weatherAlike && seasonsAlike && questsAlike && drawn;
 };
 
 /**
- * Prints the game comparison, per map and pass.
+ * Tallies every time-gated page at each season fixture, on every map holding one and on the date fixture: the game's
+ * judgements at the moment its clock was set to, against the editor's at the same season and hour.
+ * @param {ProbeReport} report The probe's report.
+ * @param {ReadonlyMap<number, MapFile>} maps Every map the probe visited, by id, the date fixture's among them.
+ * @param {SeasonPlan} plan The season pass.
+ * @param {PageRule} rule The rule the editor shows the game by.
+ * @returns {SeasonPages[]} The tallies, by season fixture, in the order asked for.
+ */
+const seasonPagesOf = (report: ProbeReport, maps: ReadonlyMap<number, MapFile>, plan: SeasonPlan, rule: PageRule): SeasonPages[] =>
+{
+  return plan.fixtures.map((fixture, index) =>
+  {
+    const moment = plan.moments[index];
+    const tallyOf = (mapId: number): PagesTally =>
+    {
+      const map = maps.get(mapId) as MapFile;
+      const judged = (report.moments ?? {})[`${mapId}@${moment.key}`];
+      if (judged === undefined)
+      {
+        throw new Error(`the game's probe judged nothing on Map${String(mapId).padStart(3, '0')} at ${moment.key}`);
+      }
+
+      return tallyPages(map, judged, rule, { timeOfDay: fixture.time, season: fixture.season }, timeGatedPagesOf(map));
+    };
+    return {
+      fixture,
+      date: dateWords(moment),
+      maps: plan.mapIds.map(mapId => ({ mapId, tally: tallyOf(mapId) })),
+      dateFixture: tallyOf(plan.fixtureId),
+    };
+  });
+};
+
+/**
+ * Prints how the game and the editor judged every time-gated page at each season fixture: the season, the hour and the
+ * date it brought; the time-gated pages both judge alike across every map holding one, and every page there; the events
+ * both show on the same page; and the date fixture's pages; then each gated page judged differently.
+ * @param {readonly SeasonPages[]} seasons The tallies.
+ * @returns {boolean} True when every time-gated page, and every page of the date fixture, was judged alike.
+ */
+const printSeasonPages = (seasons: readonly SeasonPages[]): boolean =>
+{
+  if (seasons.length === 0)
+  {
+    return true;
+  }
+
+  console.log('Time-gated pages, and the date fixture\'s, the game\'s clock set to each season\'s date and hour as the editor moves its own:');
+  seasons.forEach(({ fixture, date, maps, dateFixture }) =>
+  {
+    const total = (pick: (tally: PagesTally) => number): number => maps.reduce((sum, { tally }) => sum + pick(tally), 0);
+    const differ = [
+      ...maps.flatMap(({ mapId, tally }) => tally.gatedDiffer.map(difference => `Map${String(mapId).padStart(3, '0')} ${verdictWords(difference)}`)),
+      ...dateFixture.gatedDiffer.map(difference => `the date fixture's ${verdictWords(difference)}`),
+    ];
+    console.log(`  ${SEASON_NAMES[fixture.season]} at ${clockOf(fixture.time)}, ${date}:`
+      + ` ${total(tally => tally.gatedPagesAlike)} of ${total(tally => tally.gatedPages)} time-gated pages on ${maps.length} maps judged alike,`
+      + ` ${total(tally => tally.pagesAlike)} of ${total(tally => tally.pages)} pages there;`
+      + ` ${total(tally => tally.eventsAlike)} of ${total(tally => tally.events)} events on the editor's page;`
+      + ` the date fixture: ${dateFixture.gatedPagesAlike} of ${dateFixture.gatedPages} pages judged alike`);
+    differ.slice(0, 8).forEach(words => console.log(`           ${words}`));
+    if (differ.length > 8)
+    {
+      console.log(`           and ${differ.length - 8} more`);
+    }
+  });
+
+  return seasons.every(({ maps, dateFixture }) => dateFixture.gatedDiffer.length === 0 && maps.every(({ tally }) => tally.gatedDiffer.length === 0));
+};
+
+/**
+ * Tallies the pages of every map the probe recorded that holds quest-gated events, or that the run compares by its
+ * pages alone, at the hour the game's clock read there on arrival, or midnight in a game with no clock.
+ * @param {ProbeReport} report The probe's report.
+ * @param {ReadonlyMap<number, MapFile>} maps Every map the probe visited, by id.
+ * @param {readonly number[]} pageMapIds The maps compared by their pages alone.
+ * @param {PageRule} rule The rule the editor shows the game by.
+ * @returns {QuestPages[]} The tallies, by the key the probe keeps each map's events under.
+ */
+const questPagesOf = (report: ProbeReport, maps: ReadonlyMap<number, MapFile>, pageMapIds: readonly number[], rule: PageRule): QuestPages[] =>
+{
+  return Object.entries(report.events).flatMap(([ key, events ]) =>
+  {
+    const mapId = Number.parseInt(key, 10);
+    const map = maps.get(mapId) as MapFile;
+    if (pageMapIds.includes(mapId) === false && questGatedPagesOf(map).size === 0)
+    {
+      return [];
+    }
+
+    const clock = report.clocks[key];
+    return [ { key, tally: tallyPages(map, events, rule, { timeOfDay: clock >= 0 ? clock : 0 }) } ];
+  });
+};
+
+/**
+ * Words the map, and the hour when there is one, that the probe keeps a map's events under.
+ * @param {string} key The key, such as {@code 20} or {@code 337@1320}.
+ * @returns {string} The words, such as Map020 or Map337 at 22:00.
+ */
+const keyWords = (key: string): string =>
+{
+  const [ mapId, time ] = key.split('@');
+  const map = `Map${mapId.padStart(3, '0')}`;
+  return time === undefined ? map : `${map} at ${clockOf(Number(time))}`;
+};
+
+/**
+ * Prints how the game and the editor judged the pages of each map holding quest-gated events, then in all: the
+ * quest-gated events both show on the same page, and the quest-gated pages both judge alike, with those judged
+ * differently; then the same for every event and page on those maps.
+ * @param {readonly QuestPages[]} quests The tallies.
+ * @returns {boolean} True when every quest-gated page was judged alike.
+ */
+const printQuestPages = (quests: readonly QuestPages[]): boolean =>
+{
+  if (quests.length === 0)
+  {
+    return true;
+  }
+
+  console.log('Quest-gated events, as a fresh save shows them at the hour the game\'s clock read on arrival:');
+  quests.forEach(({ key, tally }) =>
+  {
+    console.log(`  ${keyWords(key).padEnd(8)} ${tally.gatedEventsAlike} of ${tally.gatedEvents} quest-gated events on the editor's page,`
+      + ` ${tally.gatedPagesAlike} of ${tally.gatedPages} quest-gated pages judged alike;`
+      + ` all ${tally.events} events: ${tally.eventsAlike} on the editor's page, ${tally.pagesAlike} of ${tally.pages} pages judged alike`);
+    tally.gatedDiffer.slice(0, 8).forEach(difference => console.log(`           ${verdictWords(difference)}`));
+    if (tally.gatedDiffer.length > 8)
+    {
+      console.log(`           and ${tally.gatedDiffer.length - 8} more`);
+    }
+  });
+
+  const total = (pick: (tally: PagesTally) => number): number => quests.reduce((sum, { tally }) => sum + pick(tally), 0);
+  console.log(`  in all: ${total(tally => tally.gatedEventsAlike)} of ${total(tally => tally.gatedEvents)} quest-gated events on the editor's page,`
+    + ` ${total(tally => tally.gatedPagesAlike)} of ${total(tally => tally.gatedPages)} quest-gated pages judged alike;`
+    + ` ${total(tally => tally.pagesAlike)} of ${total(tally => tally.pages)} pages on these maps judged alike`);
+  return quests.every(({ tally }) => tally.gatedDiffer.length === 0);
+};
+
+/**
+ * The order the passes of one map and hour print in.
+ */
+const PASS_ORDER: readonly ProbeCapture['pass'][] = [ 'tiles', 'events', 'dark', 'sky' ];
+
+/**
+ * Prints how the pages of one map's events compared at one hour, beneath its events pass.
+ * @param {PageComparison} comparison The comparison.
+ */
+const printPages = (comparison: PageComparison): void =>
+{
+  const { events, differ } = comparison;
+  console.log(`           pages: ${events - differ.length} of ${events} events on the editor's page, ${differ.length} on another`);
+  differ.slice(0, 8).forEach(({ id, game, editor }) => console.log(`             event ${id} ${pagesWords(game, editor)}`));
+  if (differ.length > 8)
+  {
+    console.log(`             and ${differ.length - 8} more`);
+  }
+};
+
+/**
+ * Prints the game comparison, per map, hour and pass: the passes drawn at the game's own hour first, then each time of
+ * day the map was drawn at, in the order asked for; a map that is not dark has no dark pass to print. Beneath each
+ * events pass go the events whose pages differ.
  * @param {number[]} maps The maps.
  * @param {ViewResult[]} results Every view.
- * @returns {boolean} True when no view of either pass left a difference unexplained.
+ * @param {Map<string, PageComparison>} pages The pages compared, by map and hour, as the probe keys its events.
+ * @returns {boolean} True when no view of any pass left a difference unexplained.
  */
-const printGameParity = (maps: number[], results: ViewResult[]): boolean =>
+const printGameParity = (maps: number[], results: ViewResult[], pages: Map<string, PageComparison>): boolean =>
 {
   maps.forEach(mapId =>
   {
     console.log(`Map${String(mapId).padStart(3, '0')}: ${FIXTURES[mapId] ?? 'fixture'}`);
-    [ 'tiles', 'events' ].forEach(pass =>
+
+    // each pass as it comes, once for every time of day it was drawn at.
+    const times = [ undefined, ...new Set(results.flatMap(result => (result.capture.mapId === mapId && result.capture.time !== undefined ? [ result.capture.time ] : []))) ];
+    const passes = times.flatMap(time => PASS_ORDER.map(pass => ({ pass, time })));
+    passes.forEach(({ pass, time }) =>
     {
-      const mine = results.filter(result => result.capture.mapId === mapId && result.capture.pass === pass);
+      const mine = results.filter(result => result.capture.mapId === mapId && result.capture.pass === pass && result.capture.time === time);
+      if (mine.length === 0)
+      {
+        return;
+      }
+
       const pixels = mine.reduce((sum, result) => sum + result.comparison.comparedPixels, 0);
       const differing = mine.reduce((sum, result) => sum + result.comparison.differingPixels, 0);
       const maxDelta = Math.max(0, ...mine.map(result => result.comparison.maxDelta));
@@ -288,12 +1355,18 @@ const printGameParity = (maps: number[], results: ViewResult[]): boolean =>
       const views = new Set(mine.map(result => `${result.capture.display.x},${result.capture.display.y}`)).size;
       const steps = new Set(mine.map(result => result.capture.step)).size;
       const verdict = unexplained.length === 0 ? 'MATCH' : `DIFFER at ${unexplained.length} cells: ${unexplained.slice(0, 12).join(' ')}`;
-      console.log(`  ${pass.padEnd(6)} ${views} views x ${steps} steps, ${pixels} pixels compared, ${differing} beyond ${TOLERANCE}`
+      const label = time === undefined ? pass : `${pass} ${clockOf(time)}`;
+      console.log(`  ${label.padEnd(12)} ${views} views x ${steps} steps, ${pixels} pixels compared, ${differing} beyond ${TOLERANCE}`
         + ` (max delta ${maxDelta}), ${explained} cells explained  ${verdict}`);
       reasons.slice(0, 8).forEach(reason => console.log(`           ${reason}`));
       if (reasons.length > 8)
       {
         console.log(`           and ${reasons.length - 8} more events shown differently`);
+      }
+
+      if (pass === 'events')
+      {
+        printPages(pages.get(eventsKeyOf({ mapId, time })) as PageComparison);
       }
     });
   });
@@ -397,7 +1470,10 @@ const main = async (): Promise<void> =>
     pass = await runSnapshotParity(options) && pass;
   }
 
-  console.log(pass ? 'PARITY: every difference from the game was explained, and every snapshot.js difference was predicted' : 'PARITY: differences need a look');
+  console.log(pass
+    ? 'PARITY: every difference from the game was explained, every quest-gated page was judged alike, every time-gated page agreed at every'
+      + ' season\'s date, every weather check agreed, and every snapshot.js difference was predicted'
+    : 'PARITY: differences need a look');
   process.exit(pass ? 0 : 1);
 };
 

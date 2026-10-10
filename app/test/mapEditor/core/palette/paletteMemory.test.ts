@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { recallPalette, type PaletteMemory } from '../../../../src/mapEditor/core/palette/paletteMemory.ts';
+import { EMPTY_BRUSH, shadowBrush, type PaletteBrush } from '../../../../src/mapEditor/core/palette/paintSelection.ts';
+import { brushOnShow, recallPalette, type PaletteMemory } from '../../../../src/mapEditor/core/palette/paletteMemory.ts';
 
 /*
  * A palette remembers, per tileset, the tab it showed and what was picked there, so moving between maps on different
@@ -66,5 +67,47 @@ describe('recallPalette', () =>
     // Assert.
     expect(recalled)
       .toStrictEqual({ tab: 'R', pick: null });
+  });
+});
+
+/*
+ * A palette coming into view, as it does whenever the map it shows opens, a blueprint's tab among them, must never take
+ * away a brush the author chose for its tileset since it last showed: the eyedropper's picks off a map are the window's
+ * brush but never the palette's remembered pick, so handing the window that pick again would drop them. A brush of another
+ * tileset, or none, paints nothing here, and gives way to the pick the palette remembers for this tileset.
+ */
+describe('brushOnShow', () =>
+{
+  /**
+   * A brush of one tile of a tileset, as the eyedropper picks one off a map.
+   * @param {number} tilesetId The tileset.
+   * @returns {PaletteBrush} The brush.
+   */
+  const picked = (tilesetId: number): PaletteBrush => ({ kind: 'tiles', tilesetId, width: 1, height: 1, cells: [ 2 ] });
+
+  it('keeps a brush the window holds of the tileset on show', () =>
+  {
+    // Arrange: the eyedropper's brush off a map of tileset 4, which the palette shows, remembering its shadow pen.
+    const held = picked(4);
+
+    // Act.
+    const brush = brushOnShow(held, shadowBrush(4), 4);
+
+    // Assert.
+    expect(brush)
+      .toBe(held);
+  });
+
+  it('hands over the remembered pick when the brush held is of another tileset, or none', () =>
+  {
+    // Arrange: tileset 4's remembered shadow pen, with a brush of tileset 7 held, then none.
+    const remembered = shadowBrush(4);
+
+    // Act.
+    const brushes = [ brushOnShow(picked(7), remembered, 4), brushOnShow(EMPTY_BRUSH, remembered, 4) ];
+
+    // Assert.
+    expect(brushes)
+      .toStrictEqual([ remembered, remembered ]);
   });
 });

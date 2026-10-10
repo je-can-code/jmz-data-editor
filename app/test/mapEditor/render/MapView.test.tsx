@@ -10,33 +10,65 @@ import { apiDocumentStore } from '../../../src/mapEditor/core/api/apiDocumentSto
 import type { MapEditorApi } from '../../../src/mapEditor/core/api/MapEditorApi.ts';
 import { EventSelection } from '../../../src/mapEditor/core/events/EventSelection.ts';
 import { DocumentHub } from '../../../src/mapEditor/core/history/DocumentHub.ts';
+import { LocationPicks } from '../../../src/mapEditor/core/locations/LocationPicks.ts';
 import type { DocumentKey } from '../../../src/mapEditor/core/model/documentKeys.ts';
 import { createEventPage, createMapEvent } from '../../../src/mapEditor/core/model/eventModel.ts';
 import type { JsonValue } from '../../../src/mapEditor/core/model/json.ts';
 import { MapDocument } from '../../../src/mapEditor/core/model/MapDocument.ts';
+import type { ConfigRead, OnDemandConfig, PassabilityRule } from '../../../src/mapEditor/core/modules/PluginModule.ts';
 import type { RmmzMapEvent } from '../../../src/mapEditor/core/model/rmmzTypes.ts';
 import { marksOf, TILESET_MARKS_DOCUMENT } from '../../../src/mapEditor/core/palette/tilesetMarkEdits.ts';
+import { CommandCatalog } from '../../../src/mapEditor/core/commands/CommandCatalog.ts';
+import { PluginModuleRegistry } from '../../../src/mapEditor/core/modules/PluginModuleRegistry.ts';
+import type { PageRule } from '../../../src/mapEditor/core/pageRule/pageRule.ts';
+import { WindowPageRule } from '../../../src/mapEditor/core/pageRule/WindowPageRule.ts';
+import { GamePreview } from '../../../src/mapEditor/core/preview/GamePreview.ts';
+import { WindowPreview } from '../../../src/mapEditor/core/preview/WindowPreview.ts';
 import type { MapCell } from '../../../src/mapEditor/core/renderer/camera.ts';
-import type { MarkerClassifier, OverlaySet, OverlayState } from '../../../src/mapEditor/core/renderer/MapRenderer.ts';
+import type { LightingLayerDefinition } from '../../../src/mapEditor/core/renderer/lightingLayer.ts';
+import type {
+  FootprintReader,
+  LayerVisibility,
+  MarkerClassifier,
+  OverlaySet,
+  OverlayState,
+} from '../../../src/mapEditor/core/renderer/MapRenderer.ts';
+import type { SkyWeather, WeatherLayerDefinition } from '../../../src/mapEditor/core/renderer/weatherLayer.ts';
+import { WindowClock } from '../../../src/mapEditor/core/time/WindowClock.ts';
+import { SHIPPED_MODULES } from '../../../src/mapEditor/services/pluginModules.ts';
+import type { PluginsJsEntry } from '../../../src/services/plugins/PluginsJsReader.ts';
 import { WindowPaints } from '../../../src/mapEditor/core/tools/WindowPaint.ts';
 import { MapEditorApp } from '../../../src/mapEditor/MapEditorApp.tsx';
 import { MapView, mapIdFromQuery } from '../../../src/mapEditor/render/MapView.tsx';
 import type { MapEditorServices } from '../../../src/mapEditor/services/MapEditorServices.ts';
 import { MapEditorServicesProvider } from '../../../src/mapEditor/services/MapEditorServicesContext.tsx';
 import { buildMapJson } from '../support/fixtures.ts';
+import { CHEF_WEATHER_CONFIG } from '../support/skyFixtures.ts';
 
 /**
  * What the stand-in renderers and controllers record and answer: every renderer made, what each was asked to show
- * and where to look, the overlay switches and marker classifiers it was handed, what it was told of the view being on
- * screen (with "mount" where it was mounted), ways to change its draw state and its zoom, and the maps an open lands on.
+ * and where to look, the overlay switches, layer visibilities, lighting and weather layers, marker classifiers, footprint
+ * readers and page rules it was handed, what it was told of the view being on screen (with "mount" where it was
+ * mounted), ways to change its draw state and its zoom, and the maps an open lands on.
  */
 const stand = vi.hoisted(() => ({
   renderers: [] as {
     overlays: OverlayState[];
     looks: { cell: MapCell; zoom: number }[];
     overlaySets: OverlaySet[];
+    visibilities: LayerVisibility[];
+    lighting: (readonly LightingLayerDefinition[])[];
+    weather: (readonly WeatherLayerDefinition[])[];
     classifiers: MarkerClassifier[];
+    footprints: FootprintReader[];
+    pageRules: PageRule[];
+    rules: (readonly PassabilityRule[])[];
+    refreshes: number;
     shown: (boolean | 'mount')[];
+    times: number[];
+    seasons: (number | null)[];
+    skies: (SkyWeather | null)[];
+    previews: GamePreview[];
     announce: (state: string) => void;
     zoomTo: (zoom: number) => void;
   }[],
@@ -56,8 +88,19 @@ vi.mock('../../../src/mapEditor/render/PixiMapRenderer.ts', () =>
       overlays: [] as OverlayState[],
       looks: [] as { cell: MapCell; zoom: number }[],
       overlaySets: [] as OverlaySet[],
+      visibilities: [] as LayerVisibility[],
+      lighting: [] as (readonly LightingLayerDefinition[])[],
+      weather: [] as (readonly WeatherLayerDefinition[])[],
       classifiers: [] as MarkerClassifier[],
+      footprints: [] as FootprintReader[],
+      pageRules: [] as PageRule[],
+      rules: [] as (readonly PassabilityRule[])[],
+      refreshes: 0,
       shown: [] as (boolean | 'mount')[],
+      times: [] as number[],
+      seasons: [] as (number | null)[],
+      skies: [] as (SkyWeather | null)[],
+      previews: [] as GamePreview[],
       announce: (state: string) =>
       {
         this.drawListeners.forEach(listener => listener(state));
@@ -136,9 +179,44 @@ vi.mock('../../../src/mapEditor/render/PixiMapRenderer.ts', () =>
       return null;
     }
 
-    setLayerVisibility(): void
+    setLayerVisibility(visibility: LayerVisibility): void
     {
-      // the switches are not what these tests look at.
+      this.record.visibilities.push(visibility);
+    }
+
+    setLightingLayers(definitions: readonly LightingLayerDefinition[]): void
+    {
+      this.record.lighting.push(definitions);
+    }
+
+    setWeatherLayers(definitions: readonly WeatherLayerDefinition[]): void
+    {
+      this.record.weather.push(definitions);
+    }
+
+    setTimeOfDay(minutes: number): void
+    {
+      this.record.times.push(minutes);
+    }
+
+    setSeason(season: number | null): void
+    {
+      this.record.seasons.push(season);
+    }
+
+    setWeatherSky(sky: SkyWeather | null): void
+    {
+      this.record.skies.push(sky);
+    }
+
+    setPageRule(rule: PageRule): void
+    {
+      this.record.pageRules.push(rule);
+    }
+
+    setPreview(preview: GamePreview): void
+    {
+      this.record.previews.push(preview);
     }
 
     setOverlays(overlays: OverlaySet): void
@@ -146,14 +224,24 @@ vi.mock('../../../src/mapEditor/render/PixiMapRenderer.ts', () =>
       this.record.overlaySets.push(overlays);
     }
 
-    setPassabilityRules(): void
+    setPassabilityRules(rules: readonly PassabilityRule[]): void
     {
-      // the switches are not what these tests look at.
+      this.record.rules.push(rules);
+    }
+
+    refreshOverlays(): void
+    {
+      this.record.refreshes += 1;
     }
 
     setEventMarkers(classify: MarkerClassifier): void
     {
       this.record.classifiers.push(classify);
+    }
+
+    setEventFootprints(read: FootprintReader): void
+    {
+      this.record.footprints.push(read);
     }
 
     setOverlayState(state: OverlayState): void
@@ -212,7 +300,8 @@ vi.mock('../../../src/mapEditor/render/MapViewController.ts', () =>
  * A view behind another tab lets its GPU context go, so the renderer hears whether the view is on screen before it is
  * mounted (a view mounted behind a tab must make no context at all) and each time that changes. And a map that cannot
  * draw says why over the canvas, in plain words, rather than leaving it blank: every context the window may keep is
- * taken by maps on screen, the graphics card let go of it for a moment, or the window cannot draw at all.
+ * taken by maps on screen, the graphics card let go of it for a moment, or the window cannot draw at all. Whatever the
+ * plugin modules say, such as a config one could not read, shows along the top of the map, drawing or not.
  *
  * The tiles marked to go on top decide where the painting tools lay tiles, so a view holds the marks from the start,
  * through the same open as the palette: a project that never saved marks is seeded from its own maps first. Holding an
@@ -222,6 +311,35 @@ vi.mock('../../../src/mapEditor/render/MapViewController.ts', () =>
  * Events that draw no picture show markers from the start, picking their symbol by the kind the window's registry makes
  * of them, or by their trigger when no kind claims them; the registry reads events differently once the plugin modules
  * switch on, after js/plugins.js is read, so the renderer is handed the classifier again then and redraws the markers.
+ * The areas events' pages cover, which the modules read, are handed over the same way, each shown in its marker's colour.
+ * Their passability rules are handed over again then too, so the Passability overlay marks what a module forbids, such
+ * as J-RegionEffects' regions, however late the modules switch on. The marks on transfers whose landings fail are drawn
+ * again whenever the window's landings learn more, such as a map a transfer lands on having been read.
+ *
+ * What the modules draw into the lighting layer is handed to the renderer from the start and again as they switch on,
+ * and the bar offers its Lighting switch, after Shadows, only while some module draws there: a project without such a
+ * plugin never sees a switch that does nothing. That one switch shows and hides the whole lighting layer. The weather
+ * layer is handed over and offered the same way, its Weather switch after Lighting, which with the modules the editor
+ * ships means only while J-Weather is enabled; the switch hides the weather and nothing else, and the Animate switch
+ * holds the weather still with everything else that moves.
+ *
+ * The bar shows the window's clock only while a module offers one, naming the time and the part of the day as the
+ * module names it, and the season when the module's calendar has them; the renderer is handed the clock's time and its
+ * season from the start and every time either moves, wherever it was moved from, so every view of the window draws the
+ * sky at the same hour and judges every page on the same date. With every module the editor ships on, the one clock is
+ * J-TIME's, J-Lighting-Time casting its sky by it, and the bar shows one chip.
+ *
+ * Beside the clock, the bar shows the sky's weather only while a module offers a sky, which with the modules the editor
+ * ships means while J-Weather-Time is on with J-Weather and J-TIME: no sky is picked at first, since a new game's sky is
+ * random, and then no view's renderer is told any sky and nothing is read for it. Once one is picked, its config is
+ * asked for, and every view's renderer is told the sky at the clock's hour once it arrives.
+ *
+ * The renderer is handed the window's page rule from the start, and again whenever it changes, as the modules switch
+ * on or the new game is read, so every event shows the page a fresh save would show at the clock's time; and the
+ * window's preview from the start and every time it changes, so every view shows the switches and variables set. Beside
+ * the clock, a chip says what the preview sets, "Fresh save" while nothing, so a preview is never on unnoticed, naming
+ * each kind a module adds as the module names it once the module is on, and a click on it opens the Switches & Variables
+ * window, saying so when the window was blocked.
  */
 describe('MapView', () =>
 {
@@ -237,6 +355,30 @@ describe('MapView', () =>
   });
 
   /**
+   * A window's plugin modules with none switched on: no kind claims any event, no page covers more than its own tile,
+   * nothing draws into the lighting or the weather layer, the preview sets nothing beyond switches and variables, and
+   * nothing ever switches on.
+   */
+  const NO_MODULES = {
+    overlays: () => [],
+    passabilityRules: () => [],
+    kindOf: () => null,
+    areaOf: () => null,
+    eventAreas: () => [],
+    subscribe: () => () => undefined,
+    revision: 0,
+    lightingLayers: () => [],
+    weatherLayers: () => [],
+    notices: () => [],
+    subscribeNotices: () => () => undefined,
+    noticesRevision: 0,
+    clockOffer: () => null,
+    skyOffer: () => null,
+    pageConditions: () => [],
+    previewKinds: () => [],
+  };
+
+  /**
    * Builds services with no project server behind them.
    * @returns {MapEditorServices} The services.
    */
@@ -247,18 +389,116 @@ describe('MapView', () =>
     const hub = new DocumentHub({ clientId: 'window-a' });
     const openDocument = vi.fn(() => Promise.reject(new Error('no documents in this test')));
     const paints = new WindowPaints(window);
-    return { view: { kind: 'workspace' }, api: null, shell, hub, openDocument, paints, resolveConflict: vi.fn(() => true) } as unknown as MapEditorServices;
+    const locationPicks = new LocationPicks();
+    const clock = new WindowClock(840);
+    const pages = new WindowPageRule(NO_MODULES);
+    const preview = new WindowPreview();
+    const landings = landingsHeard();
+    const services = { view: { kind: 'workspace' }, api: null, shell, hub, openDocument, paints, locationPicks, modules: NO_MODULES, clock, pages, preview, landings };
+    return { ...services, resolveConflict: vi.fn(() => true) } as unknown as MapEditorServices;
   };
 
   /**
-   * Builds services with a project server behind them, and no plugin modules: no kind claims any event, and nothing
-   * ever switches on.
+   * The window's landings as a view hears them: whoever listens, and a way for the test to say they learned more.
+   * @returns {{ subscribe: (listener: () => void) => () => void, learn: () => void, listening: () => number }} The landings.
+   */
+  const landingsHeard = () =>
+  {
+    const listeners = new Set<() => void>();
+    return {
+      subscribe: (listener: () => void) =>
+      {
+        listeners.add(listener);
+        return () =>
+        {
+          listeners.delete(listener);
+        };
+      },
+      learn: () => listeners.forEach(listener => listener()),
+      listening: () => listeners.size,
+    };
+  };
+
+  /**
+   * Builds services with a project server behind them, and no plugin modules.
    * @returns {MapEditorServices} The services.
    */
   const served = (): MapEditorServices =>
   {
-    const modules = { overlays: () => [], passabilityRules: () => [], kindOf: () => null, subscribe: () => () => undefined };
-    return { ...serverless(), api: {} as MapEditorApi, modules } as unknown as MapEditorServices;
+    return { ...serverless(), api: {} as MapEditorApi } as unknown as MapEditorServices;
+  };
+
+  /**
+   * A window's plugin modules that switch on when the test says, and from then on light the map with one lighting
+   * layer, as J-Lighting's module does.
+   * @returns {{ modules: object, light: LightingLayerDefinition, switchOn: () => void }} The modules, what they draw
+   * once on, and the switch.
+   */
+  const lightingModules = () =>
+  {
+    const listeners = new Set<() => void>();
+    const light: LightingLayerDefinition = {
+      id: 'lighting.rings',
+      title: 'Light rings',
+      create: () => ({ draw: () => undefined, tick: () => false, destroy: () => undefined }),
+    };
+    const modules = {
+      ...NO_MODULES,
+      layers: [] as LightingLayerDefinition[],
+      lightingLayers()
+      {
+        return this.layers;
+      },
+      subscribe: (listener: () => void) =>
+      {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+    };
+    const switchOn = () =>
+    {
+      modules.layers = [ light ];
+      modules.revision += 1;
+      listeners.forEach(listener => listener());
+    };
+    return { modules, light, switchOn };
+  };
+
+  /**
+   * A window's plugin modules that switch on when the test says, and from then on draw a map's weather with one weather
+   * layer, as J-Weather's module does.
+   * @returns {{ modules: object, rain: WeatherLayerDefinition, switchOn: () => void }} The modules, what they draw once
+   * on, and the switch.
+   */
+  const weatherModules = () =>
+  {
+    const listeners = new Set<() => void>();
+    const rain: WeatherLayerDefinition = {
+      id: 'weather.map',
+      title: 'Weather',
+      drawsOn: () => true,
+      create: () => ({ draw: () => undefined, tick: () => false, destroy: () => undefined }),
+    };
+    const modules = {
+      ...NO_MODULES,
+      layers: [] as WeatherLayerDefinition[],
+      weatherLayers()
+      {
+        return this.layers;
+      },
+      subscribe: (listener: () => void) =>
+      {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+    };
+    const switchOn = () =>
+    {
+      modules.layers = [ rain ];
+      modules.revision += 1;
+      listeners.forEach(listener => listener());
+    };
+    return { modules, rain, switchOn };
   };
 
   describe('mapIdFromQuery', () =>
@@ -290,7 +530,7 @@ describe('MapView', () =>
     );
 
     // Assert.
-    const switches = [ 'Grid', 'Regions', 'Passability', 'Animate water', 'Parallax', 'Events', 'Shadows', 'Highlight layer' ];
+    const switches = [ 'Grid', 'Regions', 'Passability', 'Animate', 'Parallax', 'Events', 'Shadows', 'Highlight layer' ];
     expect([ ...switches.map(label => screen.getByText(label) !== null), screen.getByText('No project server is running, so there is no map to show.') !== null ])
       .toStrictEqual([ ...switches.map(() => true), true ]);
   });
@@ -373,6 +613,39 @@ describe('MapView', () =>
       .toBe(2));
     expect([ selection.get(), stand.renderers[0].looks ])
       .toStrictEqual([ { mapId: 5, eventIds: [ 3 ] }, [ { cell: { x: 2, y: 1 }, zoom: 1 }, { cell: { x: 2, y: 1 }, zoom: 1 } ] ]);
+  });
+
+  it('centres on a cell asked for once the map is open, at the game\'s scale, and again only when asked again', async () =>
+  {
+    // Arrange: map 5 open, with the middle of a placement asked for.
+    stand.maps.set(5, MapDocument.fromJson('map:5', buildMapJson()));
+    const services = served();
+    const { rerender } = render(
+      <MapEditorServicesProvider services={services}>
+        <MapView mapId={5} lookAtCell={{ x: 4, y: 7 }} lookRequest={1}/>
+      </MapEditorServicesProvider>
+    );
+    await waitFor(() => expect(stand.renderers[0]?.looks.length)
+      .toBe(1));
+
+    // Act: drawn again as it was, then asked for again.
+    rerender(
+      <MapEditorServicesProvider services={services}>
+        <MapView mapId={5} lookAtCell={{ x: 4, y: 7 }} lookRequest={1}/>
+      </MapEditorServicesProvider>
+    );
+    const unasked = stand.renderers[0].looks.length;
+    rerender(
+      <MapEditorServicesProvider services={services}>
+        <MapView mapId={5} lookAtCell={{ x: 4, y: 7 }} lookRequest={2}/>
+      </MapEditorServicesProvider>
+    );
+
+    // Assert.
+    await waitFor(() => expect(stand.renderers[0]?.looks.length)
+      .toBe(2));
+    expect([ unasked, stand.renderers[0].looks ])
+      .toStrictEqual([ 1, [ { cell: { x: 4, y: 7 }, zoom: 1 }, { cell: { x: 4, y: 7 }, zoom: 1 } ] ]);
   });
 
   it('centres on an event revealed from a list at the zoom the view has, and only for an event its own map holds', async () =>
@@ -482,6 +755,87 @@ describe('MapView', () =>
       ]);
   });
 
+  it('says what the modules say along the top of a map that draws, for as long as they say it', () =>
+  {
+    // Arrange: a module that could not read its config, and a map drawing.
+    const notice = { id: 'lighting.config', title: 'Lights draw in white.', detail: 'The file is missing.' };
+    const services = { ...served(), modules: { ...NO_MODULES, notices: () => [ notice ] } } as unknown as MapEditorServices;
+
+    // Act.
+    render(
+      <MapEditorServicesProvider services={services}>
+        <MapView mapId={5}/>
+      </MapEditorServicesProvider>
+    );
+    act(() => stand.renderers[0].announce('drawing'));
+
+    // Assert: the map is drawing, so nothing says why it is not.
+    expect([ screen.getByRole('status').textContent, screen.queryByTestId('map-draw-notice') ])
+      .toStrictEqual([ 'Lights draw in white.The file is missing.', null ]);
+  });
+
+  it('says what a module comes to say while it is on, such as a config read only once a map needed it', () =>
+  {
+    // Arrange: modules saying nothing yet, which tell their listeners when that changes, and a map drawing.
+    const listeners = new Set<() => void>();
+    const said: { id: string; title: string; detail: string }[] = [];
+    const modules = {
+      ...NO_MODULES,
+      noticesRevision: 0,
+      notices: () => said,
+      subscribeNotices: (listener: () => void) =>
+      {
+        listeners.add(listener);
+        return () =>
+        {
+          listeners.delete(listener);
+        };
+      },
+    };
+    const services = { ...served(), modules } as unknown as MapEditorServices;
+    render(
+      <MapEditorServicesProvider services={services}>
+        <MapView mapId={5}/>
+      </MapEditorServicesProvider>
+    );
+    act(() => stand.renderers[0].announce('drawing'));
+    const before = screen.queryByRole('status');
+
+    // Act: the module comes to say something.
+    act(() =>
+    {
+      said.push({ id: 'weather.config', title: 'No weather is drawn until data/config.weather.json is fixed.', detail: 'It was not read.' });
+      modules.noticesRevision += 1;
+      listeners.forEach(listener => listener());
+    });
+
+    // Assert.
+    expect([ before, screen.getByRole('status').textContent ])
+      .toStrictEqual([ null, 'No weather is drawn until data/config.weather.json is fixed.It was not read.' ]);
+  });
+
+  it('says what the modules say beside why the map is not drawing', () =>
+  {
+    // Arrange.
+    const notice = { id: 'lighting.config', title: 'Lights draw in white.', detail: 'The file is missing.' };
+    const services = { ...served(), modules: { ...NO_MODULES, notices: () => [ notice ] } } as unknown as MapEditorServices;
+
+    // Act.
+    render(
+      <MapEditorServicesProvider services={services}>
+        <MapView mapId={5}/>
+      </MapEditorServicesProvider>
+    );
+    act(() => stand.renderers[0].announce('failed'));
+
+    // Assert.
+    expect([ screen.getByTestId('map-module-notices').textContent, screen.getByTestId('map-draw-notice').textContent ])
+      .toStrictEqual([
+        'Lights draw in white.The file is missing.',
+        'This window cannot draw maps with the graphics card.Restarting the editor may bring it back.',
+      ]);
+  });
+
   it('selects nothing and leaves the view where it is when no event is picked', async () =>
   {
     // Arrange.
@@ -524,8 +878,7 @@ describe('MapView', () =>
     // test raises; event 2 starts on autorun, and event 3 on a player's touch.
     const activations = new Set<() => void>();
     const modules = {
-      overlays: () => [],
-      passabilityRules: () => [],
+      ...NO_MODULES,
       kindOf: (event: RmmzMapEvent) => (event.id === 1 ? { marker: 'chest' } : null),
       subscribe: (listener: () => void) =>
       {
@@ -544,10 +897,132 @@ describe('MapView', () =>
     // Act: the modules switch on once the renderer holds the first classifier.
     activations.forEach(listener => listener());
 
-    // Assert: handed over twice, and both read the claimed event by its kind and the others by their triggers.
+    // Assert: handed over twice, and both read the claimed event by its kind and the others by their triggers; one handed
+    // the page an event shows reads that page's trigger, a parallel page here, unless a kind claims the event.
     const [ { classifiers } ] = stand.renderers;
-    expect([ classifiers.length, classifiers.map(classify => events.map(event => classify(event, 5))) ])
-      .toStrictEqual([ 2, [ [ 'chest', 'autorun', 'player-touch' ], [ 'chest', 'autorun', 'player-touch' ] ] ]);
+    const parallelPage = { ...createEventPage(), trigger: 4 };
+    expect([ classifiers.length, classifiers.map(classify => events.map(event => classify(event, 5))), events.map(event => classifiers[1](event, 5, parallelPage)) ])
+      .toStrictEqual([ 2, [ [ 'chest', 'autorun', 'player-touch' ], [ 'chest', 'autorun', 'player-touch' ] ], [ 'chest', 'parallel', 'parallel' ] ]);
+  });
+
+  it('hands the renderer how events show their pages\' areas from the start, and again once the modules switch on', () =>
+  {
+    // Arrange: a registry reading no area until it switches on, then a 5 by 1 area for every page; event 1 is claimed as
+    // a kind with the chest's symbol.
+    const activations = new Set<() => void>();
+    const modules = {
+      ...NO_MODULES,
+      area: null as { width: number; height: number } | null,
+      areaOf()
+      {
+        return this.area;
+      },
+      kindOf: (event: RmmzMapEvent) => (event.id === 1 ? { id: 'test.chest', marker: 'chest' } : null),
+      subscribe: (listener: () => void) =>
+      {
+        activations.add(listener);
+        return () => activations.delete(listener);
+      },
+    };
+    render(
+      <MapEditorServicesProvider services={{ ...served(), modules } as unknown as MapEditorServices}>
+        <MapView mapId={5}/>
+      </MapEditorServicesProvider>
+    );
+    const event = createMapEvent(1, 0, 0);
+    const [ { footprints } ] = stand.renderers;
+    const [ first ] = footprints;
+    const before = first(event, 5, event.pages[0]);
+
+    // Act: the modules switch on.
+    modules.area = { width: 5, height: 1 };
+    activations.forEach(listener => listener());
+
+    // Assert: handed over twice; the reader follows the modules as they stand, the chest's colour on the claimed event.
+    const [ , second ] = footprints;
+    expect([ footprints.length, before, second(event, 5, event.pages[0]) ])
+      .toStrictEqual([ 2, null, { area: { width: 5, height: 1 }, colour: 0x795548, exit: null } ]);
+  });
+
+  it('hands the renderer the modules\' passability rules from the start, and again once they switch on after it drew', () =>
+  {
+    // Arrange: modules with no rule until they switch on, and one after.
+    const activations = new Set<() => void>();
+    const ledge: PassabilityRule = { id: 'test.ledge', title: 'Ledge', deny: () => null };
+    const modules = {
+      ...NO_MODULES,
+      rules: [] as PassabilityRule[],
+      passabilityRules()
+      {
+        return this.rules;
+      },
+      subscribe: (listener: () => void) =>
+      {
+        activations.add(listener);
+        return () => activations.delete(listener);
+      },
+    };
+    render(
+      <MapEditorServicesProvider services={{ ...served(), modules } as unknown as MapEditorServices}>
+        <MapView mapId={5}/>
+      </MapEditorServicesProvider>
+    );
+
+    // Act: the modules switch on.
+    act(() =>
+    {
+      modules.rules = [ ledge ];
+      modules.revision += 1;
+      activations.forEach(listener => listener());
+    });
+
+    // Assert: none at first, then the rule.
+    expect(stand.renderers[0].rules)
+      .toStrictEqual([ [], [ ledge ] ]);
+  });
+
+  it('draws its marks on failing landings again whenever the landings learn more, until the view goes', () =>
+  {
+    // Arrange: a view over a project.
+    const services = served();
+    const { unmount } = render(
+      <MapEditorServicesProvider services={services}>
+        <MapView mapId={5}/>
+      </MapEditorServicesProvider>
+    );
+    const landings = services.landings as unknown as ReturnType<typeof landingsHeard>;
+    const before = stand.renderers[0].refreshes;
+
+    // Act: the landings learn more twice, then the view goes.
+    act(() =>
+    {
+      landings.learn();
+      landings.learn();
+    });
+    const drawn = stand.renderers[0].refreshes - before;
+    unmount();
+
+    // Assert.
+    expect([ drawn, landings.listening() ])
+      .toStrictEqual([ 2, 0 ]);
+  });
+
+  it('hands the renderer the window\'s page rule from the start, and again whenever it changes', () =>
+  {
+    // Arrange: a view over a project, whose new game is not read yet.
+    const services = served();
+    render(
+      <MapEditorServicesProvider services={services}>
+        <MapView mapId={5}/>
+      </MapEditorServicesProvider>
+    );
+
+    // Act: the new game is read, seating Jerald and Rupert.
+    act(() => services.pages.setSave({ party: [ 1, 2 ] }));
+
+    // Assert: seating nobody from the start, then the party read.
+    expect(stand.renderers[0].pageRules.map(rule => [ rule.save.party, rule.conditions ]))
+      .toStrictEqual([ [ [], [] ], [ [ 1, 2 ], [] ] ]);
   });
 
   it('holds the tiles that go on top from the start, seeded from the maps when the project never saved any', async () =>
@@ -587,5 +1062,432 @@ describe('MapView', () =>
     const seed = { tilesets: { '1': { tiles: [ cliffCorner ], kinds: [] } } };
     expect([ saves, marksOf(hub.document(TILESET_MARKS_DOCUMENT)) ])
       .toStrictEqual([ [ { schemaVersion: 1, data: seed } ], seed ]);
+  });
+
+  it('offers Lighting after Shadows once a module lights the map, and hands the renderer what it draws there', () =>
+  {
+    // Arrange: a view over a project whose lighting module switches on after the view first drew.
+    const { modules, light, switchOn } = lightingModules();
+    const services = { ...served(), modules } as unknown as MapEditorServices;
+    render(
+      <MapEditorServicesProvider services={services}>
+        <MapView mapId={5}/>
+      </MapEditorServicesProvider>
+    );
+    const before = screen.queryByText('Lighting');
+
+    // Act.
+    act(() => switchOn());
+
+    // Assert: no switch before, the switch right after Shadows once on, and the renderer handed nothing, then the light.
+    const labels = screen.getAllByRole('button').map(chip => chip.textContent);
+    expect([ before, labels.slice(labels.indexOf('Shadows'), labels.indexOf('Shadows') + 2), stand.renderers[0].lighting ])
+      .toStrictEqual([ null, [ 'Shadows', 'Lighting' ], [ [], [ light ] ] ]);
+  });
+
+  it('hides the whole lighting layer with the Lighting switch', () =>
+  {
+    // Arrange: a view whose lighting module is already on.
+    const { modules, switchOn } = lightingModules();
+    switchOn();
+    const services = { ...served(), modules } as unknown as MapEditorServices;
+    render(
+      <MapEditorServicesProvider services={services}>
+        <MapView mapId={5}/>
+      </MapEditorServicesProvider>
+    );
+
+    // Act.
+    act(() => screen.getByText('Lighting').click());
+
+    // Assert: the layer showed from the start, and the switch hid it.
+    const [ { visibilities } ] = stand.renderers;
+    expect([ visibilities[0].layers.lighting, visibilities.at(-1)?.layers.lighting ])
+      .toStrictEqual([ true, false ]);
+  });
+
+  it('offers Weather once a module draws a map\'s weather, and hands the renderer what it draws there', () =>
+  {
+    // Arrange: a view over a project whose weather module switches on after the view first drew.
+    const { modules, rain, switchOn } = weatherModules();
+    const services = { ...served(), modules } as unknown as MapEditorServices;
+    render(
+      <MapEditorServicesProvider services={services}>
+        <MapView mapId={5}/>
+      </MapEditorServicesProvider>
+    );
+    const before = screen.queryByText('Weather');
+
+    // Act.
+    act(() => switchOn());
+
+    // Assert: no switch before, the switch right after Shadows once on (no module lights this map), and the renderer
+    // handed nothing, then the weather.
+    const labels = screen.getAllByRole('button').map(chip => chip.textContent);
+    expect([ before, labels.slice(labels.indexOf('Shadows'), labels.indexOf('Shadows') + 2), stand.renderers[0].weather ])
+      .toStrictEqual([ null, [ 'Shadows', 'Weather' ], [ [], [ rain ] ] ]);
+  });
+
+  it('hides the whole weather layer with the Weather switch, and leaves the animation running', () =>
+  {
+    // Arrange: a view whose weather module is already on.
+    const { modules, switchOn } = weatherModules();
+    switchOn();
+    const services = { ...served(), modules } as unknown as MapEditorServices;
+    render(
+      <MapEditorServicesProvider services={services}>
+        <MapView mapId={5}/>
+      </MapEditorServicesProvider>
+    );
+
+    // Act.
+    act(() => screen.getByText('Weather').click());
+
+    // Assert: the layer showed from the start, and the switch hid it and nothing else.
+    const [ { visibilities } ] = stand.renderers;
+    const last = visibilities.at(-1) as LayerVisibility;
+    expect([ visibilities[0].layers.weather, last.layers.weather, last.animate ])
+      .toStrictEqual([ true, false, true ]);
+  });
+
+  it('holds the weather still with the Animate switch, as it holds the water and the lights', () =>
+  {
+    // Arrange: a view whose weather module is already on.
+    const { modules, switchOn } = weatherModules();
+    switchOn();
+    const services = { ...served(), modules } as unknown as MapEditorServices;
+    render(
+      <MapEditorServicesProvider services={services}>
+        <MapView mapId={5}/>
+      </MapEditorServicesProvider>
+    );
+
+    // Act.
+    act(() => screen.getByText('Animate').click());
+
+    // Assert: the weather still shows, and nothing in the game look moves.
+    const [ { visibilities } ] = stand.renderers;
+    const last = visibilities.at(-1) as LayerVisibility;
+    expect([ last.layers.weather, last.animate ])
+      .toStrictEqual([ true, false ]);
+  });
+
+  it('offers Weather with the modules the editor ships only while J-Weather is enabled', () =>
+  {
+    // Arrange: one window whose plugins enable J-Weather, and one whose plugins list it switched off.
+    const plugin = (name: string, status: boolean): PluginsJsEntry => ({ name, status, description: '', parameters: {} });
+    const enabled = new PluginModuleRegistry(new CommandCatalog());
+    enabled.activate(SHIPPED_MODULES, [ plugin('j/weather/J-Weather', true) ]);
+    const disabled = new PluginModuleRegistry(new CommandCatalog());
+    disabled.activate(SHIPPED_MODULES, [ plugin('j/weather/J-Weather', false) ]);
+    const labelsWith = (modules: PluginModuleRegistry): (string | null)[] =>
+    {
+      const services = { ...served(), modules, pages: new WindowPageRule(modules) } as unknown as MapEditorServices;
+      const view = render(
+        <MapEditorServicesProvider services={services}>
+          <MapView mapId={5}/>
+        </MapEditorServicesProvider>
+      );
+      const labels = screen.getAllByRole('button').map(chip => chip.textContent);
+      view.unmount();
+      return labels;
+    };
+
+    // Act.
+    const on = labelsWith(enabled);
+    const off = labelsWith(disabled);
+
+    // Assert.
+    expect([ on.includes('Weather'), off.includes('Weather') ])
+      .toStrictEqual([ true, false ]);
+  });
+
+  it('shows the window\'s clock once a module offers one, naming the time and the part of the day as it names them', () =>
+  {
+    // Arrange: a view whose modules offer a clock once they switch on, naming every hour after 20:00 Night.
+    const listeners = new Set<() => void>();
+    const modules = {
+      ...NO_MODULES,
+      offer: null as { startsAt: number; partOfDay: (minutes: number) => string } | null,
+      clockOffer()
+      {
+        return this.offer;
+      },
+      subscribe: (listener: () => void) =>
+      {
+        listeners.add(listener);
+        return () => listeners.delete(listener);
+      },
+    };
+    const services = { ...served(), modules } as unknown as MapEditorServices;
+    render(
+      <MapEditorServicesProvider services={services}>
+        <MapView mapId={5}/>
+      </MapEditorServicesProvider>
+    );
+    const before = screen.queryByTestId('map-clock');
+
+    // Act: the modules switch on, and the window's clock moves to 22:00.
+    act(() =>
+    {
+      modules.offer = { startsAt: 840, partOfDay: minutes => (minutes >= 1200 ? 'Night' : 'Afternoon') };
+      modules.revision += 1;
+      listeners.forEach(listener => listener());
+    });
+    const shown = screen.getByTestId('map-clock').textContent;
+    act(() => services.clock.set(1320));
+
+    // Assert.
+    expect([ before, shown, screen.getByTestId('map-clock').textContent ])
+      .toStrictEqual([ null, '14:00 Afternoon', '22:00 Night' ]);
+  });
+
+  it('shows one clock, J-TIME\'s, with J-Lighting and J-Lighting-Time on beside it, its pages joining the page rule', () =>
+  {
+    // Arrange: the modules the editor ships, switched on over J-Lighting, J-Lighting-Time and J-TIME, the game starting
+    // at 14:00 on 16 December 2026, in Winter.
+    const plugin = (name: string, parameters: Record<string, string> = {}): PluginsJsEntry => ({ name, status: true, description: '', parameters });
+    const modules = new PluginModuleRegistry(new CommandCatalog());
+    modules.activate(SHIPPED_MODULES, [
+      plugin('j/lighting/J-Lighting'),
+      plugin('j/lighting/ext/J-Lighting-Time'),
+      plugin('j/time/J-TIME', { useRealTime: 'false', startingHour: '14', startingMinute: '0', startingDay: '16', startingMonth: '12', startingYear: '2026' }),
+    ]);
+    const services = { ...served(), modules, pages: new WindowPageRule(modules) } as unknown as MapEditorServices;
+
+    // Act.
+    render(
+      <MapEditorServicesProvider services={services}>
+        <MapView mapId={5}/>
+      </MapEditorServicesProvider>
+    );
+
+    // Assert.
+    expect([ screen.getAllByTestId('map-clock').map(chip => chip.textContent), stand.renderers[0].pageRules[0].conditions.map(condition => condition.id) ])
+      .toStrictEqual([ [ '14:00 Afternoon · Winter' ], [ 'time.pages' ] ]);
+  });
+
+  it('hands the renderer the clock\'s time from the start and each time it moves, wherever it was moved from', () =>
+  {
+    // Arrange: two views of one window, as a map docked and a map torn out.
+    const services = served();
+    render(
+      <MapEditorServicesProvider services={services}>
+        <MapView mapId={5}/>
+        <MapView mapId={6}/>
+      </MapEditorServicesProvider>
+    );
+
+    // Act: the clock moved twice, as a slider in either view moves it.
+    act(() => services.clock.set(1320));
+    act(() => services.clock.set(120));
+
+    // Assert.
+    expect(stand.renderers.map(renderer => renderer.times))
+      .toStrictEqual([ [ 840, 1320, 120 ], [ 840, 1320, 120 ] ]);
+  });
+
+  it('hands the renderer the clock\'s season from the start and each time it is picked, wherever it was picked', () =>
+  {
+    // Arrange: two views of one window, the clock in the season the game starts in.
+    const services = served();
+    render(
+      <MapEditorServicesProvider services={services}>
+        <MapView mapId={5}/>
+        <MapView mapId={6}/>
+      </MapEditorServicesProvider>
+    );
+
+    // Act: Summer picked, then Autumn, as the chip in either view picks them.
+    act(() => services.clock.chooseSeason(1));
+    act(() => services.clock.chooseSeason(2));
+
+    // Assert.
+    expect(stand.renderers.map(renderer => renderer.seasons))
+      .toStrictEqual([ [ null, 1, 2 ], [ null, 1, 2 ] ]);
+  });
+
+  /**
+   * The modules the editor ships, switched on over J-TIME, J-Weather and J-Weather-Time, the game starting at 14:00 on
+   * 16 December 2026, with J-Weather's config read only once the test says, after something asked for it.
+   * @param {boolean} withSky Whether J-Weather-Time is on.
+   * @returns {{ modules: PluginModuleRegistry, arrive: () => void, asked: () => number }} The modules, the config's
+   * arrival, and how often it was asked for.
+   */
+  const weatherTimeModules = (withSky: boolean) =>
+  {
+    const plugin = (name: string, parameters: Record<string, string> = {}): PluginsJsEntry => ({ name, status: true, description: '', parameters });
+    const listeners = new Set<() => void>();
+    let read: ConfigRead | undefined;
+    let asked = 0;
+    const config: OnDemandConfig = {
+      current: () => read,
+      request: () =>
+      {
+        asked += 1;
+      },
+      subscribe: listener =>
+      {
+        listeners.add(listener);
+        return () =>
+        {
+          listeners.delete(listener);
+        };
+      },
+    };
+    const modules = new PluginModuleRegistry(new CommandCatalog());
+    const time = plugin('j/time/J-TIME', { useRealTime: 'false', startingHour: '14', startingMinute: '0', startingDay: '16', startingMonth: '12', startingYear: '2026' });
+    const plugins = [ time, plugin('j/weather/J-Weather'), ...(withSky ? [ plugin('j/weather/ext/J-Weather-Time') ] : []) ];
+    modules.activate(SHIPPED_MODULES, plugins, new Map(), new Map(), () => config);
+    const arrive = () =>
+    {
+      read = { content: CHEF_WEATHER_CONFIG, problem: null };
+      listeners.forEach(listener => listener());
+    };
+    return { modules, arrive, asked: () => asked };
+  };
+
+  it('shows the sky beside the clock only while J-Weather-Time drives one, naming none picked', () =>
+  {
+    // Arrange: a window with J-Weather-Time on, and one with J-Weather and J-TIME alone.
+    const views = [ true, false ].map(withSky =>
+    {
+      const { modules } = weatherTimeModules(withSky);
+      return { ...served(), modules, pages: new WindowPageRule(modules) } as unknown as MapEditorServices;
+    });
+
+    // Act.
+    const chips = views.map(services =>
+    {
+      const { unmount } = render(
+        <MapEditorServicesProvider services={services}>
+          <MapView mapId={5}/>
+        </MapEditorServicesProvider>
+      );
+      const sky = screen.queryByTestId('map-sky')?.textContent ?? null;
+      unmount();
+      return sky;
+    });
+
+    // Assert.
+    expect(chips)
+      .toStrictEqual([ 'No sky weather', null ]);
+  });
+
+  it('hands every view the sky picked once its config is read, at the clock\'s hour, and nothing while none is picked', () =>
+  {
+    // Arrange: two views of a window with J-Weather-Time on, no sky picked.
+    const { modules, arrive, asked } = weatherTimeModules(true);
+    const services = { ...served(), modules, pages: new WindowPageRule(modules) } as unknown as MapEditorServices;
+    render(
+      <MapEditorServicesProvider services={services}>
+        <MapView mapId={5}/>
+        <MapView mapId={6}/>
+      </MapEditorServicesProvider>
+    );
+    const unpicked = [ stand.renderers.map(renderer => [ ...renderer.skies ]), asked() ];
+
+    // Act: heavy rain picked, then the config read.
+    act(() => services.clock.chooseSky({ condition: 'rain', strength: 'heavy' }));
+    const beforeRead = stand.renderers.map(renderer => renderer.skies.length);
+    act(() => arrive());
+
+    // Assert.
+    const rain = { preset: 'rain', intensity: 'heavy', type: 'rain' };
+    expect([ unpicked, asked() > 0, beforeRead, stand.renderers.map(renderer => renderer.skies), screen.getAllByTestId('map-sky').map(chip => chip.textContent) ])
+      .toStrictEqual([ [ [ [], [] ], 0 ], true, [ 0, 0 ], [ [ rain ], [ rain ] ], [ 'rain · heavy', 'rain · heavy' ] ]);
+  });
+
+  it('hands every view the window\'s preview from the start and each time it changes, wherever it was changed', () =>
+  {
+    // Arrange: two views of one window.
+    const services = served();
+    render(
+      <MapEditorServicesProvider services={services}>
+        <MapView mapId={5}/>
+        <MapView mapId={6}/>
+      </MapEditorServicesProvider>
+    );
+
+    // Act: switch 147 on, then variable 74 at 99.
+    act(() => services.preview.setSwitch(147, true));
+    act(() => services.preview.setVariable(74, 99));
+
+    // Assert.
+    expect(stand.renderers.map(renderer => renderer.previews.map(preview => preview.toJson())))
+      .toStrictEqual([
+        [ {}, { switch: { 147: true } }, { switch: { 147: true }, variable: { 74: 99 } } ],
+        [ {}, { switch: { 147: true } }, { switch: { 147: true }, variable: { 74: 99 } } ],
+      ]);
+  });
+
+  it('says a fresh save beside the clock while nothing is set, and what is set once it is', () =>
+  {
+    // Arrange: a view over a project.
+    const services = served();
+    render(
+      <MapEditorServicesProvider services={services}>
+        <MapView mapId={5}/>
+      </MapEditorServicesProvider>
+    );
+    const fresh = screen.getByTestId('map-preview').textContent;
+
+    // Act: two switches on and a variable set, from the Switches & Variables window.
+    act(() => services.preview.set(GamePreview.FRESH.withSwitch(24, true).withSwitch(147, true).withVariable(74, 99)));
+
+    // Assert.
+    expect([ fresh, screen.getByTestId('map-preview').textContent ])
+      .toStrictEqual([ 'Fresh save', '2 switches on, 1 variable set' ]);
+  });
+
+  it('names in the chip each kind of state the modules let the preview set, once they switch on after the view drew', () =>
+  {
+    // Arrange: a view over a project, a quest set from the start, and J-OMNI-Quests' module not yet on.
+    const modules = new PluginModuleRegistry(new CommandCatalog());
+    const services = { ...served(), modules } as unknown as MapEditorServices;
+    services.preview.setValue('quest.states', 'cecil-001', { state: 'completed' });
+    render(
+      <MapEditorServicesProvider services={services}>
+        <MapView mapId={5}/>
+      </MapEditorServicesProvider>
+    );
+    const before = screen.getByTestId('map-preview').textContent;
+
+    // Act: the modules the editor ships switch on over J-OMNI-Quests, and a switch is turned on.
+    act(() =>
+    {
+      modules.activate(SHIPPED_MODULES, [ { name: 'j/omni/ext/J-OMNI-Quests', status: true, description: '', parameters: {} } ]);
+    });
+    act(() => services.preview.setSwitch(74, true));
+
+    // Assert.
+    expect([ before, screen.getByTestId('map-preview').textContent ])
+      .toStrictEqual([ '1 more set', '1 switch on, 1 quest set' ]);
+  });
+
+  it('opens the Switches & Variables window from the preview chip, and says so when the window was blocked', () =>
+  {
+    // Arrange: a view whose window's pop-ups are blocked.
+    const services = served();
+    const opened = vi.spyOn(services.shell, 'open').mockReturnValueOnce('opened')
+      .mockReturnValueOnce('blocked');
+    render(
+      <MapEditorServicesProvider services={services}>
+        <MapView mapId={5}/>
+      </MapEditorServicesProvider>
+    );
+
+    // Act: the chip clicked twice, the second time blocked.
+    act(() => screen.getByTestId('map-preview').click());
+    const quiet = screen.queryByText(/was blocked/u);
+    act(() => screen.getByTestId('map-preview').click());
+
+    // Assert.
+    expect([ opened.mock.calls.map(([ request ]) => request.path), quiet, screen.getByText(/was blocked/u).textContent ])
+      .toStrictEqual([
+        [ '/map.html?view=switches-variables', '/map.html?view=switches-variables' ],
+        null,
+        'The Switches & Variables window was blocked; allow pop-ups for the editor to open it.',
+      ]);
   });
 });

@@ -105,5 +105,5 @@ class EventDragPreview
   }
 }
 
-export { EventDragPreview };
+export { EventDragPreview, NO_IMAGE };
 export type { DragFrame };

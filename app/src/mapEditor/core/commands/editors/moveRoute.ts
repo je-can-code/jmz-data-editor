@@ -498,6 +498,7 @@ export {
   BLEND_MODES,
   describeMoveStep,
   insertStep,
+  isMoveRoute,
   MOVE_FREQUENCIES,
   MOVE_ROUTE_LINE_CODE,
   MOVE_SPEEDS,
@@ -514,6 +515,7 @@ export {
   SET_MOVEMENT_ROUTE_CODE,
   setRouteOption,
   setStepParameter,
+  withSteps,
   writeSetMovementRoute,
 };
 export type { MoveParameter, MoveRouteMode, MoveStepKind, SetMovementRouteModel };

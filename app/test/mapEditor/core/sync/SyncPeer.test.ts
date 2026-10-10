@@ -15,7 +15,9 @@ import { MemoryChannelNetwork } from '../../support/standIns.ts';
  * without them choosing to.
  *
  * Every step, undo, redo, forget and save made in one window is repeated in the other, so both copies and both
- * histories stay equal, and a window opening a document takes the live copy from whoever holds it.
+ * histories stay equal, and a window opening a document takes the live copy from whoever holds it. An undo or a redo
+ * that left parts of its step as they stand, as a blueprint's change leaves copies changed since, leaves the very same
+ * parts in the other window.
  *
  * When two copies are found to differ, their lineages decide. A copy that is only behind takes the other, which
  * holds everything it did, and a window offered a copy older than its own hands its own back, since that may be
@@ -186,6 +188,47 @@ describe('SyncPeer', () =>
           first.hub.history(mapHistoryKey(1)),
           first.hub.history(eventHistoryKey(1, 3)),
           first.hub.lineage(MAP),
+          false,
+        ]);
+    });
+
+    it('repeats an undo and a redo that left parts of a step as they stand exactly as they were made, in the other window', async () =>
+    {
+      // Arrange: a step renaming the map's door and chest that the map follows, as a blueprint's copies do; the door then
+      // renamed by hand in the other window.
+      const { network, first, second } = await buildPair();
+      first.hub.edit('Rename both', [ mapHistoryKey(1) ], tx =>
+      {
+        tx.set(MAP, [ 'events', 1, 'name' ], 'Gate');
+        tx.set(MAP, [ 'events', 3, 'name' ], 'Crate');
+        tx.markFollower(MAP);
+      });
+      network.flush();
+      second.hub.edit('Rename door', [ eventHistoryKey(1, 1) ], tx => tx.set(MAP, [ 'events', 1, 'name' ], 'Front door'));
+      network.flush();
+
+      // Act: undone, leaving the door; the chest renamed by hand; redone, leaving the chest.
+      first.hub.undo(mapHistoryKey(1));
+      network.flush();
+      second.hub.edit('Rename chest', [ eventHistoryKey(1, 3) ], tx => tx.set(MAP, [ 'events', 3, 'name' ], 'Box'));
+      network.flush();
+      first.hub.redo(mapHistoryKey(1));
+      network.flush();
+
+      // Assert.
+      const names = (hub: DocumentHub) => [ 1, 3 ].map(id => hub.map(MAP).event(id)?.name);
+      expect([
+        names(second.hub),
+        second.hub.history(mapHistoryKey(1)),
+        second.hub.lineage(MAP),
+        second.hub.appliedSteps(MAP).map(step => step.id),
+        first.hub.isConflicted(MAP) || second.hub.isConflicted(MAP),
+      ])
+        .toStrictEqual([
+          [ 'Front door', 'Box' ],
+          first.hub.history(mapHistoryKey(1)),
+          first.hub.lineage(MAP),
+          first.hub.appliedSteps(MAP).map(step => step.id),
           false,
         ]);
     });
@@ -632,8 +675,9 @@ describe('SyncPeer', () =>
       const events: string[] = [];
       first.hub.subscribe(event => events.push(event.type));
 
-      // Act.
-      stranger.postMessage({ type: 'operation', from: 'window-B', operation: { type: 'saved', origin: 'window-B', document: MAP, marker: [ 'window-B#99' ] } });
+      // Act: the save's file holds just what the map does.
+      const content = first.hub.committedContent(MAP);
+      stranger.postMessage({ type: 'operation', from: 'window-B', operation: { type: 'saved', origin: 'window-B', document: MAP, marker: [ 'window-B#99' ], content } });
       await settle(network);
 
       // Assert: the copy stays clean and unflagged; the difference was announced, and the other copy found to be the same.
@@ -693,6 +737,70 @@ describe('SyncPeer', () =>
       // Assert.
       expect([ before, first.peer.sharesLatest(MAP), first.peer.holders(MAP), first.peer.sharesLatest('map:2') ])
         .toStrictEqual([ true, false, [], false ]);
+    });
+
+    it('tells a window that holds nothing whenever another takes a document up, moves it on, or lets it go', async () =>
+    {
+      // Arrange: a window holding nothing, listening, and another window that will hold the map.
+      const network = new MemoryChannelNetwork();
+      const server = buildServer();
+      const watcher = buildWindow(network, 'window-A', server.store);
+      const heard: DocumentKey[] = [];
+      const stop = watcher.peer.onHoldingChange(key => heard.push(key));
+      const holder = buildWindow(network, 'window-B', server.store);
+      network.flush();
+
+      // Act: the map taken up, renamed, its presence repeated unchanged, the window gone; then the map heard of again
+      // after the listener stopped.
+      await holder.hub.load(MAP);
+      network.flush();
+      holder.hub.edit('Rename', [ mapHistoryKey(1) ], tx => tx.set(MAP, [ 'displayName' ], 'Harbor'));
+      network.flush();
+      network.flush();
+      holder.peer.stop();
+      network.flush();
+      stop();
+      const later = buildWindow(network, 'window-C', server.store);
+      await later.hub.load(MAP);
+      network.flush();
+
+      // Assert: once taken up, once moved on, once gone, and nothing for the hello of a window holding nothing.
+      expect(heard)
+        .toStrictEqual([ MAP, MAP, MAP ]);
+    });
+
+    it('says nothing for the goodbye of a window it never heard holding anything', () =>
+    {
+      // Arrange: a window listening, and a stranger's goodbye on the channel.
+      const network = new MemoryChannelNetwork();
+      const watcher = buildWindow(network, 'window-A', buildServer().store);
+      const heard: DocumentKey[] = [];
+      watcher.peer.onHoldingChange(key => heard.push(key));
+      const stranger = network.open('jmz-sync');
+
+      // Act.
+      stranger.postMessage({ type: 'goodbye', from: 'window-Z' });
+      network.flush();
+
+      // Assert.
+      expect([ heard, watcher.peer.knowsClient('window-Z') ])
+        .toStrictEqual([ [], true ]);
+    });
+
+    it('says nothing when a window repeats what it holds', async () =>
+    {
+      // Arrange: two windows holding the map at one head, the first listening.
+      const { network, first, second } = await buildPair();
+      const heard: DocumentKey[] = [];
+      first.peer.onHoldingChange(key => heard.push(key));
+
+      // Act: the second window answers a hello from a newcomer, repeating what it holds.
+      buildWindow(network, 'window-C', buildServer().store);
+      network.flush();
+
+      // Assert.
+      expect([ heard, first.peer.holders(MAP) ])
+        .toStrictEqual([ [], [ second.hub.clientId ] ]);
     });
 
     it('stops counting a window it has not heard from within the liveness window', () =>

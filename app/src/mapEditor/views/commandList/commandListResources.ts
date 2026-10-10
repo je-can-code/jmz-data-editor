@@ -1,14 +1,16 @@
-import { createContext, useEffect, useState } from 'react';
+import { createContext, useEffect, useState, useSyncExternalStore } from 'react';
 import type { MapEditorApi } from '../../core/api/MapEditorApi.ts';
 import { usageByEntry } from '../../core/commandList/commandUsage.ts';
 import type { DatabaseNamesJson } from '../../core/commandList/databaseNames.ts';
+import { ProjectNames } from '../../core/commandList/ProjectNames.ts';
 
 /**
  * What every command list in a window reads with: the project's names for ids, and how often each command is used.
  */
 type CommandListResources = {
   /**
-   * The names, or null until they arrive (or when the server could not give them), when ids read as numbers.
+   * The names, or null until they arrive (or when the server could not give them), when ids read as numbers. The switch
+   * and variable names are the ones System.json holds right now, renames not saved yet included.
    */
   readonly names: DatabaseNamesJson | null;
 
@@ -19,9 +21,14 @@ type CommandListResources = {
 };
 
 /**
- * The resources of each server, asked for once per window however many lists open.
+ * Each server's names, one live set per window however many lists read them.
  */
-const held = new WeakMap<MapEditorApi, { names: Promise<DatabaseNamesJson | null>; usage: Promise<Map<string, number>> }>();
+const namesByServer = new WeakMap<MapEditorApi, ProjectNames>();
+
+/**
+ * The usage counts each server gave, asked for once per window however many lists open.
+ */
+const usageByServer = new WeakMap<MapEditorApi, Promise<Map<string, number>>>();
 
 /**
  * No usage counts.
@@ -29,36 +36,84 @@ const held = new WeakMap<MapEditorApi, { names: Promise<DatabaseNamesJson | null
 const NO_USAGE: ReadonlyMap<string, number> = new Map();
 
 /**
- * Asks the server for the names and counts once, keeping the answers for every list after, and for the command
- * editors' pickers, which read the same names. Neither is needed for a list to work, only to read better and rank
- * better, so a failure leaves ids as numbers and the search in name order rather than stopping anything.
- * @param {MapEditorApi} api The server.
- * @returns {{ names: Promise<DatabaseNamesJson | null>, usage: Promise<Map<string, number>> }} The answers.
+ * Finds the names a window reads ids by, made the first time anything asks, which reads nothing yet: the services keep
+ * the switch and variable names current in it from the start, while the rest is read from the server only once a list
+ * or a picker needs it ({@link commandListResourcesOf}).
+ * @param {MapEditorApi} api The window's server.
+ * @returns {ProjectNames} The window's names.
  */
-const commandListResourcesOf = (api: MapEditorApi) =>
+const projectNamesOf = (api: MapEditorApi): ProjectNames =>
 {
-  const known = held.get(api);
+  const known = namesByServer.get(api);
   if (known !== undefined)
   {
     return known;
   }
 
-  const asked = {
-    names: api.loadDatabaseNames().catch(() => null),
-    usage: api.loadCommandUsage().then(usageByEntry).catch(() => new Map<string, number>()),
-  };
-  held.set(api, asked);
-  return asked;
+  const names = new ProjectNames(() => api.loadDatabaseNames());
+  namesByServer.set(api, names);
+  return names;
 };
 
 /**
- * Reads the names and usage counts a command list reads with, once they arrive.
+ * Asks the server for the names and counts once, keeping the answers for every list after, and for the command
+ * editors' pickers, which read the same names. Neither is needed for a list to work, only to read better and rank
+ * better, so a failure leaves ids as numbers and the search in name order rather than stopping anything.
+ * @param {MapEditorApi} api The server.
+ * @returns {{ names: Promise<DatabaseNamesJson | null>, usage: Promise<Map<string, number>> }} The answers: the names as
+ * the server read them, which {@link projectNamesOf} keeps current from then on, and the counts.
+ */
+const commandListResourcesOf = (api: MapEditorApi) =>
+{
+  const names = projectNamesOf(api).read();
+  const known = usageByServer.get(api);
+  if (known !== undefined)
+  {
+    return { names, usage: known };
+  }
+
+  const usage = api.loadCommandUsage().then(usageByEntry).catch(() => new Map<string, number>());
+  usageByServer.set(api, usage);
+  return { names, usage };
+};
+
+/**
+ * Hears nothing, for a window with no server, whose names never change.
+ * @returns {() => void} Stops hearing nothing.
+ */
+const hearNothing = (): (() => void) => () => undefined;
+
+/**
+ * Reads no names, for a window with no server.
+ * @returns {null} Always null.
+ */
+const noNames = (): null => null;
+
+/**
+ * Reads the names a window shows ids by, once they arrive, and every change to them after, such as a switch renamed in
+ * another window: the read is asked for once per window however many hooks ask.
+ * @param {MapEditorApi | null} api The server, or null when the window has none.
+ * @returns {DatabaseNamesJson | null} The names, or null until they arrive.
+ */
+const useProjectNames = (api: MapEditorApi | null): DatabaseNamesJson | null =>
+{
+  const names = api === null ? null : projectNamesOf(api);
+  useEffect(() =>
+  {
+    names?.read();
+  }, [ names ]);
+
+  return useSyncExternalStore(names?.subscribe ?? hearNothing, names?.names ?? noNames);
+};
+
+/**
+ * Reads the names and usage counts a command list reads with, once they arrive, the names kept current after.
  * @param {MapEditorApi | null} api The server, or null when the window has none.
  * @returns {CommandListResources} The resources so far.
  */
 const useCommandListResources = (api: MapEditorApi | null): CommandListResources =>
 {
-  const [ names, setNames ] = useState<DatabaseNamesJson | null>(null);
+  const names = useProjectNames(api);
   const [ usage, setUsage ] = useState<ReadonlyMap<string, number>>(NO_USAGE);
 
   useEffect(() =>
@@ -70,15 +125,7 @@ const useCommandListResources = (api: MapEditorApi | null): CommandListResources
 
     // answers arriving after the list has gone are dropped.
     let live = true;
-    const asked = commandListResourcesOf(api);
-    asked.names.then(value =>
-    {
-      if (live)
-      {
-        setNames(value);
-      }
-    });
-    asked.usage.then(value =>
+    commandListResourcesOf(api).usage.then(value =>
     {
       if (live)
       {
@@ -145,5 +192,5 @@ const createSoundPlayer = (createAudio: (url: string) => HTMLAudioElement): Soun
  */
 const SoundPlayerContext = createContext<SoundPlayer>(createSoundPlayer(url => new Audio(url)));
 
-export { commandListResourcesOf, createSoundPlayer, SoundPlayerContext, useCommandListResources };
+export { commandListResourcesOf, createSoundPlayer, projectNamesOf, SoundPlayerContext, useCommandListResources, useProjectNames };
 export type { CommandListResources, SoundPlayer, SoundSettings };

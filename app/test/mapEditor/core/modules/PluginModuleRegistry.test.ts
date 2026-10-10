@@ -2,20 +2,65 @@ import { describe, expect, it, vi } from 'vitest';
 import { CommandCatalog } from '../../../../src/mapEditor/core/commands/CommandCatalog.ts';
 import { pluginCommandEntry } from '../../../../src/mapEditor/core/commands/pluginCommands.ts';
 import { createMapEvent, pageCommentText } from '../../../../src/mapEditor/core/model/eventModel.ts';
-import type { EventKindDefinition, PluginModule } from '../../../../src/mapEditor/core/modules/PluginModule.ts';
-import { PluginModuleRegistry } from '../../../../src/mapEditor/core/modules/PluginModuleRegistry.ts';
-import type { RmmzMapEvent } from '../../../../src/mapEditor/core/model/rmmzTypes.ts';
+import type { JsonValue } from '../../../../src/mapEditor/core/model/json.ts';
+import type {
+  EventKindDefinition,
+  LiveNotice,
+  ModuleContext,
+  ModuleNotice,
+  OnDemandConfig,
+  PluginModule,
+  PreviewKindDefinition,
+  SkyOffer,
+} from '../../../../src/mapEditor/core/modules/PluginModule.ts';
+import { configNamesOf, enabledPlugins, PluginModuleRegistry } from '../../../../src/mapEditor/core/modules/PluginModuleRegistry.ts';
+import type { RmmzEventPage, RmmzMapEvent } from '../../../../src/mapEditor/core/model/rmmzTypes.ts';
 import type { PluginsJsEntry } from '../../../../src/services/plugins/PluginsJsReader.ts';
 
 /*
  * The core editor works on any MZ project; each plugin's awareness is its own module, switched on only when that
  * plugin is enabled in js/plugins.js. The registry owes the editor exactly that: a module whose plugin is off (or
  * missing, or only a near namesake like J-ABS-Metrics) contributes nothing, a module that is on contributes its
- * kinds, palette entries, passability rules, overlays and command entries, a module can never claim a core kind,
- * and the core's own kinds are on in every project. When several kinds recognise one event, the higher priority
- * wins, since a battler is also a comment-only event. A map an active module copies its events from, such as J-ABS's
- * action map, holds the plugin's patterns, so no kind claims an event there. Every activation is announced, since
- * modules switch on after the views that show kinds have drawn.
+ * kinds, palette entries, passability rules, overlays, lighting layers, weather layers, command entries, notices and Map
+ * Properties sections, a module can never claim a core kind, and the core's own kinds are on in every project. When several kinds recognise one event, the
+ * higher priority wins, since a battler is also a comment-only event. A map an active module copies its events from,
+ * such as J-ABS's action map, holds the plugin's patterns, so no kind claims an event there. Every activation is
+ * announced, since modules switch on after the views that show kinds have drawn.
+ *
+ * A module naming project config files gets each one as it was read before switching on, and null for one that was
+ * not, with why it could not be read, and never another module's. An extension's config, which a module reads only while
+ * the plugins the extension needs are enabled too, is handed over only then, after the module's own. A config a module
+ * reads only on demand is handed over as the window's copy, which nothing reads until the module asks for it; asking for
+ * one the module does not name is a mistake in the module and throws, and a registry given no copies hands over configs
+ * that are never read, as a window without a server has.
+ *
+ * What the modules say can change while they are on, as when a config read only on demand turns out to be broken: the
+ * views are shown everything said, in the order it was said, and told whenever that changes and only then, a change that
+ * says the same thing again included; a module switching off is no longer listened to.
+ *
+ * A module may offer the map views a clock; the first one offered among the active modules is the window's, and none is
+ * offered once the modules offering it switch off. A sky is offered the same way, as J-Weather's module offers the one
+ * J-Weather-Time drives.
+ *
+ * A module may add conditions to the game's page rule, as J-TIME adds its hours, kept while it is on and taken back
+ * when it switches off. Every module is handed words for a page, read from the page's own conditions and from every
+ * page condition the active modules add, a module switching on after it included.
+ *
+ * A module may say its plugin reads whether a map has a sky, named under its own id, so Map Properties can offer the one
+ * sky setting however many plugins read it. Every module is handed the readers of the active modules as they stand when
+ * it asks, in the order they were said, a module switching on after it included and one switched off left out.
+ *
+ * A module may let the preview set a kind of state of its own, as J-OMNI-Quests lets it set where each quest stands,
+ * named under its own id like everything else it adds, so it can never take over the switches, the variables or another
+ * module's kind; listed while it is on, in the order the modules added them, and taken back when it switches off.
+ *
+ * A module may read tags of its own from an event page's comments as fields a blueprint's copies follow, as J-Lighting
+ * reads its lights, named under its own id; listed while it is on, in the order the modules added them, and taken back
+ * when it switches off.
+ *
+ * A module may give event pages areas, as J-Pixelistics does, named under its own id: a page's area is the first active
+ * module's that reads one for it, none while no module does, and the registry's reading follows the modules as they
+ * stand, so a reader handed on before a module switches off reads nothing of it after.
  */
 describe('PluginModuleRegistry', () =>
 {
@@ -46,6 +91,21 @@ describe('PluginModuleRegistry', () =>
   const decor = (): EventKindDefinition => ({ id: 'core.decor', title: 'Decor', priority: 0, detect: () => true });
 
   /**
+   * A kind of preview state a module adds under its own id, listing nothing.
+   * @param {string} moduleId The module.
+   * @returns {PreviewKindDefinition} The kind.
+   */
+  const previewKind = (moduleId: string): PreviewKindDefinition => ({
+    id: `${moduleId}.states`,
+    title: moduleId,
+    nouns: { one: moduleId, many: `${moduleId}s`, state: 'set' },
+    searchHint: 'Find one',
+    noMatch: 'None.',
+    entries: () => [],
+    choose: () => undefined,
+  });
+
+  /**
    * A J-ABS stand-in module contributing one of everything.
    * @returns {PluginModule} The module.
    */
@@ -65,7 +125,11 @@ describe('PluginModuleRegistry', () =>
       contributions.paletteEntry({ id: 'jabs.battler', title: 'Battler', kind: 'jabs.battler', createEvent: createMapEvent });
       contributions.passabilityRule({ id: 'jabs.blocked', title: 'Blocked', deny: () => null });
       contributions.overlay({ id: 'jabs.pursuit', title: `Pursuit (${context.plugins.get('J-ABS')?.parameters['actionMapId']})`, defaultOn: false, draw: () => undefined });
+      contributions.lightingLayer({ id: 'jabs.glow', title: 'Glow', create: () => ({ draw: () => undefined, tick: () => false, destroy: () => undefined }) });
+      contributions.weatherLayer({ id: 'jabs.dust', title: 'Dust', drawsOn: () => true, create: () => ({ draw: () => undefined, tick: () => false, destroy: () => undefined }) });
       contributions.catalogEntry(pluginCommandEntry({ plugin: 'J-ABS', command: 'spawn', args: [] }));
+      contributions.notice({ id: 'jabs.config', title: 'Battlers fight as their database says.', detail: 'Their config was not read.' });
+      contributions.mapProperties({ id: 'jabs.map', title: 'Battles', source: () => ({ note: null, fields: [] }) });
     },
   });
 
@@ -88,7 +152,11 @@ describe('PluginModuleRegistry', () =>
       registry.passabilityRules().map(rule => rule.id),
       registry.overlays().map(overlay => overlay.id),
       registry.overlays()[0].title,
+      registry.lightingLayers().map(layer => layer.id),
+      registry.weatherLayers().map(layer => layer.id),
       catalog.entry('plugin:J-ABS:spawn')?.name,
+      registry.notices().map(notice => notice.id),
+      registry.mapPropertiesSections().map(section => section.id),
     ])
       .toStrictEqual([
         { active: [ 'jabs' ], inactive: [] },
@@ -98,7 +166,11 @@ describe('PluginModuleRegistry', () =>
         [ 'jabs.blocked' ],
         [ 'jabs.pursuit', 'jabs.sight' ],
         'Pursuit (2)',
+        [ 'jabs.glow' ],
+        [ 'jabs.dust' ],
         'Plugin: spawn',
+        [ 'jabs.config' ],
+        [ 'jabs.map' ],
       ]);
   });
 
@@ -139,8 +211,68 @@ describe('PluginModuleRegistry', () =>
     registry.activate([ jabs() ], [ plugin('j/abs/J-ABS', false) ]);
 
     // Assert.
-    expect([ registry.isActive('jabs'), registry.eventKinds().map(kind => kind.id), registry.overlays(), catalog.entry('plugin:J-ABS:spawn') ])
-      .toStrictEqual([ false, [ 'core.decor' ], [], null ]);
+    expect([
+      registry.isActive('jabs'),
+      registry.eventKinds().map(kind => kind.id),
+      registry.overlays(),
+      registry.lightingLayers(),
+      registry.weatherLayers(),
+      catalog.entry('plugin:J-ABS:spawn'),
+      registry.notices(),
+      registry.mapPropertiesSections(),
+    ])
+      .toStrictEqual([ false, [ 'core.decor' ], [], [], [], null, [], [] ]);
+  });
+
+  it('hands a module each config it names as it was read, null for one that was not, and no other module\'s', () =>
+  {
+    // Arrange: a module naming its own config and one never read, beside another module's config.
+    const register = vi.fn();
+    const lighting: PluginModule = { id: 'lighting', title: 'Lighting', plugins: [ 'J-Lighting' ], configs: [ 'lighting', 'lighting-time' ], register };
+    const read = new Map<string, JsonValue | null>([ [ 'lighting', { light: { color: '#ffbb73' } } ], [ 'jabs', { teams: [] } ] ]);
+    const registry = new PluginModuleRegistry(new CommandCatalog());
+
+    // Act.
+    registry.activate([ lighting ], [ plugin('j/lighting/J-Lighting', true) ], read);
+
+    // Assert.
+    const [ [ , context ] ] = register.mock.calls as [ unknown, ModuleContext ][];
+    expect([ ...context.configs ])
+      .toStrictEqual([ [ 'lighting', { light: { color: '#ffbb73' } } ], [ 'lighting-time', null ] ]);
+  });
+
+  it('hands a module why each config it names could not be read, and no other module\'s problems', () =>
+  {
+    // Arrange: its own second config is missing, and so is another module's.
+    const register = vi.fn();
+    const lighting: PluginModule = { id: 'lighting', title: 'Lighting', plugins: [ 'J-Lighting' ], configs: [ 'lighting', 'lighting-time' ], register };
+    const read = new Map<string, JsonValue | null>([ [ 'lighting', {} ], [ 'lighting-time', null ], [ 'jabs', null ] ]);
+    const problems = new Map([ [ 'lighting-time', 'the file is missing' ], [ 'jabs', 'the file is not JSON' ] ]);
+    const registry = new PluginModuleRegistry(new CommandCatalog());
+
+    // Act.
+    registry.activate([ lighting ], [ plugin('j/lighting/J-Lighting', true) ], read, problems);
+
+    // Assert.
+    const [ [ , context ] ] = register.mock.calls as [ unknown, ModuleContext ][];
+    expect([ ...context.configProblems ])
+      .toStrictEqual([ [ 'lighting-time', 'the file is missing' ] ]);
+  });
+
+  it('hands a module naming no configs none, whatever was read', () =>
+  {
+    // Arrange.
+    const register = vi.fn();
+    const plain: PluginModule = { id: 'jabs', title: 'J-ABS', plugins: [ 'J-ABS' ], register };
+    const registry = new PluginModuleRegistry(new CommandCatalog());
+
+    // Act.
+    registry.activate([ plain ], [ plugin('j/abs/J-ABS', true) ], new Map([ [ 'jabs', null ] ]), new Map([ [ 'jabs', 'the file is missing' ] ]));
+
+    // Assert.
+    const [ [ , context ] ] = register.mock.calls as [ unknown, ModuleContext ][];
+    expect([ context.configs.size, context.configProblems.size ])
+      .toStrictEqual([ 0, 0 ]);
   });
 
   it('gives an event the highest-priority kind that recognises it', () =>
@@ -176,7 +308,7 @@ describe('PluginModuleRegistry', () =>
     // Arrange: a module naming map 2 as its patterns, over the core's catch-all decor.
     const registry = new PluginModuleRegistry(new CommandCatalog());
     registry.registerCoreKind(decor());
-    const patterns: PluginModule = { id: 'jabs', title: 'J-ABS', plugins: [ 'J-ABS' ], register: add => add.templateMap(2) };
+    const patterns: PluginModule = { id: 'jabs', title: 'J-ABS', plugins: [ 'J-ABS' ], register: add => add.templateMap(2, 'action templates') };
     const lamp = createMapEvent(4, 1, 1);
 
     // Act.
@@ -188,6 +320,22 @@ describe('PluginModuleRegistry', () =>
     // Assert.
     expect([ whileOn, onceOff ])
       .toStrictEqual([ [ null, 'core.decor' ], 'core.decor' ]);
+  });
+
+  it('names the plugin whose module says it copies a map\'s events, and what they are to it, for that map alone, until the module switches off', () =>
+  {
+    // Arrange: J-ABS's module naming map 2 as its action templates.
+    const registry = new PluginModuleRegistry(new CommandCatalog());
+    const patterns: PluginModule = { id: 'jabs', title: 'J-ABS', plugins: [ 'J-ABS' ], register: add => add.templateMap(2, 'action templates') };
+
+    // Act.
+    registry.activate([ patterns ], [ plugin('j/abs/J-ABS', true) ]);
+    const whileOn = [ registry.templateMapOf(2), registry.templateMapOf(3) ];
+    registry.activate([ patterns ], [ plugin('j/abs/J-ABS', false) ]);
+
+    // Assert.
+    expect([ whileOn, registry.templateMapOf(2) ])
+      .toStrictEqual([ [ { owner: 'J-ABS', holds: 'action templates' }, null ], null ]);
   });
 
   it('tells whoever listens after each activation, and stops once they stop listening', () =>
@@ -218,6 +366,31 @@ describe('PluginModuleRegistry', () =>
       { id: 'b', title: 'B', plugins: [], register: add => add.paletteEntry({ id: 'chest', title: 'x', kind: 'x', createEvent: createMapEvent }) },
       { id: 'c', title: 'C', plugins: [], register: add => add.passabilityRule({ id: 'core.x', title: 'x', deny: () => null }) },
       { id: 'd', title: 'D', plugins: [], register: add => add.overlay({ id: 'grid.x', title: 'x', defaultOn: false, draw: () => undefined }) },
+      {
+        id: 'e',
+        title: 'E',
+        plugins: [],
+        register: add => add.lightingLayer({ id: 'core.x', title: 'x', create: () => ({ draw: () => undefined, tick: () => false, destroy: () => undefined }) }),
+      },
+      { id: 'f', title: 'F', plugins: [], register: add => add.notice({ id: 'core.x', title: 'x', detail: 'x' }) },
+      { id: 'g', title: 'G', plugins: [], register: add => add.mapProperties({ id: 'core.x', title: 'x', source: () => ({ note: null, fields: [] }) }) },
+      { id: 'h', title: 'H', plugins: [], register: add => add.pageCondition({ id: 'core.x', read: () => null }) },
+      { id: 'i', title: 'I', plugins: [], register: add => add.previewKind({ ...previewKind('quest'), id: 'quest.states' }) },
+      {
+        id: 'j',
+        title: 'J',
+        plugins: [],
+        register: add => add.weatherLayer({ id: 'core.x', title: 'x', drawsOn: () => true, create: () => ({ draw: () => undefined, tick: () => false, destroy: () => undefined }) }),
+      },
+      {
+        id: 'k',
+        title: 'K',
+        plugins: [],
+        register: add => add.liveNotice({ id: 'core.x', current: () => null, subscribe: () => () => undefined }),
+      },
+      { id: 'l', title: 'L', plugins: [], register: add => add.skyReader({ id: 'lighting.sky', follows: 'x', does: 'x' }) },
+      { id: 'm', title: 'M', plugins: [], register: add => add.commentTag({ id: 'lighting.light', read: () => [], write: text => text }) },
+      { id: 'n', title: 'N', plugins: [], register: add => add.eventArea({ id: 'core.area', read: () => null }) },
     ];
 
     // Act.
@@ -232,6 +405,231 @@ describe('PluginModuleRegistry', () =>
       .toThrow('c can only add passability rules whose id starts with "c.", not core.x');
     expect(failures[3])
       .toThrow('d can only add overlays whose id starts with "d.", not grid.x');
+    expect(failures[4])
+      .toThrow('e can only add lighting layers whose id starts with "e.", not core.x');
+    expect(failures[5])
+      .toThrow('f can only add notices whose id starts with "f.", not core.x');
+    expect(failures[6])
+      .toThrow('g can only add map properties sections whose id starts with "g.", not core.x');
+    expect(failures[7])
+      .toThrow('h can only add page conditions whose id starts with "h.", not core.x');
+    expect(failures[8])
+      .toThrow('i can only add preview kinds whose id starts with "i.", not quest.states');
+    expect(failures[9])
+      .toThrow('j can only add weather layers whose id starts with "j.", not core.x');
+    expect(failures[10])
+      .toThrow('k can only add notices whose id starts with "k.", not core.x');
+    expect(failures[11])
+      .toThrow('l can only add sky readers whose id starts with "l.", not lighting.sky');
+    expect(failures[12])
+      .toThrow('m can only add comment tags whose id starts with "m.", not lighting.light');
+    expect(failures[13])
+      .toThrow('n can only add event areas whose id starts with "n.", not core.area');
+  });
+
+  describe('configs read on demand', () =>
+  {
+    /**
+     * A config a window holds, read as the test says, which nothing here ever asks the server for.
+     * @param {string} name The config's name.
+     * @returns {OnDemandConfig} The config.
+     */
+    const heldConfig = (name: string): OnDemandConfig => ({
+      current: () => ({ content: { name }, problem: null }),
+      request: () => undefined,
+      subscribe: () => () => undefined,
+    });
+
+    it('hands a module the window\'s copy of each config it reads on demand, by name, and refuses one it does not name', () =>
+    {
+      // Arrange: a module reading the weather config on demand, and the window's copies by name.
+      const register = vi.fn();
+      const weather: PluginModule = { id: 'weather', title: 'Weather', plugins: [ 'J-Weather' ], onDemandConfigs: [ 'weather' ], register };
+      const copies = new Map([ [ 'weather', heldConfig('weather') ], [ 'jabs', heldConfig('jabs') ] ]);
+      const registry = new PluginModuleRegistry(new CommandCatalog());
+
+      // Act.
+      registry.activate([ weather ], [ plugin('j/weather/J-Weather', true) ], new Map(), new Map(), name => copies.get(name) as OnDemandConfig);
+
+      // Assert.
+      const [ [ , context ] ] = register.mock.calls as [ unknown, ModuleContext ][];
+      expect(context.onDemandConfig('weather'))
+        .toBe(copies.get('weather'));
+      expect(() => context.onDemandConfig('jabs'))
+        .toThrow('weather asked for the config jabs, which it does not name among those it reads on demand');
+    });
+
+    it('refuses every config to a module naming none to read on demand', () =>
+    {
+      // Arrange.
+      const register = vi.fn();
+      const plain: PluginModule = { id: 'jabs', title: 'J-ABS', plugins: [ 'J-ABS' ], register };
+      const registry = new PluginModuleRegistry(new CommandCatalog());
+
+      // Act.
+      registry.activate([ plain ], [ plugin('j/abs/J-ABS', true) ]);
+
+      // Assert.
+      const [ [ , context ] ] = register.mock.calls as [ unknown, ModuleContext ][];
+      expect(() => context.onDemandConfig('jabs'))
+        .toThrow('jabs asked for the config jabs, which it does not name among those it reads on demand');
+    });
+
+    it('hands over configs that are never read when it is given no copies of them, as in a window without a server', () =>
+    {
+      // Arrange.
+      const register = vi.fn();
+      const weather: PluginModule = { id: 'weather', title: 'Weather', plugins: [ 'J-Weather' ], onDemandConfigs: [ 'weather' ], register };
+      const registry = new PluginModuleRegistry(new CommandCatalog());
+      registry.activate([ weather ], [ plugin('j/weather/J-Weather', true) ]);
+      const [ [ , context ] ] = register.mock.calls as [ unknown, ModuleContext ][];
+      const config = context.onDemandConfig('weather');
+      const heard = vi.fn();
+
+      // Act: asked for, listened to, and the listening stopped.
+      config.request();
+      config.subscribe(heard)();
+
+      // Assert.
+      expect([ config.current(), heard.mock.calls.length ])
+        .toStrictEqual([ undefined, 0 ]);
+    });
+  });
+
+  describe('live notices', () =>
+  {
+    /**
+     * A notice a module gives that the test changes, telling its listeners each time, counting them.
+     * @param {string} id Its id.
+     * @returns {{ notice: LiveNotice, say: (said: ModuleNotice | null) => void, listening: () => number }} The notice,
+     * a change to it, and how many listen.
+     */
+    const changingNotice = (id: string) =>
+    {
+      const listeners = new Set<() => void>();
+      let said: ModuleNotice | null = null;
+      const notice: LiveNotice = {
+        id,
+        current: () => said,
+        subscribe: listener =>
+        {
+          listeners.add(listener);
+          return () =>
+          {
+            listeners.delete(listener);
+          };
+        },
+      };
+      const say = (next: ModuleNotice | null) =>
+      {
+        said = next;
+        listeners.forEach(listener => listener());
+      };
+      return { notice, say, listening: () => listeners.size };
+    };
+
+    /**
+     * A module saying a fixed notice, then a live one, while J-Weather is on.
+     * @param {LiveNotice} live The live one.
+     * @returns {PluginModule} The module.
+     */
+    const sayingModule = (live: LiveNotice): PluginModule => ({
+      id: 'weather',
+      title: 'Weather',
+      plugins: [ 'J-Weather' ],
+      register: add =>
+      {
+        add.notice({ id: 'weather.fixed', title: 'Fixed.', detail: 'Always said.' });
+        add.liveNotice(live);
+      },
+    });
+
+    it('says what a live notice says once it says something, after the notices said before it, and tells the views', () =>
+    {
+      // Arrange: switched on with the live notice saying nothing yet, and a view listening.
+      const changing = changingNotice('weather.config');
+      const registry = new PluginModuleRegistry(new CommandCatalog());
+      registry.activate([ sayingModule(changing.notice) ], [ plugin('j/weather/J-Weather', true) ]);
+      const before = [ registry.notices().map(notice => notice.id), registry.noticesRevision ];
+      const heard = vi.fn();
+      registry.subscribeNotices(heard);
+
+      // Act.
+      changing.say({ id: 'weather.config', title: 'Broken.', detail: 'Fix it.' });
+
+      // Assert: the views told once, the count moved on, and the activation's own count left as it was.
+      expect([ before, registry.notices().map(notice => notice.id), registry.noticesRevision, heard.mock.calls.length, registry.revision ])
+        .toStrictEqual([ [ [ 'weather.fixed' ], 1 ], [ 'weather.fixed', 'weather.config' ], 2, 1, 1 ]);
+    });
+
+    it('tells the views when a live notice says something else, and not when it says the same again', () =>
+    {
+      // Arrange: a live notice saying one thing.
+      const changing = changingNotice('weather.config');
+      const registry = new PluginModuleRegistry(new CommandCatalog());
+      registry.activate([ sayingModule(changing.notice) ], [ plugin('j/weather/J-Weather', true) ]);
+      changing.say({ id: 'weather.config', title: 'Broken.', detail: 'Missing.' });
+      const heard = vi.fn();
+      registry.subscribeNotices(heard);
+
+      // Act: the same again, then another detail.
+      changing.say({ id: 'weather.config', title: 'Broken.', detail: 'Missing.' });
+      const afterSame = heard.mock.calls.length;
+      changing.say({ id: 'weather.config', title: 'Broken.', detail: 'Not JSON.' });
+
+      // Assert.
+      expect([ afterSame, heard.mock.calls.length, registry.notices().map(notice => notice.detail) ])
+        .toStrictEqual([ 0, 1, [ 'Always said.', 'Not JSON.' ] ]);
+    });
+
+    it('tells the views of every activation, and stops telling one that stopped listening', () =>
+    {
+      // Arrange.
+      const registry = new PluginModuleRegistry(new CommandCatalog());
+      const heard = vi.fn();
+      const stop = registry.subscribeNotices(heard);
+
+      // Act.
+      registry.activate([ jabs() ], [ plugin('j/abs/J-ABS', true) ]);
+      stop();
+      registry.activate([ jabs() ], [ plugin('j/abs/J-ABS', false) ]);
+
+      // Assert.
+      expect([ heard.mock.calls.length, registry.noticesRevision ])
+        .toStrictEqual([ 1, 2 ]);
+    });
+
+    it('stops listening to the live notices of a module once it switches off', () =>
+    {
+      // Arrange: switched on, then off.
+      const changing = changingNotice('weather.config');
+      const registry = new PluginModuleRegistry(new CommandCatalog());
+      registry.activate([ sayingModule(changing.notice) ], [ plugin('j/weather/J-Weather', true) ]);
+      const whileOn = changing.listening();
+
+      // Act.
+      registry.activate([ sayingModule(changing.notice) ], [ plugin('j/weather/J-Weather', false) ]);
+
+      // Assert.
+      expect([ whileOn, changing.listening(), registry.notices() ])
+        .toStrictEqual([ 1, 0, [] ]);
+    });
+  });
+
+  describe('enabledPlugins', () =>
+  {
+    it('reads the enabled plugins by file name, leaving out the disabled', () =>
+    {
+      // Arrange: two enabled in folders, one disabled beside them.
+      const plugins = [ plugin('j/base/J-Base', true), plugin('j/abs/J-ABS', false), plugin('j/lighting/J-Lighting', true) ];
+
+      // Act.
+      const enabled = enabledPlugins(plugins);
+
+      // Assert.
+      expect([ ...enabled.keys() ])
+        .toStrictEqual([ 'J-Base', 'J-Lighting' ]);
+    });
   });
 
   it('refuses a core kind that is not named as one, or registered twice', () =>
@@ -248,5 +646,478 @@ describe('PluginModuleRegistry', () =>
       .toThrow('a core kind\'s id starts with "core.", not chest');
     expect(attempts[1])
       .toThrow('core.decor is already registered');
+  });
+
+  describe('clockOffer', () =>
+  {
+    /**
+     * A module offering a clock starting at a time, once its plugin is on.
+     * @param {string} id The module.
+     * @param {string} pluginName The plugin it needs.
+     * @param {number} startsAt Where its clock starts.
+     * @returns {PluginModule} The module.
+     */
+    const clockModule = (id: string, pluginName: string, startsAt: number): PluginModule => ({
+      id,
+      title: id,
+      plugins: [ pluginName ],
+      register: contributions => contributions.clock({ startsAt, partOfDay: () => id }),
+    });
+
+    it('offers the clock of the first module offering one, and none while no module does', () =>
+    {
+      // Arrange: two modules offering clocks, the first starting at 14:00, and a registry where neither is on.
+      const lighting = clockModule('lighting', 'J-Lighting', 840);
+      const time = clockModule('time', 'J-TIME', 540);
+      const both = new PluginModuleRegistry(new CommandCatalog());
+      const neither = new PluginModuleRegistry(new CommandCatalog());
+
+      // Act.
+      both.activate([ lighting, time ], [ plugin('j/lighting/J-Lighting', true), plugin('j/time/J-TIME', true) ]);
+      neither.activate([ lighting, time ], [ plugin('j/lighting/J-Lighting', false) ]);
+
+      // Assert.
+      expect([ both.clockOffer()?.startsAt, both.clockOffer()?.partOfDay(0), neither.clockOffer() ])
+        .toStrictEqual([ 840, 'lighting', null ]);
+    });
+
+    it('takes the clock back once the module offering it switches off', () =>
+    {
+      // Arrange: the module on.
+      const lighting = clockModule('lighting', 'J-Lighting', 840);
+      const registry = new PluginModuleRegistry(new CommandCatalog());
+      registry.activate([ lighting ], [ plugin('j/lighting/J-Lighting', true) ]);
+
+      // Act.
+      registry.activate([ lighting ], [ plugin('j/lighting/J-Lighting', false) ]);
+
+      // Assert.
+      expect(registry.clockOffer())
+        .toBeNull();
+    });
+  });
+
+  describe('skyOffer', () =>
+  {
+    /**
+     * A sky that says only its own name, never read.
+     * @param {string} name What it says.
+     * @returns {SkyOffer} The sky.
+     */
+    const skyNamed = (name: string): SkyOffer => ({
+      config: { current: () => undefined, request: () => undefined, subscribe: () => () => undefined },
+      strengths: [],
+      conditionsAt: () => ({ conditions: [], problem: name }),
+      readingAt: () => ({ weather: null, words: name }),
+    });
+
+    /**
+     * A module offering a sky, once its plugin is on.
+     * @param {string} id The module.
+     * @param {string} pluginName The plugin it needs.
+     * @param {SkyOffer} sky The sky.
+     * @returns {PluginModule} The module.
+     */
+    const skyModule = (id: string, pluginName: string, sky: SkyOffer): PluginModule => ({
+      id,
+      title: id,
+      plugins: [ pluginName ],
+      register: contributions => contributions.sky(sky),
+    });
+
+    it('offers the sky of the first module offering one, and none while no module does', () =>
+    {
+      // Arrange: two modules offering skies, and a registry where neither is on.
+      const first = skyNamed('first');
+      const modules = [ skyModule('weather', 'J-Weather', first), skyModule('storms', 'J-Storms', skyNamed('second')) ];
+      const both = new PluginModuleRegistry(new CommandCatalog());
+      const neither = new PluginModuleRegistry(new CommandCatalog());
+
+      // Act.
+      both.activate(modules, [ plugin('j/weather/J-Weather', true), plugin('j/weather/J-Storms', true) ]);
+      neither.activate(modules, [ plugin('j/weather/J-Weather', false) ]);
+
+      // Assert.
+      expect([ both.skyOffer() === first, neither.skyOffer() ])
+        .toStrictEqual([ true, null ]);
+    });
+
+    it('takes the sky back once the module offering it switches off', () =>
+    {
+      // Arrange: the module on.
+      const weather = skyModule('weather', 'J-Weather', skyNamed('sky'));
+      const registry = new PluginModuleRegistry(new CommandCatalog());
+      registry.activate([ weather ], [ plugin('j/weather/J-Weather', true) ]);
+      const before = registry.skyOffer();
+
+      // Act.
+      registry.activate([ weather ], [ plugin('j/weather/J-Weather', false) ]);
+
+      // Assert.
+      expect([ before === null, registry.skyOffer() ])
+        .toStrictEqual([ false, null ]);
+    });
+  });
+
+  describe('pageConditions', () =>
+  {
+    /**
+     * A module adding a page condition that asks a page for the words of its first comment, once its plugin is on, and
+     * keeping what it is handed.
+     * @param {string} id The module.
+     * @param {string} pluginName The plugin it needs.
+     * @param {{ context?: ModuleContext }} kept Where it keeps the context it is handed.
+     * @returns {PluginModule} The module.
+     */
+    const gatingModule = (id: string, pluginName: string, kept: { context?: ModuleContext } = {}): PluginModule => ({
+      id,
+      title: id,
+      plugins: [ pluginName ],
+      register: (contributions, context) =>
+      {
+        kept.context = context;
+        contributions.pageCondition({
+          id: `${id}.pages`,
+          read: page => ({ followsClock: true, holds: () => true, words: [ `${id} reads ${String(page.list[0].parameters[0])}` ] }),
+        });
+      },
+    });
+
+    it('lists the page conditions of the active modules in the order they added them, and none while they are off', () =>
+    {
+      // Arrange: two modules gating pages, and a registry where neither is on.
+      const modules = [ gatingModule('time', 'J-TIME'), gatingModule('weather', 'J-Weather-Time') ];
+      const both = new PluginModuleRegistry(new CommandCatalog());
+      const neither = new PluginModuleRegistry(new CommandCatalog());
+
+      // Act.
+      both.activate(modules, [ plugin('j/time/J-TIME', true), plugin('j/weather/ext/J-Weather-Time', true) ]);
+      neither.activate(modules, [ plugin('j/time/J-TIME', false) ]);
+
+      // Assert.
+      expect([ both.pageConditions().map(condition => condition.id), neither.pageConditions() ])
+        .toStrictEqual([ [ 'time.pages', 'weather.pages' ], [] ]);
+    });
+
+    it('takes a module\'s page conditions back once it switches off', () =>
+    {
+      // Arrange: the module on.
+      const time = gatingModule('time', 'J-TIME');
+      const registry = new PluginModuleRegistry(new CommandCatalog());
+      registry.activate([ time ], [ plugin('j/time/J-TIME', true) ]);
+
+      // Act.
+      registry.activate([ time ], [ plugin('j/time/J-TIME', false) ]);
+
+      // Assert.
+      expect(registry.pageConditions())
+        .toStrictEqual([]);
+    });
+
+    it('hands a module words for a page from a page\'s own conditions and every page condition, those added after it included', () =>
+    {
+      // Arrange: a module switching on first, keeping its context, then one gating pages; a page waiting for switch 4.
+      const kept: { context?: ModuleContext } = {};
+      const lighting: PluginModule = {
+        id: 'lighting',
+        title: 'Lighting',
+        plugins: [ 'J-Lighting' ],
+        register: (_add, context) =>
+        {
+          kept.context = context;
+        },
+      };
+      const registry = new PluginModuleRegistry(new CommandCatalog());
+      registry.activate([ lighting, gatingModule('time', 'J-TIME') ], [ plugin('j/lighting/J-Lighting', true), plugin('j/time/J-TIME', true) ]);
+      const [ page ] = commentedEvent('<hourRangePage:18-5>').pages;
+      page.conditions = { ...page.conditions, switch1Valid: true, switch1Id: 4 };
+
+      // Act.
+      const words = kept.context?.pageWords(page);
+
+      // Assert.
+      expect(words)
+        .toStrictEqual([ 'while switch 4 is on', 'time reads <hourRangePage:18-5>' ]);
+    });
+  });
+
+  describe('skyReaders', () =>
+  {
+    /**
+     * A module saying its plugin reads the sky, once its plugin is on, and keeping the context it is handed.
+     * @param {string} id The module.
+     * @param {string} pluginName The plugin it needs.
+     * @param {{ context?: ModuleContext }} kept Where it keeps the context it is handed.
+     * @returns {PluginModule} The module.
+     */
+    const readingModule = (id: string, pluginName: string, kept: { context?: ModuleContext } = {}): PluginModule => ({
+      id,
+      title: id,
+      plugins: [ pluginName ],
+      register: (contributions, context) =>
+      {
+        kept.context = context;
+        contributions.skyReader({ id: `${id}.sky`, follows: `the ${id}`, does: `The ${id} reaches this map.` });
+      },
+    });
+
+    it('hands every module the sky readers of the active modules as they stand, those said after it included', () =>
+    {
+      // Arrange: two modules saying their plugins read the sky, the first keeping its context, and a third whose plugin
+      // is off.
+      const kept: { context?: ModuleContext } = {};
+      const modules = [ readingModule('clock', 'J-Lighting-Time', kept), readingModule('weather', 'J-Weather'), readingModule('tides', 'J-Tides') ];
+      const registry = new PluginModuleRegistry(new CommandCatalog());
+      registry.activate(modules, [ plugin('j/lighting/ext/J-Lighting-Time', true), plugin('j/weather/J-Weather', true), plugin('j/tides/J-Tides', false) ]);
+
+      // Act.
+      const readers = kept.context?.skyReaders().map(reader => reader.id);
+
+      // Assert.
+      expect(readers)
+        .toStrictEqual([ 'clock.sky', 'weather.sky' ]);
+    });
+
+    it('takes a module\'s sky reader back once it switches off', () =>
+    {
+      // Arrange: both on, then the second switched off, the first keeping the context of each switch-on.
+      const kept: { context?: ModuleContext } = {};
+      const modules = [ readingModule('clock', 'J-Lighting-Time', kept), readingModule('weather', 'J-Weather') ];
+      const registry = new PluginModuleRegistry(new CommandCatalog());
+      registry.activate(modules, [ plugin('j/lighting/ext/J-Lighting-Time', true), plugin('j/weather/J-Weather', true) ]);
+
+      // Act.
+      registry.activate(modules, [ plugin('j/lighting/ext/J-Lighting-Time', true), plugin('j/weather/J-Weather', false) ]);
+
+      // Assert.
+      expect(kept.context?.skyReaders().map(reader => reader.id))
+        .toStrictEqual([ 'clock.sky' ]);
+    });
+  });
+
+  describe('previewKinds', () =>
+  {
+    /**
+     * A module letting the preview set a kind of its own, once its plugin is on.
+     * @param {string} id The module.
+     * @param {string} pluginName The plugin it needs.
+     * @returns {PluginModule} The module.
+     */
+    const previewing = (id: string, pluginName: string): PluginModule => ({
+      id,
+      title: id,
+      plugins: [ pluginName ],
+      register: contributions => contributions.previewKind(previewKind(id)),
+    });
+
+    it('lists the preview kinds of the active modules in the order they added them, and none while they are off', () =>
+    {
+      // Arrange: two modules adding kinds, and a registry where neither is on.
+      const modules = [ previewing('quest', 'J-OMNI-Quests'), previewing('weather', 'J-Weather') ];
+      const both = new PluginModuleRegistry(new CommandCatalog());
+      const neither = new PluginModuleRegistry(new CommandCatalog());
+
+      // Act.
+      both.activate(modules, [ plugin('j/omni/ext/J-OMNI-Quests', true), plugin('j/weather/J-Weather', true) ]);
+      neither.activate(modules, [ plugin('j/omni/ext/J-OMNI-Quests', false) ]);
+
+      // Assert.
+      expect([ both.previewKinds().map(kind => kind.id), neither.previewKinds() ])
+        .toStrictEqual([ [ 'quest.states', 'weather.states' ], [] ]);
+    });
+
+    it('takes a module\'s preview kind back once it switches off', () =>
+    {
+      // Arrange: the module on.
+      const quest = previewing('quest', 'J-OMNI-Quests');
+      const registry = new PluginModuleRegistry(new CommandCatalog());
+      registry.activate([ quest ], [ plugin('j/omni/ext/J-OMNI-Quests', true) ]);
+      const listed = registry.previewKinds().length;
+
+      // Act.
+      registry.activate([ quest ], [ plugin('j/omni/ext/J-OMNI-Quests', false) ]);
+
+      // Assert.
+      expect([ listed, registry.previewKinds() ])
+        .toStrictEqual([ 1, [] ]);
+    });
+  });
+
+  describe('commentTags', () =>
+  {
+    /**
+     * A module reading one tag of its own from comments as fields, once its plugin is on.
+     * @param {string} id The module.
+     * @param {string} pluginName The plugin it needs.
+     * @returns {PluginModule} The module.
+     */
+    const tagging = (id: string, pluginName: string): PluginModule => ({
+      id,
+      title: id,
+      plugins: [ pluginName ],
+      register: contributions => contributions.commentTag({ id: `${id}.tag`, read: () => [], write: text => text }),
+    });
+
+    it('lists the comment tags of the active modules in the order they added them, and none while they are off', () =>
+    {
+      // Arrange: two modules reading tags, and a registry where neither is on.
+      const modules = [ tagging('lighting', 'J-Lighting'), tagging('jabs', 'J-ABS') ];
+      const both = new PluginModuleRegistry(new CommandCatalog());
+      const neither = new PluginModuleRegistry(new CommandCatalog());
+
+      // Act.
+      both.activate(modules, [ plugin('j/lighting/J-Lighting', true), plugin('j/abs/J-ABS', true) ]);
+      neither.activate(modules, [ plugin('j/lighting/J-Lighting', false) ]);
+
+      // Assert.
+      expect([ both.commentTags().map(tag => tag.id), neither.commentTags() ])
+        .toStrictEqual([ [ 'lighting.tag', 'jabs.tag' ], [] ]);
+    });
+
+    it('takes a module\'s comment tags back once it switches off', () =>
+    {
+      // Arrange: the module on.
+      const lighting = tagging('lighting', 'J-Lighting');
+      const registry = new PluginModuleRegistry(new CommandCatalog());
+      registry.activate([ lighting ], [ plugin('j/lighting/J-Lighting', true) ]);
+      const listed = registry.commentTags().length;
+
+      // Act.
+      registry.activate([ lighting ], [ plugin('j/lighting/J-Lighting', false) ]);
+
+      // Assert.
+      expect([ listed, registry.commentTags() ])
+        .toStrictEqual([ 1, [] ]);
+    });
+  });
+
+  describe('eventAreas', () =>
+  {
+    /**
+     * A module giving pages an area once its plugin is on: the given area for a page whose first command is a comment
+     * naming the module, and none for any other page.
+     * @param {string} id The module.
+     * @param {string} pluginName The plugin it needs.
+     * @param {{ width: number, height: number }} area The area it reads.
+     * @returns {PluginModule} The module.
+     */
+    const areaReading = (id: string, pluginName: string, area: { width: number; height: number }): PluginModule => ({
+      id,
+      title: id,
+      plugins: [ pluginName ],
+      register: contributions => contributions.eventArea({
+        id: `${id}.area`,
+        read: page => (pageCommentText(page).includes(id) ? area : null),
+      }),
+    });
+
+    /**
+     * Builds a page whose comment names some modules.
+     * @param {string} comment The comment.
+     * @returns {RmmzEventPage} The page.
+     */
+    const pageNaming = (comment: string): RmmzEventPage => commentedEvent(comment).pages[0];
+
+    it('reads a page\'s area as the first active module reading one, and none while no module is on', () =>
+    {
+      // Arrange: two modules on; pages naming the first, the second, both, and neither; and a registry where neither is on.
+      const modules = [ areaReading('pixel', 'J-Pixelistics', { width: 5, height: 1 }), areaReading('wide', 'J-Wide', { width: 9, height: 2 }) ];
+      const both = new PluginModuleRegistry(new CommandCatalog());
+      const neither = new PluginModuleRegistry(new CommandCatalog());
+      const pages = [ 'pixel', 'wide', 'pixel wide', 'nobody' ].map(pageNaming);
+
+      // Act.
+      both.activate(modules, [ plugin('j/pixel/J-Pixelistics', true), plugin('j/wide/J-Wide', true) ]);
+      neither.activate(modules, [ plugin('j/pixel/J-Pixelistics', false) ]);
+
+      // Assert.
+      expect([ both.eventAreas().map(reader => reader.id), pages.map(both.areaOf), neither.eventAreas(), neither.areaOf(pages[0]) ])
+        .toStrictEqual([
+          [ 'pixel.area', 'wide.area' ],
+          [ { width: 5, height: 1 }, { width: 9, height: 2 }, { width: 5, height: 1 }, null ],
+          [],
+          null,
+        ]);
+    });
+
+    it('takes a module\'s area reading back once it switches off, its reader handed on before reading none', () =>
+    {
+      // Arrange: the module on, and the registry's reader handed on, as a map view holds it.
+      const pixel = areaReading('pixel', 'J-Pixelistics', { width: 5, height: 1 });
+      const registry = new PluginModuleRegistry(new CommandCatalog());
+      registry.activate([ pixel ], [ plugin('j/pixel/J-Pixelistics', true) ]);
+      const { areaOf } = registry;
+      const page = pageNaming('pixel');
+      const read = areaOf(page);
+
+      // Act.
+      registry.activate([ pixel ], [ plugin('j/pixel/J-Pixelistics', false) ]);
+
+      // Assert.
+      expect([ read, registry.eventAreas(), areaOf(page) ])
+        .toStrictEqual([ { width: 5, height: 1 }, [], null ]);
+    });
+  });
+
+  describe('extension configs', () =>
+  {
+    /**
+     * A lighting module reading its own config always, and its time extension's only with J-Lighting-Time and J-TIME on.
+     * @param {(context: ModuleContext) => void} register What it does with what it is handed.
+     * @returns {PluginModule} The module.
+     */
+    const lightingWithTime = (register: (context: ModuleContext) => void): PluginModule => ({
+      id: 'lighting',
+      title: 'Lighting',
+      plugins: [ 'J-Lighting' ],
+      configs: [ 'lighting' ],
+      extensionConfigs: [ { name: 'lighting-time', plugins: [ 'J-Lighting-Time', 'J-TIME' ] } ],
+      register: (_contributions, context) => register(context),
+    });
+
+    it('hands a module an extension\'s config only while every plugin the extension needs is enabled', () =>
+    {
+      // Arrange: both configs read, and the extension with J-TIME on and with it off.
+      const read = new Map<string, JsonValue | null>([ [ 'lighting', {} ], [ 'lighting-time', { sequence: [] } ] ]);
+      const handed: string[][] = [];
+      const lighting = lightingWithTime(context => handed.push([ ...context.configs.keys() ]));
+      const extension = plugin('j/lighting/ext/J-Lighting-Time', true);
+
+      // Act.
+      new PluginModuleRegistry(new CommandCatalog()).activate([ lighting ], [ plugin('j/lighting/J-Lighting', true), extension, plugin('j/time/J-TIME', true) ], read);
+      new PluginModuleRegistry(new CommandCatalog()).activate([ lighting ], [ plugin('j/lighting/J-Lighting', true), extension, plugin('j/time/J-TIME', false) ], read);
+
+      // Assert.
+      expect(handed)
+        .toStrictEqual([ [ 'lighting', 'lighting-time' ], [ 'lighting' ] ]);
+    });
+
+    it('names a module\'s own configs first, then each extension\'s whose plugins are on', () =>
+    {
+      // Arrange: J-Lighting-Time and J-TIME both on, and then the extension off.
+      const lighting = lightingWithTime(() => undefined);
+      const on = enabledPlugins([ plugin('j/lighting/ext/J-Lighting-Time', true), plugin('j/time/J-TIME', true) ]);
+      const off = enabledPlugins([ plugin('j/lighting/ext/J-Lighting-Time', false), plugin('j/time/J-TIME', true) ]);
+
+      // Act.
+      const names = [ configNamesOf(lighting, on), configNamesOf(lighting, off) ];
+
+      // Assert.
+      expect(names)
+        .toStrictEqual([ [ 'lighting', 'lighting-time' ], [ 'lighting' ] ]);
+    });
+
+    it('names no config for a module naming none', () =>
+    {
+      // Arrange.
+      const plain: PluginModule = { id: 'jabs', title: 'J-ABS', plugins: [ 'J-ABS' ], register: () => undefined };
+
+      // Act.
+      const names = configNamesOf(plain, enabledPlugins([ plugin('j/abs/J-ABS', true) ]));
+
+      // Assert.
+      expect(names)
+        .toStrictEqual([]);
+    });
   });
 });

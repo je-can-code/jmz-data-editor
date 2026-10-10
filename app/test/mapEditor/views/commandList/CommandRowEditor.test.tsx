@@ -57,6 +57,39 @@ describe('CommandRowEditor', () =>
     return onChange;
   };
 
+  it('hands a hand-built editor where its command sits', () =>
+  {
+    // Arrange: a stand-in editor noting where it was told its command sits.
+    const registry = new CommandEditorRegistry();
+    const told: unknown[] = [];
+    registry.registerForCode(205, (props: CommandEditorProps) =>
+    {
+      told.push(props.whereabouts);
+      return null;
+    });
+    const whereabouts = { documentKey: 'map:7' as const, listPath: [ 'events', 3, 'pages', 0, 'list' ], before: [ cmd(230, 0, [ 30 ]) ] };
+
+    // Act.
+    render(
+      <CommandRowEditor
+        entry={entryOf(205)}
+        draft={{ command: cmd(205, 0, [ 0, { list: [ { code: 0 } ], repeat: false, skippable: false, wait: true } ]), continuation: [] }}
+        onChange={vi.fn()}
+        block={undefined}
+        elseBranch={null}
+        registry={registry}
+        names={null}
+        api={null}
+        playSound={vi.fn()}
+        whereabouts={whereabouts}
+      />
+    );
+
+    // Assert.
+    expect(told.at(-1))
+      .toBe(whereabouts);
+  });
+
   it('opens the hand-built editor registered for the command, handing it the command, its lines and its block', () =>
   {
     // Arrange.

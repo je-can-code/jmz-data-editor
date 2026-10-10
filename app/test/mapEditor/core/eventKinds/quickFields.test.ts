@@ -3,16 +3,20 @@ import { chestQuickModel, readChest } from '../../../../src/mapEditor/core/event
 import {
   editQuickField,
   groupSelection,
+  QuickFieldDrag,
   quickSections,
   runQuickAction,
   sharedActions,
   sharedFields,
   type QuickField,
   type QuickModel,
+  type QuickModelSource,
 } from '../../../../src/mapEditor/core/eventKinds/quickFields.ts';
 import { transferQuickModel } from '../../../../src/mapEditor/core/eventKinds/transferKind.ts';
+import type { DocumentHub } from '../../../../src/mapEditor/core/history/DocumentHub.ts';
 import { mapHistoryKey } from '../../../../src/mapEditor/core/history/historyKeys.ts';
 import { cloneJson, type JsonValue } from '../../../../src/mapEditor/core/model/json.ts';
+import type { RmmzMapEvent } from '../../../../src/mapEditor/core/model/rmmzTypes.ts';
 import { command, event, eventIn, hubWith, oreChest, page, text, transferPage } from '../../support/eventKindFixtures.ts';
 
 /*
@@ -22,7 +26,9 @@ import { command, event, eventIn, hubWith, oreChest, page, text, transferPage } 
  * that has the setting its new value as one step in the map's history, so one undo takes it back from all of them,
  * and each event's edit is worked out from the map as it stands at that moment: a change made since the panel last
  * read the map (in another window, say) is never written over by an edit addressed to where things used to be.
- * A selection is sorted by kind, so each kind's panel only ever sees its own events.
+ * A setting changed continuously, as a slider drags, shows each value on the map at once and records only the value it
+ * ends on, as one step, or nothing when it ends where it began; a value that cannot be written puts the map back as it
+ * was before the drag. A selection is sorted by kind, so each kind's panel only ever sees its own events.
  */
 describe('quickFields', () =>
 {
@@ -195,6 +201,171 @@ describe('quickFields', () =>
       // Assert: the reward moved from 12 to 14 and took the amount there; the new message is untouched.
       expect([ readBefore, list[14], list[8].code, list[9].parameters ])
         .toStrictEqual([ 12, { code: 126, indent: 0, parameters: [ 32, 0, 0, 99 ] }, 101, [ 'Hm?' ] ]);
+    });
+  });
+
+  describe('QuickFieldDrag', () =>
+  {
+    /**
+     * A kind offering one setting, an event's move speed on its first page, written as one change, or as a change and
+     * then one the map cannot take when the value is 99.
+     * @param {RmmzMapEvent} each The event.
+     * @returns {QuickModel} The setting.
+     */
+    const speedOf: QuickModelSource = (each: RmmzMapEvent): QuickModel => ({
+      fields: [ {
+        key: 'speed',
+        label: 'Speed',
+        section: '',
+        control: { kind: 'number', min: 1, max: 99 },
+        value: each.pages[0].moveSpeed,
+        step: 'Change speed',
+        write: value => [
+          { kind: 'set', path: [ 'pages', 0, 'moveSpeed' ], value },
+          ...(value === 99 ? [ { kind: 'set', path: [ 'nowhere', 'at', 'all' ], value } as const ] : []),
+        ],
+      } ],
+      actions: [],
+    });
+
+    /**
+     * Reads an event's speed from the hub's map.
+     * @param {DocumentHub} hub The hub.
+     * @param {number} id The event.
+     * @returns {number | undefined} The speed.
+     */
+    const speedIn = (hub: DocumentHub, id: number) => eventIn(hub, id)?.pages[0].moveSpeed;
+
+    /**
+     * A hub holding two walkers at speed 3 and a third, not selected, at speed 3 too.
+     * @returns {{ hub: DocumentHub, drag: QuickFieldDrag }} The hub, and a drag of the first two walkers' speed.
+     */
+    const walkers = () =>
+    {
+      const { hub } = hubWith([ 1, 2, 3 ].map(id => event(id, [ page([]) ])));
+      const drag = new QuickFieldDrag(hub, 1, [ 1, 2 ], speedOf, { events: [], names: null }, 'speed');
+      return { hub, drag };
+    };
+
+    it('shows each value on the map at once, and records the last as one step when it ends', () =>
+    {
+      // Arrange.
+      const { hub, drag } = walkers();
+
+      // Act.
+      drag.move(4);
+      drag.move(5);
+      const showing = [ speedIn(hub, 1), speedIn(hub, 2), hub.history(mapHistoryKey(1)).rows.length ];
+      const step = drag.commit();
+      hub.undo(mapHistoryKey(1));
+
+      // Assert: the walker not selected stays at 3, and the undo takes both back from 5 in one go.
+      expect([ drag.key, showing, step?.label, speedIn(hub, 3), [ speedIn(hub, 1), speedIn(hub, 2) ] ])
+        .toStrictEqual([ 'speed', [ 5, 5, 0 ], 'Change speed', 3, [ 3, 3 ] ]);
+    });
+
+    it('records nothing for a drag that ends where it began', () =>
+    {
+      // Arrange.
+      const { hub, drag } = walkers();
+
+      // Act.
+      drag.move(6);
+      drag.move(3);
+      const step = drag.commit();
+
+      // Assert.
+      expect([ step, speedIn(hub, 1), hub.history(mapHistoryKey(1)).rows ])
+        .toStrictEqual([ null, 3, [] ]);
+    });
+
+    it('puts back everything it showed when cancelled', () =>
+    {
+      // Arrange.
+      const { hub, drag } = walkers();
+
+      // Act.
+      drag.move(6);
+      drag.cancel();
+
+      // Assert.
+      expect([ speedIn(hub, 1), speedIn(hub, 2), hub.history(mapHistoryKey(1)).rows ])
+        .toStrictEqual([ 3, 3, [] ]);
+    });
+
+    it('takes no more values once it has ended, and ends only once', () =>
+    {
+      // Arrange.
+      const { hub, drag } = walkers();
+      drag.move(6);
+      drag.commit();
+
+      // Act.
+      drag.move(7);
+      const again = drag.commit();
+      drag.cancel();
+
+      // Assert.
+      expect([ speedIn(hub, 1), again, hub.history(mapHistoryKey(1)).rows.length ])
+        .toStrictEqual([ 6, null, 1 ]);
+    });
+
+    it('puts the map back as it was before the drag when a value cannot be written, and says why', () =>
+    {
+      // Arrange: 99 writes the speed, then a change the map cannot take.
+      const { hub, drag } = walkers();
+      drag.move(6);
+
+      // Act.
+      let failure = '';
+      try
+      {
+        drag.move(99);
+      }
+      catch (error)
+      {
+        failure = (error as Error).message;
+      }
+      const step = drag.commit();
+
+      // Assert.
+      expect([ failure, speedIn(hub, 1), speedIn(hub, 2), step ])
+        .toStrictEqual([ 'no container at events/1/nowhere/at', 3, 3, null ]);
+    });
+
+    it('keeps the map free while it shows a value every selected event already holds', () =>
+    {
+      // Arrange: the walkers already move at 3.
+      const { hub, drag } = walkers();
+
+      // Act.
+      drag.move(3);
+      const painted = hub.edit('Paint', [ mapHistoryKey(1) ], tx =>
+      {
+        tx.set('map:1', [ 'events', 3, 'pages', 0, 'moveSpeed' ], 5);
+      });
+
+      // Assert: the map was free for the next edit, and the drag has nothing to record.
+      expect([ painted?.label, speedIn(hub, 3), drag.commit() ])
+        .toStrictEqual([ 'Paint', 5, null ]);
+    });
+
+    it('opens nothing for a setting none of the selected events has', () =>
+    {
+      // Arrange: the walkers have no "pace".
+      const { hub } = walkers();
+      const drag = new QuickFieldDrag(hub, 1, [ 1, 2 ], speedOf, { events: [], names: null }, 'pace');
+
+      // Act.
+      drag.move(6);
+      const painted = hub.edit('Paint', [ mapHistoryKey(1) ], tx =>
+      {
+        tx.set('map:1', [ 'events', 3, 'pages', 0, 'moveSpeed' ], 5);
+      });
+
+      // Assert: the map was free for the next edit.
+      expect([ painted?.label, drag.commit() ])
+        .toStrictEqual([ 'Paint', null ]);
     });
   });
 

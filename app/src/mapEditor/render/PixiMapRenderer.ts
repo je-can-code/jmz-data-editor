@@ -2,11 +2,17 @@ import { Container, Graphics, Rectangle, Text, WebGLRenderer, type TextureSource
 import type { DocumentChange } from '../core/model/EditorDocument.ts';
 import type { MapDocument } from '../core/model/MapDocument.ts';
 import type { PassabilityRule } from '../core/modules/PluginModule.ts';
+import type { PageRule } from '../core/pageRule/pageRule.ts';
+import { ShownPages } from '../core/pageRule/ShownPages.ts';
+import type { GamePreview } from '../core/preview/GamePreview.ts';
 import { cellAtPoint, panBy, screenToWorld, TILE_SIZE, type Camera, type MapCell, type ScreenPoint } from '../core/renderer/camera.ts';
 import { FrameTimeRecorder, type FrameTimings } from '../core/renderer/FrameTimeRecorder.ts';
+import type { JsonValue } from '../core/model/json.ts';
+import type { LightingLayerDefinition, ScreenTone } from '../core/renderer/lightingLayer.ts';
 import {
   GAME_LOOK,
   NO_OVERLAY_STATE,
+  type FootprintReader,
   type LayerVisibility,
   type MapContextMenu,
   type MapRenderer,
@@ -17,8 +23,11 @@ import {
   type RendererInfo,
   type TextureSource as ImageTextureSource,
   type TilesetTextures,
+  type WorldRect,
 } from '../core/renderer/MapRenderer.ts';
 import { precisePoint } from '../core/renderer/precisePoint.ts';
+import { castsTone } from '../core/renderer/screenTone.ts';
+import type { SkyWeather, WeatherLayerDefinition } from '../core/renderer/weatherLayer.ts';
 import {
   centerCamera,
   fitCamera,
@@ -37,16 +46,21 @@ import { animationFrameAt, animationVector, engineFramesAt } from './engine/anim
 import { cellPassage, passabilityQuery, tileEventsByCell } from './engine/passability.ts';
 import type { TileSource } from './engine/spotWriter.ts';
 import { FrameLoop, type FrameWindow } from './FrameLoop.ts';
+import { lightingClockAt } from './lightingClock.ts';
 import { AtlasChunks } from './scene/AtlasChunks.ts';
 import { EventLayer } from './scene/EventLayer.ts';
 import { GhostTiles } from './scene/GhostTiles.ts';
+import { LightingLayers } from './scene/LightingLayers.ts';
 import { markerAtlasSource } from './scene/markerAtlas.ts';
 import { ModuleOverlays } from './scene/ModuleOverlays.ts';
 import { drawPassageAtlas, drawRegionAtlas, passageMarkIndex } from './scene/overlayAtlases.ts';
 import { ParallaxLayer } from './scene/ParallaxLayer.ts';
 import { drawGrid, drawPointerOverlays, drawSelection } from './scene/pointerOverlays.ts';
 import { TileChunks } from './scene/TileChunks.ts';
+import { ToneFilter } from './scene/ToneFilter.ts';
+import { WeatherLayers } from './scene/WeatherLayers.ts';
 import { textureSourceFor } from './textureImages.ts';
+import { weatherClockAt } from './weatherClock.ts';
 
 /**
  * What a frame did, for anything timing the renderer.
@@ -78,6 +92,21 @@ type RendererStats = {
   readonly eventMarkers: number;
 
   /**
+   * Events showing the area their page covers as a footprint.
+   */
+  readonly eventFootprints: number;
+
+  /**
+   * Events no page holds for at the clock's time, drawn faded.
+   */
+  readonly fadedEvents: number;
+
+  /**
+   * Events whose page can turn as the clock moves, the only ones judged again when it does.
+   */
+  readonly eventsFollowingClock: number;
+
+  /**
    * Pictures still loading: character sheets, and the parallax.
    */
   readonly loadingImages: number;
@@ -85,18 +114,35 @@ type RendererStats = {
 };
 
 /**
- * The world's layers, bottom to top: the engine's black behind the map, the parallax, the tiles below characters,
- * the events in their three priorities around the tiles above characters, the lighting P9 draws, then the editor's
- * own: the markers of events that draw no picture, which neither the tiles above characters nor the dark of a lit map
- * may hide, the dimming and highlighted layer, and the overlays, the ghosts and the pointer's own marks, then the
- * selection over them all, so an event shows as selected while the pointer still rests on it after the click that
- * picked it.
+ * The world's layers, bottom to top: what the game itself draws and tones (the engine's black behind the map, the
+ * parallax, the tiles below characters, the events in their three priorities around the tiles above characters, and the
+ * weather the plugin modules draw over all of them, all held in {@link game}), the lighting the plugin modules draw, then
+ * the editor's own: the markers of events that draw no picture, over the footprints of events whose pages cover more
+ * tiles than their own, which neither the tiles above characters nor the dark of a lit map may hide, the dimming and
+ * highlighted layer, and the overlays, the ghosts and the pointer's own marks, then the selection over them all, so an
+ * event shows as selected while the pointer still rests on it after the click that picked it.
  */
 type Slots = {
+  /**
+   * Everything the game draws beneath its lighting, which a screen tone casts its colour over, as the engine's base
+   * sprite holds it, and nothing of the editor's.
+   */
+  readonly game: Container;
   readonly backdrop: Graphics;
   readonly parallax: Container;
   readonly lowerTiles: Container;
   readonly upperTiles: Container;
+
+  /**
+   * The weather the plugin modules draw, last inside what the game tones, as J-Weather appends its plane to the base
+   * sprite after the tilemap: over every tile and event, coloured by the screen's tone, and beneath the lighting's dark.
+   */
+  readonly weather: Container;
+
+  /**
+   * The map's own rectangle, which the weather is clipped to, so nothing of it falls on the editor around the map.
+   */
+  readonly weatherClip: Graphics;
   readonly lighting: Container;
   readonly markers: Container;
   readonly dim: Graphics;
@@ -196,9 +242,14 @@ const scheduleOnTimers = (callback: () => void, delayMs: number): (() => void) =
  * edit, and draws a frame only when something changed. Frames are scheduled on whichever window hosts it, so a
  * torn-out map keeps drawing.
  *
- * The game look is the default: water animates, the parallax scrolls, events stand where the engine stands them and
- * auto-shadows stay off, since the game never draws them. The camera is its own: the wheel zooms about the pointer,
- * the right button held pans, and a right click that does not move raises a context-menu event.
+ * The game look is the default: water animates, the parallax scrolls, lights run their effects, the weather falls over
+ * the map where the game draws it, toned with the map and beneath the dark, events stand where the engine stands them and
+ * auto-shadows stay off, since the game never draws them. The lighting draws at the hour of the
+ * window's clock, and a tone it casts, such as the sky's colour at that hour, colours what the game tones, through the
+ * engine's own colour arithmetic, and none of the editor's overlays. Each event draws the page the page rule handed over
+ * picks at that hour, the page a fresh save would show, and its light comes from that page too; moving the clock judges
+ * again only the events whose pages ask something of it, and draws again only those it turned. The camera is its own: the wheel zooms about the
+ * pointer, the right button held pans, and a right click that does not move raises a context-menu event.
  *
  * Its WebGL context is held only while the view is on screen, through a {@link ContextKeeper}: a view behind another
  * tab lets it go and asks for it back when shown, keeping its map, its camera and everything else, and a context the
@@ -238,6 +289,47 @@ class PixiMapRenderer implements MapRenderer
   #parallax: ParallaxLayer;
 
   #modules = new ModuleOverlays();
+
+  #lighting = new LightingLayers(TILE_SIZE, tone => this.#castTone(tone));
+
+  #weather = new WeatherLayers(TILE_SIZE);
+
+  /**
+   * What the sky is doing, which the weather is drawn under; null while nothing drives a sky.
+   */
+  #weatherSky: SkyWeather | null = null;
+
+  /**
+   * The tone the lighting casts over what the game tones, or null while it casts none; it shows only while the lighting
+   * does.
+   */
+  #tone: ScreenTone | null = null;
+
+  /**
+   * The filter casting {@link #tone}, made the first time a tone shows, and kept for the life of the renderer.
+   */
+  #toneFilter: ToneFilter | null = null;
+
+  /**
+   * Whether the filter is on what the game tones now.
+   */
+  #toning = false;
+
+  /**
+   * The time of day the window's clock shows, in minutes past midnight, which the lighting reads its sky at.
+   */
+  #timeOfDay = 0;
+
+  /**
+   * The page each event shows at the clock's time, by the page rule handed over; every event's first until one is.
+   */
+  #pages = new ShownPages();
+
+  /**
+   * How many times drawing has started on a live context: once for the first, and once more each time the graphics
+   * card gives the context back. The lighting reads it to know its render textures hold nothing.
+   */
+  #contexts = 0;
 
   #atlases: { regions: TextureSource; passability: TextureSource } | null = null;
 
@@ -344,11 +436,14 @@ class PixiMapRenderer implements MapRenderer
     this.#events = new EventLayer(invalidate);
     this.#parallax = new ParallaxLayer(invalidate);
     this.#slots = {
+      game: new Container(),
       backdrop: new Graphics(),
       parallax: this.#parallax.layer,
       lowerTiles: new Container(),
       upperTiles: new Container(),
-      lighting: new Container(),
+      weather: this.#weather.layer,
+      weatherClip: this.#weather.clip,
+      lighting: this.#lighting.layer,
       markers: new Container(),
       dim: new Graphics(),
       highlightTiles: new Container(),
@@ -367,11 +462,13 @@ class PixiMapRenderer implements MapRenderer
     this.#slots.pointerLabel.anchor.set(0, 1);
     this.#slots.pointerLabel.visible = false;
 
-    // the engine's order: lower tiles, events below and with characters, upper tiles, events above characters. The
-    // markers go over the lighting, so an event no picture shows stays in sight on the darkest map, and the selection
-    // goes over the hover, which would otherwise hide it on the very tile just clicked.
+    // the engine's order: lower tiles, events below and with characters, upper tiles, events above characters, then the
+    // weather, all of it in the one container a screen tone colours, as the engine's base sprite holds it; the weather's
+    // clip rides beside it, so it moves and scales with the world. The markers go over the lighting, so an event no
+    // picture shows stays in sight on the darkest map, and the selection goes over the hover, which would otherwise hide
+    // it on the very tile just clicked.
     const { slots } = this;
-    this.#world.addChild(
+    slots.game.addChild(
       slots.backdrop,
       slots.parallax,
       slots.lowerTiles,
@@ -379,6 +476,11 @@ class PixiMapRenderer implements MapRenderer
       this.#events.same,
       slots.upperTiles,
       this.#events.above,
+      slots.weatherClip,
+      slots.weather,
+    );
+    this.#world.addChild(
+      slots.game,
       slots.lighting,
       slots.markers,
       slots.dim,
@@ -393,7 +495,9 @@ class PixiMapRenderer implements MapRenderer
       slots.pointerLabel,
     );
     slots.ghosts.addChild(this.#events.ghosts);
-    slots.markers.addChild(this.#events.markers);
+
+    // the footprints sit beneath the markers they join, each marker in its footprint's corner.
+    slots.markers.addChild(this.#events.footprints, this.#events.markers);
     this.#stage.addChild(this.#world);
     this.#applyVisibility();
   }
@@ -408,12 +512,179 @@ class PixiMapRenderer implements MapRenderer
   }
 
   /**
-   * The container P9's lighting draws into: above the map and its events, below the editor's overlays.
+   * The container the plugin modules' lighting draws into: above the map and its events, below the editor's overlays,
+   * shown while the layer visibility's lighting is on.
    * @returns {Container} The layer.
    */
   get lightingLayer(): Container
   {
     return this.#slots.lighting;
+  }
+
+  /**
+   * Chooses what the plugin modules draw into the lighting layer, making each drawing once and keeping it for as long
+   * as its lighting layer is handed over again; one no longer handed over is let go.
+   * @param {readonly LightingLayerDefinition[]} definitions The lighting layers of the active modules.
+   */
+  setLightingLayers(definitions: readonly LightingLayerDefinition[]): void
+  {
+    this.#lighting.setDefinitions(definitions);
+    this.#needsRender = true;
+  }
+
+  /**
+   * The container the plugin modules' weather draws into: last inside what the game tones, over the map and its events
+   * and beneath the lighting, shown while the layer visibility's weather is on.
+   * @returns {Container} The layer.
+   */
+  get weatherLayer(): Container
+  {
+    return this.#slots.weather;
+  }
+
+  /**
+   * Chooses what the plugin modules draw into the weather layer: a drawing is made only on a map its weather layer draws
+   * on, and kept for as long as that weather layer is handed over again; one no longer handed over is let go, and the
+   * view draws again without it.
+   * @param {readonly WeatherLayerDefinition[]} definitions The weather layers of the active modules.
+   */
+  setWeatherLayers(definitions: readonly WeatherLayerDefinition[]): void
+  {
+    if (this.#weather.setDefinitions(definitions))
+    {
+      this.#needsRender = true;
+    }
+  }
+
+  /**
+   * Says what the sky is doing, which the weather is drawn under: an outdoor map tagged with a look rises and falls with
+   * it, and one with no look of its own shows the sky's. It stays null, which is J-Weather on its own, until the view
+   * follows a sky the author picked; the weather is asked to draw again in the next frame.
+   * @param {SkyWeather | null} sky What the sky is doing, or null for no sky.
+   */
+  setWeatherSky(sky: SkyWeather | null): void
+  {
+    this.#weatherSky = sky;
+    this.#weather.markStale();
+    this.#needsRender = true;
+  }
+
+  /**
+   * What the sky is doing, as last said.
+   * @returns {SkyWeather | null} The sky, or null for none.
+   */
+  get weatherSky(): SkyWeather | null
+  {
+    return this.#weatherSky;
+  }
+
+  /**
+   * Starts the weather over, as on arriving at the map: every weather drawing is let go, and each weather layer drawing
+   * on the map is made afresh and settles as the game's does, in the next frame, for the part of the map the view shows
+   * then.
+   */
+  resetWeather(): void
+  {
+    this.#weather.reset();
+    this.#needsRender = true;
+  }
+
+  /**
+   * Says what the weather shows, as each drawing describes itself, for the parity check.
+   * @returns {JsonValue[]} What each weather drawing shows.
+   */
+  weatherDescriptions(): JsonValue[]
+  {
+    return this.#weather.describe();
+  }
+
+  /**
+   * Sets the time of day the window's clock shows, which the lighting reads the sky at and the page rule picks each
+   * event's page at. Nothing draws for it at once: the events whose pages ask something of the clock are judged again,
+   * and those now showing another page are drawn again in the next frame, with the lighting asked to draw, since their
+   * lights may have come or gone; the lighting is handed the new time in that frame too, and only what the hour changed
+   * is drawn again, which within one hour may be nothing at all.
+   * @param {number} minutes The time of day, in minutes past midnight.
+   */
+  setTimeOfDay(minutes: number): void
+  {
+    this.#timeOfDay = minutes;
+    this.#drawTurned(this.#pages.setTime(minutes));
+  }
+
+  /**
+   * Sets the season the window's clock shows, which moves the date the page rule picks each event's page at. Nothing
+   * draws for it at once: the events whose pages read the date are judged again, and those now showing another page are
+   * drawn again in the next frame, with the lighting asked to draw, since their lights may have come or gone. A season
+   * no event's pages read draws nothing at all.
+   * @param {number | null} season The season, or null for the season the game starts in.
+   */
+  setSeason(season: number | null): void
+  {
+    this.#drawTurned(this.#pages.setSeason(season));
+  }
+
+  /**
+   * The season every event's pages are judged at, as last set.
+   * @returns {number | null} The season, or null for the season the game starts in.
+   */
+  get season(): number | null
+  {
+    return this.#pages.season;
+  }
+
+  /**
+   * Sets the preview every event's pages are judged against: the switches, variables and the rest the author set to see
+   * the game further along than a fresh save. Nothing draws for it at once: the events whose pages read something the
+   * preview changed are judged again, and those now showing another page are drawn again in the next frame, with the
+   * lighting asked to draw, since their lights may have come or gone. A preview changing nothing any event reads draws
+   * nothing at all.
+   * @param {GamePreview} preview The preview.
+   */
+  setPreview(preview: GamePreview): void
+  {
+    this.#drawTurned(this.#pages.setPreview(preview));
+  }
+
+  /**
+   * The preview every event's pages are judged against, as last set.
+   * @returns {GamePreview} The preview.
+   */
+  get preview(): GamePreview
+  {
+    return this.#pages.preview;
+  }
+
+  /**
+   * Picks each event's page by a page rule, the game's own with the plugin modules' conditions, at the clock's time and
+   * the preview: every event is judged afresh and drawn again in the next frame, and the lighting asked to draw.
+   * @param {PageRule | null} rule The rule, or null to show every event's first page, as MZ's own editor does.
+   */
+  setPageRule(rule: PageRule | null): void
+  {
+    this.#pages.setRule(rule);
+    this.#events.markChanged(null);
+    this.#eventsDirty = true;
+    this.#selectionDirty = true;
+    this.#lighting.markStale();
+  }
+
+  /**
+   * The time of day the lighting reads the sky at, as last set.
+   * @returns {number} The time of day, in minutes past midnight.
+   */
+  get timeOfDay(): number
+  {
+    return this.#timeOfDay;
+  }
+
+  /**
+   * The tone the lighting casts over what the game tones, whether or not the lighting shows.
+   * @returns {ScreenTone | null} The tone, or null while it casts none.
+   */
+  get tone(): ScreenTone | null
+  {
+    return this.#tone;
   }
 
   /**
@@ -455,6 +726,9 @@ class PixiMapRenderer implements MapRenderer
       chunks: scene === null ? 0 : scene.grid.columns * scene.grid.rows,
       eventSprites: this.#events.spriteCount,
       eventMarkers: this.#events.markerCount,
+      eventFootprints: this.#events.footprintCount,
+      fadedEvents: this.#events.fadedCount,
+      eventsFollowingClock: this.#pages.followingClock,
       loadingImages: this.#events.pendingLoads + (this.#parallax.loading ? 1 : 0),
       moduleOverlays: this.#modules.count,
     };
@@ -635,6 +909,14 @@ class PixiMapRenderer implements MapRenderer
     this.#selectionDirty = true;
   }
 
+  setEventFootprints(read: FootprintReader): void
+  {
+    // every event is rebuilt in the next frame, and the selection with it, since a selected event's footprint is outlined.
+    this.#events.setFootprintReader(read);
+    this.#eventsDirty = true;
+    this.#selectionDirty = true;
+  }
+
   frameTimings(): FrameTimings
   {
     return this.#frames.summary();
@@ -746,7 +1028,8 @@ class PixiMapRenderer implements MapRenderer
 
   /**
    * Holds the game look's animation still at one moment, or lets it run again: water at an animation step, and a
-   * scrolling parallax a number of engine frames in. The parity check uses it to match a frame of the game.
+   * scrolling parallax and the lighting's clock a number of engine frames in. The parity check uses it to match a frame
+   * of the game.
    * @param {{ step: number, frames: number } | null} moment The moment, or null to follow the clock.
    */
   holdAnimation(moment: { step: number; frames: number } | null): void
@@ -805,7 +1088,7 @@ class PixiMapRenderer implements MapRenderer
     const saved = { camera: this.#camera, view: this.#view };
     this.#camera = { x: rect.x, y: rect.y, zoom: 1 };
     this.#view = { width: rect.width, height: rect.height };
-    this.#prepareFrame(performance.now());
+    this.#prepareFrame(performance.now(), pixi);
     this.#world.scale.set(1);
     this.#world.position.set(-rect.x, -rect.y);
     try
@@ -839,6 +1122,12 @@ class PixiMapRenderer implements MapRenderer
     this.#events.destroy();
     this.#parallax.destroy();
     this.#modules.destroy();
+    this.#lighting.destroy();
+    this.#weather.destroy();
+    this.#slots.game.filters = null;
+    this.#toning = false;
+    this.#toneFilter?.destroy();
+    this.#toneFilter = null;
     [ ...this.#sheetSources, ...this.#retiredSources ].forEach(source => source?.destroy());
     this.#sheetSources = [];
     this.#retiredSources = [];
@@ -963,7 +1252,8 @@ class PixiMapRenderer implements MapRenderer
 
   /**
    * Draws again on a context that has just come up. Pixi uploads every texture and buffer afresh as the first frame
-   * draws, and edits made meanwhile, in this window or another, are already marked in the chunks they touched.
+   * draws, and edits made meanwhile, in this window or another, are already marked in the chunks they touched. What
+   * the lighting drew into render textures went with the old context, so it draws again too, told the context is new.
    */
   #resumeDrawing(): void
   {
@@ -972,6 +1262,9 @@ class PixiMapRenderer implements MapRenderer
     this.#needsRender = true;
     this.#selectionDirty = true;
     this.#pointerDirty = true;
+    this.#contexts += 1;
+    this.#lighting.markStale();
+    this.#weather.markStale();
     this.#loop.start();
   }
 
@@ -1250,6 +1543,9 @@ class PixiMapRenderer implements MapRenderer
     this.#mountScene(scene);
     this.#drawMapBound(source.width, source.height);
     this.#tileEvents = tileEventsByCell(document);
+
+    // a map opened or swapped is read afresh, every event at the clock's time.
+    this.#pages.forget(null);
     this.#events.setContext({
       document,
       flags: source.flags,
@@ -1257,6 +1553,7 @@ class PixiMapRenderer implements MapRenderer
       images: this.#images,
       tileSize: TILE_SIZE,
       markerAtlas: () => this.#markerAtlasSource(),
+      pages: this.#pages,
     });
     this.#parallax.setMap({
       name: document.property('parallaxName'),
@@ -1268,6 +1565,8 @@ class PixiMapRenderer implements MapRenderer
     this.#animationStart = performance.now();
     this.#animationStep = -1;
     this.#modulesDirty = true;
+    this.#lighting.markStale();
+    this.#weather.markStale();
     this.#selectionDirty = true;
     this.#pointerDirty = true;
     this.#ghostsDirty = true;
@@ -1345,7 +1644,8 @@ class PixiMapRenderer implements MapRenderer
   }
 
   /**
-   * Draws what is sized to the map: the black behind it, the dimming, and the grid.
+   * Draws what is sized to the map: the black behind it, the dimming, and the grid. The weather's clip is drawn by the
+   * weather itself, and only on a map with weather to clip.
    * @param {number} width The map's width in tiles.
    * @param {number} height The map's height in tiles.
    */
@@ -1396,6 +1696,8 @@ class PixiMapRenderer implements MapRenderer
       ? Number(highlighted.slice('tiles'.length)) - 1
       : null;
     slots.lighting.visible = layers.lighting;
+    slots.weather.visible = layers.weather;
+    this.#applyTone();
     slots.parallax.visible = layers.parallax;
     slots.dim.visible = highlight !== null;
     slots.grid.visible = this.#isOn('grid');
@@ -1407,8 +1709,12 @@ class PixiMapRenderer implements MapRenderer
       group.visible = layers.events;
     });
 
-    // the markers show the events no picture shows, so they go with the events, and with nothing of the editor's.
+    // the markers show the events no picture shows, so they go with the events, and with nothing of the editor's; the
+    // footprints joined to them and the events no page holds for go with them, so with the markers off a map shows only
+    // what the game draws.
     this.#events.markers.visible = layers.events && this.#isOn('markers');
+    this.#events.footprints.visible = this.#events.markers.visible;
+    this.#events.setFadedShown(this.#isOn('markers'));
     const scene = this.#scene;
     if (scene !== null)
     {
@@ -1433,6 +1739,54 @@ class PixiMapRenderer implements MapRenderer
   }
 
   /**
+   * Keeps the tone the lighting casts, and shows it.
+   * @param {ScreenTone | null} tone The tone, or null for none.
+   */
+  #castTone(tone: ScreenTone | null): void
+  {
+    this.#tone = tone;
+    this.#applyTone();
+    this.#needsRender = true;
+  }
+
+  /**
+   * Casts the lighting's tone over what the game tones while the lighting shows and the tone changes anything, and takes
+   * it off otherwise. Nothing filters the map while there is no tone to cast, so a map in plain daylight, or with the
+   * Lighting switch off, costs no more to draw than it ever did.
+   */
+  #applyTone(): void
+  {
+    const { game, lighting } = this.#slots;
+    const tone = this.#tone;
+    if (lighting.visible === false || castsTone(tone) === false)
+    {
+      if (this.#toning)
+      {
+        game.filters = null;
+        this.#toning = false;
+      }
+
+      return;
+    }
+
+    // the filter is made once, the first time a tone shows; after that only its tone changes.
+    if (this.#toneFilter === null)
+    {
+      this.#toneFilter = new ToneFilter(tone);
+    }
+    else
+    {
+      this.#toneFilter.tone = tone;
+    }
+
+    if (this.#toning === false)
+    {
+      game.filters = [ this.#toneFilter ];
+      this.#toning = true;
+    }
+  }
+
+  /**
    * Hears a change to the document and marks what it touched.
    * @param {DocumentChange} change The change.
    */
@@ -1442,11 +1796,15 @@ class PixiMapRenderer implements MapRenderer
     const effect = changeEffect(change);
 
     // the modules draw from events and regions, so a tile edit that leaves the regions alone never redraws them: a
-    // brush stroke would otherwise redraw every sight ring and light on the map at every step.
+    // brush stroke would otherwise redraw every sight ring and light on the map at every step. The lighting and the
+    // weather read no tiles at all, so no tile edit ever asks either to draw.
     if (effect.kind !== 'tiles' || this.#touchesRegions(effect.indices))
     {
       this.#modulesDirty = true;
     }
+
+    this.#lighting.hear(effect);
+    this.#weather.hear(effect);
 
     switch (effect.kind)
     {
@@ -1458,9 +1816,12 @@ class PixiMapRenderer implements MapRenderer
         this.#markTiles(effect.indices);
         break;
       case 'event':
+        // a changed event is judged again, since its pages, or whether it follows the clock, may have changed.
+        this.#pages.forget(effect.id);
         this.#eventsChanged(effect.id);
         break;
       case 'events':
+        this.#pages.forget(null);
         this.#eventsChanged(null);
         break;
       case 'overlays':
@@ -1517,6 +1878,25 @@ class PixiMapRenderer implements MapRenderer
   }
 
   /**
+   * Draws again, in the next frame, the events a move of the clock, of its season or of the preview turned to another
+   * page, asking the lighting to draw with them, since their lights may have come or gone, and the selection, since a
+   * selected event's footprint may have changed with its page; when it turned none, nothing is asked of anything.
+   * @param {readonly number[]} turned The ids of the events now showing another page.
+   */
+  #drawTurned(turned: readonly number[]): void
+  {
+    if (turned.length === 0)
+    {
+      return;
+    }
+
+    turned.forEach(id => this.#events.markChanged(id));
+    this.#eventsDirty = true;
+    this.#selectionDirty = true;
+    this.#lighting.markStale();
+  }
+
+  /**
    * Redraws the events changed since the last frame, and rebuilds passability only when the tile-image events that
    * block steps are not where they were.
    */
@@ -1552,7 +1932,7 @@ class PixiMapRenderer implements MapRenderer
     }
 
     const elapsed = Math.max(0, now - this.#animationStart);
-    const animate = this.#visibility.animateWater;
+    const { animate } = this.#visibility;
     const fixed = this.#fixedAnimation;
     const step = fixed?.step ?? (animate ? animationFrameAt(elapsed) : 0);
     const frames = fixed?.frames ?? (animate ? engineFramesAt(elapsed) : 0);
@@ -1591,7 +1971,12 @@ class PixiMapRenderer implements MapRenderer
         const event = document?.event(id) ?? null;
         return event === null ? null : { x: event.x, y: event.y };
       };
-      drawSelection(this.#slots.selection, this.#overlayState, shown, eventCell, TILE_SIZE);
+
+      // a selected event's footprint is outlined while footprints show, so picking an exit strip at its far end shows the
+      // whole strip picked.
+      const footprints = this.#events.footprints.visible;
+      const eventFootprint = (id: number) => (footprints ? this.#events.footprintOf(id) : null);
+      drawSelection(this.#slots.selection, this.#overlayState, shown, eventCell, TILE_SIZE, eventFootprint);
       redrew = true;
     }
 
@@ -1617,11 +2002,13 @@ class PixiMapRenderer implements MapRenderer
 
   /**
    * Brings the scene up to date for a frame: rebuilds the map when it went stale, places a new map whole on screen,
-   * moves the animation, culls to the camera and rebuilds dirty chunks and overlays.
+   * moves the animation, culls to the camera, rebuilds dirty chunks and overlays, and lets the lighting and the weather
+   * draw when they are due, or move on with the clock when they are not.
    * @param {number} now The frame's time.
+   * @param {WebGLRenderer} pixi The renderer the frame draws with, which the lighting may draw into textures with.
    * @returns {{ changed: boolean, rebuiltChunks: number }} Whether anything changed, and how many tile chunks rebuilt.
    */
-  #prepareFrame(now: number): { changed: boolean; rebuiltChunks: number }
+  #prepareFrame(now: number, pixi: WebGLRenderer): { changed: boolean; rebuiltChunks: number }
   {
     if (this.#mapDirty)
     {
@@ -1645,9 +2032,12 @@ class PixiMapRenderer implements MapRenderer
     let changed = this.#tickAnimation(now);
     let rebuiltChunks = 0;
     const scene = this.#scene;
+
+    // the part of the map this frame shows, which the tiles are culled to and the lighting may leave alone outside of.
+    const view = visibleWorld(this.#camera, this.#view);
     if (scene !== null)
     {
-      const range: ChunkRange = chunkRangeFor(scene.grid, visibleWorld(this.#camera, this.#view), TILE_SIZE);
+      const range: ChunkRange = chunkRangeFor(scene.grid, view, TILE_SIZE);
       scene.tiles.cull(range);
       scene.regions?.cull(range);
       scene.passability?.cull(range);
@@ -1657,7 +2047,42 @@ class PixiMapRenderer implements MapRenderer
     }
 
     changed = this.#refreshOverlays() || changed;
+    if (document !== null)
+    {
+      changed = this.#drawLightAndWeather(document, now, pixi, view) || changed;
+    }
+
     return { changed, rebuiltChunks };
+  }
+
+  /**
+   * Lets the lighting draw, or move on with the clock, and the weather likewise. A map without weather costs the frame
+   * nothing: the weather is handed a frame only while it holds a drawing, or is due to ask whether the map has any.
+   * @param {MapDocument} document The map shown.
+   * @param {number} now The frame's time.
+   * @param {WebGLRenderer} pixi The renderer the frame draws with.
+   * @param {WorldRect} view The part of the map the frame shows.
+   * @returns {boolean} True when either changed what it shows.
+   */
+  #drawLightAndWeather(document: MapDocument, now: number, pixi: WebGLRenderer, view: WorldRect): boolean
+  {
+    const clock = lightingClockAt(now, this.#fixedAnimation, this.#visibility.animate, this.#timeOfDay);
+    const lit = this.#lighting.draw({ document, renderer: pixi, context: this.#contexts, clock, pages: this.#pages, view });
+    if (this.#weather.needsFrame === false)
+    {
+      return lit;
+    }
+
+    const fell = this.#weather.draw({
+      document,
+      renderer: pixi,
+      context: this.#contexts,
+      clock: weatherClockAt(now, this.#fixedAnimation, this.#visibility.animate),
+      view,
+      images: this.#images,
+      sky: this.#weatherSky,
+    });
+    return lit || fell;
   }
 
   /**
@@ -1674,7 +2099,7 @@ class PixiMapRenderer implements MapRenderer
 
     const started = performance.now();
     this.#beforeFrameListeners.forEach(listener => listener(time));
-    const { changed, rebuiltChunks } = this.#prepareFrame(started);
+    const { changed, rebuiltChunks } = this.#prepareFrame(started, pixi);
     if (changed === false && this.#needsRender === false)
     {
       return;

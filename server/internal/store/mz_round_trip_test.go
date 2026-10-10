@@ -78,6 +78,147 @@ func TestSaveInMzLayoutReproducesEveryFile(t *testing.T) {
 	})
 }
 
+// TestUpdateInFileLayoutKeepsSystemJsonAsEitherAppLeftIt is the promise the switch and variable
+// window rests on, held against the game's real System.json, read and never written, in both layouts
+// it lives in: on one line, as MZ keeps it, and indented, as the data editor's own save leaves it,
+// which is made here from the real file, into a temporary folder, by that very save. In each, a save
+// of the unchanged settings gives back the file byte for byte, and renaming a switch changes that one
+// name in the file, and every other byte stays as it was.
+//
+// The switch renamed is the first whose name the file holds exactly once, so the file with that name
+// replaced in place is exactly the file a rename must write, whatever else the game has renamed
+// since. The new name carries a `<`, an `&`, quotes and characters beyond ASCII, which the two apps
+// spell differently: the saved line must spell them as the rest of its own file does. The body each
+// save is made from has every object's keys sorted, as a client keeping no order would send them, so
+// the file's key order comes from the file being replaced, as on a real save.
+func TestUpdateInFileLayoutKeepsSystemJsonAsEitherAppLeftIt(t *testing.T) {
+	path := filepath.Join(gametest.DataDir(t), "System.json")
+	original, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	system, err := Load[*db.RpgSystem](path)
+	if err != nil {
+		t.Fatalf("System.json did not load: %v", err)
+	}
+
+	// the data editor's POST /api/system save of the same settings: its own writer, into a temporary folder.
+	indentedPath := filepath.Join(t.TempDir(), "System.json")
+	if err := Save(system, indentedPath); err != nil {
+		t.Fatal(err)
+	}
+	indented, err := os.ReadFile(indentedPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.HasPrefix(indented, []byte("{\n  \"advanced\": {\n    \"gameId\": ")) == false {
+		t.Fatalf("the data editor no longer saves System.json indented as this test expects:\n%s", excerpt(indented, 0))
+	}
+
+	cases := []struct {
+		name    string
+		file    []byte
+		spell   func(t *testing.T, name string) []byte
+		renamed string
+	}{
+		{name: "MZ's one line", file: original, spell: quoted, renamed: `"Vampire's <gone> & \"dusted\" — ✓"`},
+		{name: "the data editor's indent", file: indented, spell: goQuoted, renamed: "\"Vampire's \\u003cgone\\u003e \\u0026 \\\"dusted\\\" — ✓\""},
+	}
+
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			// Arrange- the file where a save may write, and the first named switch whose name, spelled as the file
+			// spells it, appears nowhere else in it.
+			target := filepath.Join(t.TempDir(), "System.json")
+			if err := os.WriteFile(target, testCase.file, 0644); err != nil {
+				t.Fatal(err)
+			}
+			switchId := 0
+			for id, name := range system.Switches {
+				if name != "" && bytes.Count(testCase.file, testCase.spell(t, name)) == 1 {
+					switchId = id
+					break
+				}
+			}
+			if switchId == 0 {
+				t.Fatal("System.json names no switch a rename could be told apart by")
+			}
+			renamed := *system
+			renamed.Switches = append([]string{}, system.Switches...)
+			renamed.Switches[switchId] = "Vampire's <gone> & \"dusted\" — ✓"
+
+			// Act- the unchanged settings saved, then the rename.
+			saveFromClient(t, system, target)
+			unchanged, err := os.ReadFile(target)
+			if err != nil {
+				t.Fatal(err)
+			}
+			saveFromClient(t, &renamed, target)
+			written, err := os.ReadFile(target)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			// Assert- the file as it was, then with that one name replaced, spelled as the file spells its strings.
+			if bytes.Equal(unchanged, testCase.file) == false {
+				offset := firstDifference(unchanged, testCase.file)
+				t.Errorf("an unchanged save changed the file at byte %d:\n  file:  %s\n  saved: %s",
+					offset, excerpt(testCase.file, offset), excerpt(unchanged, offset))
+			}
+			expected := bytes.Replace(testCase.file, testCase.spell(t, system.Switches[switchId]), []byte(testCase.renamed), 1)
+			if bytes.Equal(written, expected) == false {
+				offset := firstDifference(written, expected)
+				t.Errorf("renaming switch %d changed more than its name, at byte %d:\n  expected: %s\n  saved:    %s",
+					switchId, offset, excerpt(expected, offset), excerpt(written, offset))
+			}
+		})
+	}
+}
+
+// saveFromClient saves settings the way PUT /api/system does: as a client's body, with every object's
+// keys sorted the way a client keeping no order would send them, decoded strictly, then written over
+// the file at path in its own layout. The body is written whole; which of it the route carries over
+// is the route's to test, and here the body differs from the file in the renamed switch alone.
+func saveFromClient(t *testing.T, system *db.RpgSystem, path string) {
+	t.Helper()
+
+	var decoded *db.RpgSystem
+	decoder := json.NewDecoder(bytes.NewReader(sortedKeys(t, system)))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&decoded); err != nil {
+		t.Fatalf("the body did not decode: %v", err)
+	}
+	if err := UpdateInFileLayout(path, func(*db.RpgSystem) *db.RpgSystem { return decoded }, nil); err != nil {
+		t.Fatalf("the save failed: %v", err)
+	}
+}
+
+// quoted spells a name as JSON.stringify writes a string: in quotes, with only quotes, backslashes and
+// control characters escaped, as mzjson writes it.
+func quoted(t *testing.T, name string) []byte {
+	t.Helper()
+
+	value, err := mzjson.Parse(sortedKeys(t, name))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return mzjson.Compact(value)
+}
+
+// goQuoted spells a name as Go's encoder writes a string, and so as the data editor's save does: in
+// quotes, with `<`, `>` and `&` escaped besides what JSON.stringify escapes.
+func goQuoted(t *testing.T, name string) []byte {
+	t.Helper()
+
+	spelled, err := json.Marshal(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return spelled
+}
+
 // assertSaveReproduces saves one real file through the same steps a PUT takes and checks the result,
 // reporting true when the file came back in MZ's layout rather than its own. whole is the PUT's check
 // that a body is complete, which an unchanged real document must pass or it could never be saved.

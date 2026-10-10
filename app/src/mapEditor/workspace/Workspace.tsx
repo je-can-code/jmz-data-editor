@@ -29,6 +29,7 @@ import { MapTreePanel } from './panels/MapTreePanel.tsx';
 import { PalettePanel } from './panels/palette/PalettePanel.tsx';
 import { StartPanel } from './panels/PlaceholderPanels.tsx';
 import { QuickSettingsPanel } from './panels/QuickSettingsPanel.tsx';
+import { StampsPanel } from './panels/StampsPanel.tsx';
 import { attachShortcutsToPopouts, withWindowScope } from './windowScope.tsx';
 import { NoticeBar, WorkspaceBar } from './WorkspaceChrome.tsx';
 import { WorkspaceController } from './WorkspaceController.ts';
@@ -55,6 +56,7 @@ const PANELS: Record<string, React.FunctionComponent<IDockviewPanelProps>> = {
   [PANEL_COMPONENTS.history]: withWindowScope(HistoryPanel),
   [PANEL_COMPONENTS.properties]: withWindowScope(MapPropertiesPanel),
   [PANEL_COMPONENTS.palette]: withWindowScope(PalettePanel),
+  [PANEL_COMPONENTS.stamps]: withWindowScope(StampsPanel),
   [PANEL_COMPONENTS.layers]: withWindowScope(LayersPanel),
   [PANEL_COMPONENTS.quick]: withWindowScope(QuickSettingsPanel),
   [PANEL_COMPONENTS.events]: withWindowScope(EventsPanel),
@@ -85,9 +87,9 @@ const holdsTheTree = (group: DockviewDndOverlayEvent['group']): boolean =>
 
 /**
  * The map editor's workspace: one window split into panels (any number of maps, the map tree, the map properties,
- * the history, the palette, the layer strip, the quick settings and the events list) that can be resized, rearranged,
- * stacked as tabs, closed, or torn out into windows of their own, still live and in sync. The layout is kept with the
- * project and comes back as it was left, torn-out windows included.
+ * the history, the palette, the stamps, the layer strip, the quick settings and the events list) that can be resized,
+ * rearranged, stacked as tabs, closed, or torn out into windows of their own, still live and in sync. The layout is
+ * kept with the project and comes back as it was left, torn-out windows included.
  *
  * The middle is the centre, which never closes: maps open there, in front, and once the last map in it is closed,
  * dragged off or torn out it shows the start panel, at the size it had (see CentreKeeper).
@@ -169,6 +171,12 @@ const Workspace = () =>
     window.addEventListener('keydown', onSideShortcut);
     return () => window.removeEventListener('keydown', onSideShortcut);
   }, [ onSideShortcut ]);
+
+  // closing asks first while placements of blueprints have not reached the disk, as it does for unsaved edits.
+  useEffect(() => controller.guardClose(window), [ controller ]);
+
+  // a blueprint deleted on disk closes its tabs, with a note.
+  useEffect(() => controller.services.blueprintMaps.onDeletedOnDisk((blueprintId, name) => controller.closeBlueprintDeletedOnDisk(blueprintId, name)), [ controller ]);
 
   // a layout still waiting to be written is written as the page goes.
   useEffect(() =>

@@ -99,8 +99,9 @@ describe('registerHandBuiltEditors', () =>
     // Arrange.
     const { onChange } = open(command(101, [ '', 0, 0, 2, 'Chef' ]), [ command(401, [ 'Hello' ]) ]);
 
-    // Act.
+    // Act: type, then leave the box, which ends the burst.
     fireEvent.change(screen.getByLabelText('Text'), { target: { value: 'one\ntwo\nthree\nfour\nfive' } });
+    fireEvent.blur(screen.getByLabelText('Text'));
 
     // Assert.
     expect(onChange.mock.calls.at(-1))
@@ -112,8 +113,9 @@ describe('registerHandBuiltEditors', () =>
     // Arrange.
     const { onChange } = open(command(355, [ 'a();' ]));
 
-    // Act.
+    // Act: type, then leave the box, which ends the burst.
     fireEvent.change(screen.getByLabelText('Script'), { target: { value: 'a();\nb();' } });
+    fireEvent.blur(screen.getByLabelText('Script'));
 
     // Assert.
     expect(onChange.mock.calls.at(-1))
@@ -125,8 +127,9 @@ describe('registerHandBuiltEditors', () =>
     // Arrange.
     const { onChange } = open(command(201, [ 0, 5, 3, 4, 2, 0 ]));
 
-    // Act.
+    // Act: type, then leave the box, which ends the burst.
     fireEvent.change(screen.getByLabelText('X'), { target: { value: '9' } });
+    fireEvent.blur(screen.getByLabelText('X'));
 
     // Assert.
     expect(onChange.mock.calls.at(-1))
@@ -138,8 +141,9 @@ describe('registerHandBuiltEditors', () =>
     // Arrange.
     const { onChange } = open(command(122, [ 3, 3, 0, 0, 1 ]));
 
-    // Act.
+    // Act: type, then leave the box, which ends the burst.
     fireEvent.change(screen.getByLabelText('Value'), { target: { value: '42' } });
+    fireEvent.blur(screen.getByLabelText('Value'));
 
     // Assert.
     expect(onChange.mock.calls.at(-1))
@@ -175,8 +179,9 @@ describe('registerHandBuiltEditors', () =>
     const onBlock = vi.fn();
     open(commands[0], [], { block: { commands, onChange: onBlock } });
 
-    // Act.
+    // Act: type, then leave the box, which ends the burst.
     fireEvent.change(screen.getByLabelText('Choice 2'), { target: { value: 'Never' } });
+    fireEvent.blur(screen.getByLabelText('Choice 2'));
 
     // Assert.
     expect(onBlock.mock.calls.at(-1))
@@ -225,8 +230,9 @@ describe('registerHandBuiltEditors', () =>
     const opened = command(357, [ 'j/omni/ext/J-OMNI-Quests', 'progress-quest', 'Progress Quest', { key: 'main-001' } ]);
     const { onChange } = open(opened, [ command(657, [ 'key = main-001' ]) ], { headers });
 
-    // Act.
+    // Act: type, then leave the box, which ends the burst.
     fireEvent.change(screen.getByLabelText('key'), { target: { value: 'side-004' } });
+    fireEvent.blur(screen.getByLabelText('key'));
 
     // Assert.
     expect(onChange.mock.calls.at(-1))
@@ -287,8 +293,9 @@ describe('registerHandBuiltEditors', () =>
     // Arrange: history never answers, so the command handed in stays as it was.
     const { onChange } = open(opened, [], { headers });
 
-    // Act.
+    // Act: type, then leave the box, which ends the burst.
     fireEvent.change(screen.getByRole('textbox', { name: label }), { target: { value: 'typed text' } });
+    fireEvent.blur(screen.getByRole('textbox', { name: label }));
 
     // Assert: the change went out, and the field still shows what was typed.
     expect([ onChange.mock.calls.length, (screen.getByRole('textbox', { name: label }) as HTMLInputElement).value ])

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { patchInterference } from '../../../../src/mapEditor/core/history/patchInterference.ts';
+import { isSlotSplice, patchInterference } from '../../../../src/mapEditor/core/history/patchInterference.ts';
 import type { JsonValue } from '../../../../src/mapEditor/core/model/json.ts';
 import type { Patch, PatchPath } from '../../../../src/mapEditor/core/model/patches.ts';
 
@@ -338,5 +338,34 @@ describe('patchInterference', () =>
           [ false, false ], [ false, false ], [ false, false ], [ false, false ], [ false, false ],
         ]);
     });
+  });
+});
+
+/*
+ * A step that made room for an event past the end of a map's list made empty slots first, then put the event in one. Taking
+ * those slots back out only shortens the list, which an undo may skip where an edit since stands further along it, rather
+ * than give that edit's event another id. So this owes the history one exact answer: a splice is slots only when every item
+ * it takes out or puts in is an empty slot, and it moves at least one; anything holding a value, a set, or a splice moving
+ * nothing is not, since leaving it would leave something real behind.
+ */
+describe('isSlotSplice', () =>
+{
+  it('reads a splice putting in or taking out empty slots alone as slots, and nothing holding a value as slots', () =>
+  {
+    // Arrange: empty slots put in and taken out, beside a slot holding an event, a splice moving nothing, and a set.
+    const patches: Patch[] = [
+      { kind: 'splice', path: [ 'events' ], index: 3, removed: [], inserted: [ null, null ] },
+      { kind: 'splice', path: [ 'events' ], index: 3, removed: [ null ], inserted: [] },
+      { kind: 'splice', path: [ 'events' ], index: 3, removed: [], inserted: [ null, { id: 4 } ] },
+      { kind: 'splice', path: [ 'events' ], index: 3, removed: [], inserted: [] },
+      { kind: 'set', path: [ 'events', 3 ], before: null, after: { id: 3 } },
+    ];
+
+    // Act.
+    const read = patches.map(isSlotSplice);
+
+    // Assert.
+    expect(read)
+      .toStrictEqual([ true, true, false, false, false ]);
   });
 });

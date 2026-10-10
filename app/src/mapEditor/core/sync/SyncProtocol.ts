@@ -23,7 +23,8 @@ type HeldDocument = {
  *   from anyone (opening it) or from one window (after finding its copy differs).
  * - {@code offer}: a window hands its copy to another: to catch up a window that is behind, to tell a window
  *   the two copies went different ways, or, with {@code resolution}, because the person chose this copy.
- * - {@code operation}: a step committed, undone, redone or forgotten, or a document saved.
+ * - {@code operation}: a step committed, undone, redone or forgotten, a document saved, or its file written otherwise, as
+ *   a blueprint's change is written at once, each with what the file holds now.
  * - {@code outside}: the one window reading the file-change stream read a document's file after it changed outside the
  *   editor, or, with {@code recheck}, after the stream came back, and hands every window that very version, so they
  *   all take the same one rather than each whatever it would read a moment later. {@code content} is null when the

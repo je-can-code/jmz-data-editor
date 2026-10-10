@@ -129,6 +129,59 @@ const reshapeAround = (draft: TileDraft, changed: Iterable<CellPosition>, mode: 
 };
 
 /**
+ * The shape the neighbours of a carried autotile called for where it was lifted from, by where it now lands and its
+ * kind: what a moved or copied piece of map remembers of its old surroundings. Null for a tile the piece did not carry
+ * onto that layer of that cell.
+ */
+type CarriedShape = (x: number, y: number, z: number, kind: number) => number | null;
+
+/**
+ * Reshapes, in a draft, the autotiles a piece of map put down affected: a piece the select tool moved or copied, or a
+ * stamp. It is {@link reshapeAround}'s rule with one addition for the tiles the piece carried: such a tile keeps the very
+ * shape it was lifted in whenever its new neighbours call for the same shape its old ones did, so a shape drawn by hand
+ * (with Shift, in MZ) survives the trip, and only the tiles along the piece's edge, which meet new neighbours, are shaped
+ * afresh. Every other autotile the change reached is reshaped only when what its neighbours call for changed.
+ * @param {TileDraft} draft The map with the piece placed.
+ * @param {Iterable<CellPosition>} changed The cells written.
+ * @param {number} mode The tileset's mode.
+ * @param {CarriedShape} carriedShape What a carried tile's old neighbours called for, or null for a tile not carried.
+ */
+const reshapeCarried = (draft: TileDraft, changed: Iterable<CellPosition>, mode: number, carriedShape: CarriedShape): void =>
+{
+  cellsToReshape(draft, changed).forEach(([ x, y ]) =>
+  {
+    for (let z = 0; z < 4; z++)
+    {
+      const tileId = draft.tileAt(x, y, z);
+      if (isAutotile(tileId) === false)
+      {
+        continue;
+      }
+
+      // the shape called for before: where a carried tile came from, or here for a tile the change did not write.
+      const kind = autotileKind(tileId);
+      const after = autotileShapeFor(draft, x, y, kind, mode);
+      const carried = carriedShape(x, y, z, kind);
+      let before = -1;
+      if (carried !== null)
+      {
+        before = carried;
+      }
+      else if (draft.hasChanged(x, y, z) === false)
+      {
+        before = autotileShapeFor(draft.base, x, y, kind, mode);
+      }
+
+      const shaped = makeAutotileId(kind, after);
+      if (before !== after && shaped !== tileId)
+      {
+        draft.setTile(x, y, z, shaped);
+      }
+    }
+  });
+};
+
+/**
  * Completes a set of cell writes with the autotile reshaping they cause, so a caller that places tiles its own way
  * (erasing, pasting a stamp) still leaves every edge and corner right. Writes to the shadow and region layers are
  * passed through without reshaping anything, since no autotile reads them.
@@ -162,5 +215,5 @@ const withReshapes = (grid: TileGrid, writes: readonly CellChange[], mode: numbe
   return draft.changes();
 };
 
-export { cellsToReshape, reshapeAround, withReshapes };
-export type { CellPosition };
+export { cellsToReshape, reshapeAround, reshapeCarried, withReshapes };
+export type { CarriedShape, CellPosition };

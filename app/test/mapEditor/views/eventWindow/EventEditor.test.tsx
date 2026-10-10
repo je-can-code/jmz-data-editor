@@ -20,11 +20,30 @@ import { createEventPage } from '../../../../src/mapEditor/core/model/eventModel
 import type { JsonValue } from '../../../../src/mapEditor/core/model/json.ts';
 import type { RmmzMap, RmmzTileset } from '../../../../src/mapEditor/core/model/rmmzTypes.ts';
 import type { MapEditorApi } from '../../../../src/mapEditor/core/api/MapEditorApi.ts';
+import { PluginModuleRegistry } from '../../../../src/mapEditor/core/modules/PluginModuleRegistry.ts';
 import type { MapEditorServices } from '../../../../src/mapEditor/services/MapEditorServices.ts';
 import { MapEditorServicesProvider } from '../../../../src/mapEditor/services/MapEditorServicesContext.tsx';
 import { SoundPlayerContext } from '../../../../src/mapEditor/views/commandList/commandListResources.ts';
 import { EventWindowView } from '../../../../src/mapEditor/views/EventWindowView.tsx';
+import type { RouteSetting } from '../../../../src/mapEditor/core/moveRoutes/routeStart.ts';
+import type { RoutePreviewProps } from '../../../../src/mapEditor/views/moveRoute/RoutePreview.tsx';
 import { eventWindowMap, heldEvent, markedPage, TARGET } from '../../support/eventWindowFixtures.ts';
+
+/**
+ * Where the stand-in route preview was last told a page's own route runs.
+ */
+const preview = vi.hoisted(() => ({
+  setting: null as RouteSetting | null,
+}));
+
+// the route preview is proved in its own tests; here it only notes where it was told the route runs.
+vi.mock('../../../../src/mapEditor/views/moveRoute/RoutePreview.tsx', () => ({
+  RoutePreview: (props: RoutePreviewProps) =>
+  {
+    preview.setting = props.setting;
+    return null;
+  },
+}));
 
 /*
  * The event window is the full editor of one event, in its own window. It owes the author the event's map first (another
@@ -43,7 +62,8 @@ import { eventWindowMap, heldEvent, markedPage, TARGET } from '../../support/eve
  * What gets written lives in the services the core tests cover; these check that each control reaches its service.
  * The fixture's event 2 holds pages marked 1, 2 and 3, each with a comment naming it.
  */
-describe('EventWindowView', () =>
+// each test mounts the whole event window and clicks through it, which nears five seconds on CI's slower runner.
+describe('EventWindowView', { timeout: 20_000 }, () =>
 {
   /**
    * The tilesets the fixture map draws with: tileset 4.
@@ -63,6 +83,7 @@ describe('EventWindowView', () =>
     store?: DocumentStore;
     clipboard?: string;
     api?: MapEditorApi;
+    tree?: JsonValue;
   } = {}) =>
   {
     const map = options.map ?? eventWindowMap();
@@ -74,6 +95,12 @@ describe('EventWindowView', () =>
     if (options.held !== false)
     {
       hub.adopt('map:1', map as unknown as JsonValue);
+    }
+
+    // a window holding the map tree names maps as it does.
+    if (options.tree !== undefined)
+    {
+      hub.adopt('mapinfos', options.tree);
     }
 
     const catalog = new CommandCatalog();
@@ -88,6 +115,7 @@ describe('EventWindowView', () =>
       loadCommandResources: async () => undefined,
       openDocument,
       shell: new WindowShell({ channel: null, origin: 'http://ui', openWindow: () => null, readClipboardText: async () => options.clipboard ?? '' }),
+      modules: new PluginModuleRegistry(new CommandCatalog()),
     } as unknown as MapEditorServices;
     render(
       <MapEditorServicesProvider services={services}>
@@ -194,6 +222,20 @@ describe('EventWindowView', () =>
       .toBeInTheDocument();
   });
 
+  it('names the map that cannot be opened as the map tree the window holds shows it', async () =>
+  {
+    // Arrange: the tree held, naming map 1.
+    const tree = [ null, { id: 1, name: 'Bearcat Congregation', parentId: 0, order: 1, expanded: false, scrollX: 0, scrollY: 0 } ];
+    renderWindow({ held: false, tree: tree as unknown as JsonValue, open: async () => Promise.reject(new Error('the server is down')) });
+
+    // Act.
+    await settle();
+
+    // Assert.
+    expect(screen.getByText('Bearcat Congregation could not be opened: the server is down'))
+      .toBeInTheDocument();
+  });
+
   it('titles the window after the event and its map', () =>
   {
     // Arrange: nothing beyond the render; without the project's names, the map reads as its number.
@@ -272,6 +314,22 @@ describe('EventWindowView', () =>
     const [ page ] = heldEvent(hub).pages;
     expect([ page.through, page.priorityType, page.trigger, stepsOf(hub) ])
       .toStrictEqual([ true, 2, 4, [ 'Turn on through (page 1)', 'Change priority (page 1)', 'Change trigger (page 1)' ] ]);
+  });
+
+  it('shows a page\'s own route on the event\'s map, walked by the event from the page shown', () =>
+  {
+    // Arrange: the second page shown, its movement made a route of its own.
+    preview.setting = null;
+    renderWindow();
+    fireEvent.click(screen.getByRole('tab', { name: 'Page 2' }));
+
+    // Act.
+    fireEvent.mouseDown(screen.getByLabelText('Type'));
+    fireEvent.click(screen.getByRole('option', { name: 'Custom' }));
+
+    // Assert.
+    expect(preview.setting)
+      .toStrictEqual({ mapId: TARGET.mapId, page: { eventId: TARGET.eventId, pageIndex: 1 }, before: [], characterId: 0 });
   });
 
   it('mounts the graphic picker and the movement settings on the page, each change a step of the page shown', () =>
@@ -734,7 +792,7 @@ describe('EventWindowView', () =>
       fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
       await Promise.resolve();
     });
-    const told = screen.queryByText('"Rename event" cannot be undone: "Rename on the map" later changed what "Rename event" changed.') !== null;
+    const told = screen.queryByText('"Rename event" cannot be undone: "Rename on the map" later changed what "Rename event" changed, on Map 1. Undo "Rename on the map" there first.') !== null;
     fireEvent.click(screen.getByRole('button', { name: 'Forget it' }));
 
     // Assert: the name stays as the map left it, and the step is gone from the event's history.

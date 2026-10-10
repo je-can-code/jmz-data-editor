@@ -1,5 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Alert, Box, Button, List, ListItemButton, ListItemText, Typography } from '@mui/material';
+import { stepLabelIn } from '../../core/blueprints/blueprintSteps.ts';
+import type { HistoryRow } from '../../core/history/History.ts';
 import { TREE_HISTORY_KEY, type HistoryKey } from '../../core/history/historyKeys.ts';
 import type { HistoryOutcome } from '../../core/workspace/HistoryRouter.ts';
 import type { WorkspaceController } from '../WorkspaceController.ts';
@@ -26,7 +28,7 @@ const historyTitle = (controller: WorkspaceController, key: HistoryKey): string 
     case 'event':
       return `Event ${second} on ${controller.mapName(Number.parseInt(first, 10))}`;
     case 'blueprint':
-      return `Blueprint ${first}`;
+      return `Blueprint: ${controller.blueprintName(first)}`;
     case 'tilesets':
       return 'Tilesets';
     default:
@@ -35,10 +37,26 @@ const historyTitle = (controller: WorkspaceController, key: HistoryKey): string 
 };
 
 /**
+ * Names one row of a history: its step's label, a blueprint's change in a map's history named for its blueprint (see
+ * blueprintSteps' stepLabelIn).
+ * @param {WorkspaceController} controller The workspace, for its documents and blueprint names.
+ * @param {HistoryKey} key The history.
+ * @param {HistoryRow} row The row.
+ * @returns {string} Its words.
+ */
+const rowLabel = (controller: WorkspaceController, key: HistoryKey, row: HistoryRow): string =>
+{
+  const step = controller.services.hub.knownStep(row.id);
+  return step === null
+    ? row.label
+    : stepLabelIn(step, key, blueprintId => controller.blueprintName(blueprintId));
+};
+
+/**
  * The history of whatever has focus, the way paint programs show it: every step by name, oldest first, the steps
  * undone greyed below the current point, and a click on any row jumps there, undoing or redoing as many steps as it
- * takes. A step that a later edit blocks is named, with the choice to forget it and go on past it. Focusing this
- * panel never changes whose history it shows.
+ * takes. A blueprint's change listed in a map's history is named for its blueprint. A step that a later edit blocks is
+ * named, with the choice to forget it and go on past it. Focusing this panel never changes whose history it shows.
  * @returns {React.JSX.Element} The panel.
  */
 const HistoryPanel = () =>
@@ -112,7 +130,7 @@ const HistoryPanel = () =>
         {view.rows.map((row, index) => (
           <ListItemButton key={row.id} selected={view.position === index + 1} onClick={() => jump(row.id)}>
             <ListItemText
-              primary={row.label}
+              primary={rowLabel(controller, key, row)}
               slotProps={{ primary: { variant: 'body2', sx: { opacity: row.done ? 1 : 0.45 } } }}
             />
           </ListItemButton>

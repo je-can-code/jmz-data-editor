@@ -35,9 +35,12 @@ describe('apiDocumentStore', () =>
     loadPluginList: vi.fn(async () => ''),
     loadEditorData: vi.fn(async (key: string) => (key === 'layouts' ? { schemaVersion: 1, data: { layouts: { main: 1 } } } : null)),
     saveEditorData: vi.fn(async () => undefined),
+    mergeBlueprintUses: vi.fn(async () => undefined),
     fileChangesUrl: vi.fn(() => ''),
     loadCommonEvents: vi.fn(async () => [ null, 'common events' ] as never),
     saveCommonEvents: vi.fn(async () => undefined),
+    loadSystem: vi.fn(async () => ({ switches: [ '', 'system' ], variables: [] })),
+    saveSystem: vi.fn(async () => undefined),
     loadCommandUsage: vi.fn(async () => ({ events: 0, codes: {}, pluginCommands: [] })),
     loadDatabaseNames: vi.fn(async () => ({}) as never),
   });
@@ -53,6 +56,7 @@ describe('apiDocumentStore', () =>
       await store.load('mapinfos'),
       await store.load('tilesets'),
       await store.load('common-events'),
+      await store.load('system'),
       await store.load('editor-data:layouts'),
     ];
 
@@ -63,6 +67,7 @@ describe('apiDocumentStore', () =>
         [ null, 'infos' ],
         [ null, 'tilesets' ],
         [ null, 'common events' ],
+        { switches: [ '', 'system' ], variables: [] },
         { schemaVersion: 1, data: { layouts: { main: 1 } } },
       ]);
   });
@@ -77,7 +82,7 @@ describe('apiDocumentStore', () =>
 
     // Assert.
     expect(loaded)
-      .toStrictEqual({ schemaVersion: 1, data: { blueprints: [] } });
+      .toStrictEqual({ schemaVersion: 1, data: { blueprints: {} } });
   });
 
   it('saves each kind of document through its own call', async () =>
@@ -92,6 +97,7 @@ describe('apiDocumentStore', () =>
     await store.save('mapinfos', [ null ]);
     await store.save('tilesets', [ null ]);
     await store.save('common-events', [ null, 'events' ]);
+    await store.save('system', { switches: [ '', 'Door' ], variables: [] });
     await store.save('editor-data:tileset-marks', content);
 
     // Assert.
@@ -100,9 +106,17 @@ describe('apiDocumentStore', () =>
       vi.mocked(api.saveMapInfos).mock.calls,
       vi.mocked(api.saveTilesets).mock.calls,
       vi.mocked(api.saveCommonEvents).mock.calls,
+      vi.mocked(api.saveSystem).mock.calls,
       vi.mocked(api.saveEditorData).mock.calls,
     ])
-      .toStrictEqual([ [ [ 3, content ] ], [ [ [ null ] ] ], [ [ [ null ] ] ], [ [ [ null, 'events' ] ] ], [ [ 'tileset-marks', content ] ] ]);
+      .toStrictEqual([
+        [ [ 3, content ] ],
+        [ [ [ null ] ] ],
+        [ [ [ null ] ] ],
+        [ [ [ null, 'events' ] ] ],
+        [ [ { switches: [ '', 'Door' ], variables: [] } ] ],
+        [ [ 'tileset-marks', content ] ],
+      ]);
   });
 
   it('refuses an editor document the editor does not keep', async () =>
@@ -118,5 +132,23 @@ describe('apiDocumentStore', () =>
       .rejects.toThrow('the editor keeps no document called secrets');
     await expect(attempts[1])
       .rejects.toThrow('the editor keeps no document called secrets');
+  });
+
+  it('refuses to load or save a blueprint opened as a map, calling nothing, since no file of its own backs it', async () =>
+  {
+    // Arrange.
+    const api = buildApi();
+    const store = apiDocumentStore(api);
+
+    // Act.
+    const attempts = [ store.load('blueprint-map:k3x9q2mf'), store.save('blueprint-map:k3x9q2mf', { any: 'thing' }) ];
+
+    // Assert.
+    await expect(attempts[0])
+      .rejects.toThrow('no file of its own');
+    await expect(attempts[1])
+      .rejects.toThrow('no file of its own');
+    expect([ vi.mocked(api.loadMap).mock.calls, vi.mocked(api.saveMap).mock.calls, vi.mocked(api.saveEditorData).mock.calls ])
+      .toStrictEqual([ [], [], [] ]);
   });
 });

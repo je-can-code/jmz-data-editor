@@ -16,6 +16,9 @@ import { locateGameProject } from '../../../../support/gameProject.ts';
  * fields it has, and every field it offers starts at a value its own control can show. A fresh command built from
  * an entry reads as a sentence. And the sentences read right: the right name for an id, the right branch of a
  * command whose shape depends on a choice, notes only when they apply.
+ *
+ * One rule stands over every entry, new ones included: anywhere a map and a tile on it are chosen, the tile can be
+ * picked by clicking it on the map. So every field choosing a map belongs to a place its entry declares.
  */
 describe('built-in commands', () =>
 {
@@ -182,6 +185,40 @@ describe('built-in commands', () =>
       // Assert.
       expect(strays)
         .toStrictEqual([]);
+    });
+
+    it('pair every map they choose with its tile, as a place the form can pick on the map', () =>
+    {
+      // Arrange: every field choosing a map, by the entry it belongs to.
+      const chosen = BUILT_IN_ENTRIES.flatMap(entry => entry.fields
+        .filter(field => field.kind === 'map')
+        .map(field => ({ entry, key: field.key })));
+
+      // Act.
+      const unpaired = chosen
+        .filter(({ entry, key }) => (entry.places ?? []).some(place => place.map === key) === false)
+        .map(({ entry, key }) => `${entry.id}.${key}`);
+
+      // Assert: anywhere a map and its tile are chosen, the tile can be picked on the map.
+      expect([ unpaired, chosen.map(({ entry }) => entry.id) ])
+        .toStrictEqual([ [], [ 'core:201', 'core:202' ] ]);
+    });
+
+    it('name in their places a map field and two number fields of their own', () =>
+    {
+      // Arrange: what kind each place's three keys must name.
+      const wanted: readonly (readonly [ 'map' | 'x' | 'y', string ])[] = [ [ 'map', 'map' ], [ 'x', 'number' ], [ 'y', 'number' ] ];
+
+      // Act.
+      const checked = BUILT_IN_ENTRIES.flatMap(entry => (entry.places ?? []).flatMap(place => wanted.map(([ part, kind ]) =>
+      {
+        const named = entry.fields.find(field => field.key === place[part]);
+        return named !== undefined && named.kind === kind ? 'ok' : `${entry.id}.${place[part]}`;
+      })));
+
+      // Assert: two places, three fields each, all of the right kind.
+      expect(checked)
+        .toStrictEqual([ 'ok', 'ok', 'ok', 'ok', 'ok', 'ok' ]);
     });
 
     it('give every command the list offers a fresh shape that reads as a sentence', () =>

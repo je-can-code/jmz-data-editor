@@ -86,7 +86,7 @@ const isHoldable = (key: DocumentKey, content: JsonValue): boolean =>
  *
  * When the stream comes back after dropping, the same window re-reads every document held anywhere, since whatever
  * changed meanwhile was never announced; only a document without unsaved edits takes what it finds, the others
- * differing from their files by definition.
+ * differing from their files by definition, and so does one whose file was removed, which may have come back meanwhile.
  */
 class FileChangeRouter
 {
@@ -151,8 +151,8 @@ class FileChangeRouter
   /**
    * Re-reads every document held anywhere after the stream came back, since changes made while it was down were
    * never announced. A document this window holds with unsaved edits is not read at all, since every window holding
-   * it holds the same edits; one it cannot read now, or whose file holds nothing it could be, is left for its next
-   * change.
+   * it holds the same edits, unless its file was removed, which may have come back meanwhile; one it cannot read now,
+   * or whose file holds nothing it could be, is left for its next change.
    * @returns {Promise<ExternalChangeResult[]>} What this window did with each document read, in order.
    */
   recheck(): Promise<ExternalChangeResult[]>
@@ -162,7 +162,7 @@ class FileChangeRouter
       return Promise.resolve([]);
     }
 
-    const held = this.#hub.documentKeys().filter(key => this.#hub.isDirty(key) === false);
+    const held = this.#hub.documentKeys().filter(key => this.#hub.isDirty(key) === false || this.#hub.isFileRemoved(key));
     const elsewhere = this.#peers.documentsHeldElsewhere().filter(key => this.#hub.has(key) === false);
     return this.#inTurn(async () =>
     {

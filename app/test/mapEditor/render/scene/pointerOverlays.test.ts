@@ -5,8 +5,9 @@ import { drawPointerOverlays, drawSelection, OverlayColour } from '../../../../s
 
 /*
  * The pointer overlays are drawn in two parts, because a selection can hold every event on a map (600 on Map361)
- * while the pointer moves every frame. The selection part draws the selected events' tiles and the selected tile area,
- * and nothing else, so it is redrawn only when the selection changes. The pointer part draws the box, every ghost
+ * while the pointer moves every frame. The selection part draws the selected events' tiles, an outline round the
+ * footprint of each one showing one, and the selected tile area, and nothing else, so it is redrawn only when the
+ * selection changes. The pointer part draws the box, every ghost
  * event's landing tile (an event with no picture has only that to show where it would land), the blocked tiles in red,
  * and the hover on top. Each part clears before drawing and draws nothing its switch has turned off.
  */
@@ -93,6 +94,27 @@ describe('pointerOverlays', () =>
       // Assert.
       expect(log)
         .toStrictEqual([ 'clear' ]);
+    });
+
+    it('outlines the footprint of a selected event showing one, after its tile, and of no other event', () =>
+    {
+      // Arrange: event 4 shows a 3 by 1 footprint from its own tile; event 7 shows none.
+      const { graphics, log } = recorder();
+      const footprints: Readonly<Record<number, { x: number; y: number; width: number; height: number }>> = { 4: { x: 1, y: 2, width: 3, height: 1 } };
+
+      // Act.
+      drawSelection(graphics, { ...NO_OVERLAY_STATE, selectedEvents: [ 4, 7 ] }, everything, eventCell, 10, id => footprints[id] ?? null);
+
+      // Assert: the footprint is only outlined, never washed over.
+      expect(log)
+        .toStrictEqual([
+          'clear',
+          `fill 10,20 10x10 #${selection}`,
+          `stroke 10,20 10x10 #${selection}`,
+          `stroke 10,20 30x10 #${selection}`,
+          `fill 30,0 10x10 #${selection}`,
+          `stroke 30,0 10x10 #${selection}`,
+        ]);
     });
   });
 

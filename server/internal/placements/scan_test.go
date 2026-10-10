@@ -32,8 +32,8 @@ func TestScanMapListsEachEventUnderTheEnemyItNames(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertBattlers(t, battlers, []battler{
-		{enemyId: 5, eventId: 1, eventName: "Slime", x: 3, y: 4, pageIndexes: []int{0}, pageCount: 1},
-		{enemyId: 7, eventId: 2, eventName: "Bat", x: 7, y: 8, pageIndexes: []int{0}, pageCount: 1},
+		{enemyId: 5, eventId: 1, eventName: "Slime", x: 3, y: 4, pageIndexes: []int{0}, pageCount: 1, firstPage: pageOf(commentOf(t, "<enemyId:5>"))},
+		{enemyId: 7, eventId: 2, eventName: "Bat", x: 7, y: 8, pageIndexes: []int{0}, pageCount: 1, firstPage: pageOf(commentOf(t, "<enemyId:7>"))},
 	})
 }
 
@@ -56,19 +56,21 @@ func TestScanMapLeavesOutEventsThatNameNoEnemy(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertBattlers(t, battlers, []battler{
-		{enemyId: 5, eventId: 4, eventName: "Slime", x: 1, y: 2, pageIndexes: []int{0}, pageCount: 1},
+		{enemyId: 5, eventId: 4, eventName: "Slime", x: 1, y: 2, pageIndexes: []int{0}, pageCount: 1, firstPage: pageOf(commentOf(t, "<enemyId:5>"))},
 	})
 }
 
-// TestScanMapListsOnlyThePagesNamingTheEnemy covers battlers that stand on some pages and not others.
+// TestScanMapListsOnlyThePagesNamingTheEnemy covers battlers that stand on some pages and not others, each
+// shaped after the first page naming its enemy: the ambusher's second, never its first, and the returner's
+// first, never its last, though both name the enemy alike.
 func TestScanMapListsOnlyThePagesNamingTheEnemy(t *testing.T) {
-	// Arrange- a battler on its second page only, and one on pages 1 and 3 of 3.
+	// Arrange- a battler on its second page only, and one on pages 1 and 3 of 3, its last page hopping.
 	gameMap := mapOf(
 		eventOf(1, "Ambush", 2, 2, pageOf(), pageOf(commentOf(t, "<enemyId:5>"))),
 		eventOf(2, "Returner", 4, 4,
 			pageOf(commentOf(t, "<enemyId:5>")),
 			pageOf(commentOf(t, "<sight:5>")),
-			pageOf(commentOf(t, "<enemyId:5>"))),
+			pageOf(commentOf(t, "<enemyId:5>"), commentOf(t, "<motion:[hop]>"))),
 	)
 
 	// Act.
@@ -79,8 +81,8 @@ func TestScanMapListsOnlyThePagesNamingTheEnemy(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertBattlers(t, battlers, []battler{
-		{enemyId: 5, eventId: 1, eventName: "Ambush", x: 2, y: 2, pageIndexes: []int{1}, pageCount: 2},
-		{enemyId: 5, eventId: 2, eventName: "Returner", x: 4, y: 4, pageIndexes: []int{0, 2}, pageCount: 3},
+		{enemyId: 5, eventId: 1, eventName: "Ambush", x: 2, y: 2, pageIndexes: []int{1}, pageCount: 2, firstPage: pageOf(commentOf(t, "<enemyId:5>"))},
+		{enemyId: 5, eventId: 2, eventName: "Returner", x: 4, y: 4, pageIndexes: []int{0, 2}, pageCount: 3, firstPage: pageOf(commentOf(t, "<enemyId:5>"))},
 	})
 }
 
@@ -103,8 +105,8 @@ func TestScanMapListsAnEventOnceForEachEnemyItsPagesName(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertBattlers(t, battlers, []battler{
-		{enemyId: 5, eventId: 1, eventName: "Shifter", x: 5, y: 6, pageIndexes: []int{0, 2}, pageCount: 3},
-		{enemyId: 7, eventId: 1, eventName: "Shifter", x: 5, y: 6, pageIndexes: []int{1}, pageCount: 3},
+		{enemyId: 5, eventId: 1, eventName: "Shifter", x: 5, y: 6, pageIndexes: []int{0, 2}, pageCount: 3, firstPage: pageOf(commentOf(t, "<enemyId:5>"))},
+		{enemyId: 7, eventId: 1, eventName: "Shifter", x: 5, y: 6, pageIndexes: []int{1}, pageCount: 3, firstPage: pageOf(commentOf(t, "<enemyId:7>"))},
 	})
 }
 

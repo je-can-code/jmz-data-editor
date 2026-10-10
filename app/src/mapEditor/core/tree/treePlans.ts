@@ -1,3 +1,4 @@
+import type { BlueprintSpot } from '../blueprints/blueprintUses.ts';
 import { cloneJson, jsonEquals, type JsonValue } from '../model/json.ts';
 import type { PatchPath } from '../model/patches.ts';
 import type { RmmzMap, RmmzMapInfo } from '../model/rmmzTypes.ts';
@@ -19,11 +20,13 @@ type TreePlace = {
 };
 
 /**
- * A map a plan brings into being, with the file it starts with.
+ * A map a plan brings into being, with the file it starts with, and the placements of blueprints its tiles hold, which a
+ * copy of a map holds as its original did; a brand new map holds none.
  */
 type CreatedMap = {
   readonly mapId: number;
   readonly content: RmmzMap;
+  readonly spots: readonly BlueprintSpot[];
 };
 
 /**
@@ -40,22 +43,24 @@ type TreePlan = {
 };
 
 /**
- * A map on the clipboard, as it was when copied: its name and file, and the copied map it hung from when that one
- * was copied too, so a copied branch pastes as the same branch.
+ * A map on the clipboard, as it was when copied: its name and file, the placements of blueprints its tiles held then,
+ * and the copied map it hung from when that one was copied too, so a copied branch pastes as the same branch.
  */
 type CopiedMap = {
   readonly sourceId: number;
   readonly parentSourceId: number | null;
   readonly name: string;
   readonly content: RmmzMap;
+  readonly spots: readonly BlueprintSpot[];
 };
 
 /**
- * A map to duplicate, with its file as it stands.
+ * A map to duplicate, with its file as it stands, and the placements of blueprints its tiles hold; none, left out.
  */
 type DuplicateSource = {
   readonly mapId: number;
   readonly content: RmmzMap;
+  readonly spots?: readonly BlueprintSpot[];
 };
 
 /**
@@ -206,7 +211,7 @@ const planCreate = (rows: MapInfoRows, parentId: number, content: RmmzMap, skip:
   return {
     label: `Create ${quoted(tree, mapId)}`,
     rows: tree.toRows(),
-    created: [ { mapId, content: cloneJson(content) } ],
+    created: [ { mapId, content: cloneJson(content), spots: [] } ],
     removed: [],
     selection: [ mapId ],
   };
@@ -302,13 +307,20 @@ const planDelete = (rows: MapInfoRows, mapIds: readonly number[]): TreePlan =>
 };
 
 /**
- * Captures maps for the clipboard, in tree order, each with its file and the copied map it hung from.
+ * Captures maps for the clipboard, in tree order, each with its file, the placements of blueprints its tiles hold, and
+ * the copied map it hung from.
  * @param {MapInfoRows} rows The tree as it stands.
  * @param {readonly number[]} mapIds The maps to copy.
  * @param {ReadonlyMap<number, RmmzMap>} contents Each map's file as it stands.
+ * @param {ReadonlyMap<number, readonly BlueprintSpot[]>} spots Each map's placements; a map left out holds none.
  * @returns {CopiedMap[]} The copies.
  */
-const copyMaps = (rows: MapInfoRows, mapIds: readonly number[], contents: ReadonlyMap<number, RmmzMap>): CopiedMap[] =>
+const copyMaps = (
+  rows: MapInfoRows,
+  mapIds: readonly number[],
+  contents: ReadonlyMap<number, RmmzMap>,
+  spots: ReadonlyMap<number, readonly BlueprintSpot[]> = new Map(),
+): CopiedMap[] =>
 {
   const tree = new MapTreeModel(rows);
   const selected = new Set(mapIds);
@@ -334,13 +346,14 @@ const copyMaps = (rows: MapInfoRows, mapIds: readonly number[], contents: Readon
         parentSourceId: parentId === TREE_ROOT ? null : parentId,
         name: tree.row(id)?.name ?? defaultMapName(id),
         content: cloneJson(content),
+        spots: [ ...spots.get(id) ?? [] ],
       };
     });
 };
 
 /**
- * Works out a paste: each copied map becomes a new map with the lowest free id, its name and file as copied, hung
- * last under the place's parent, or under the copy of the copied map it hung from.
+ * Works out a paste: each copied map becomes a new map with the lowest free id, its name, file and placements of
+ * blueprints as copied, hung last under the place's parent, or under the copy of the copied map it hung from.
  * @param {MapInfoRows} rows The tree as it stands.
  * @param {readonly CopiedMap[]} copies The clipboard's maps, in the order they were copied.
  * @param {number} parentId Where they land, or {@link TREE_ROOT} for the top level.
@@ -369,15 +382,15 @@ const planPaste = (rows: MapInfoRows, copies: readonly CopiedMap[], parentId: nu
   return {
     label: copies.length === 1 ? `Paste "${copies[0].name}"` : `Paste ${copies.length} maps`,
     rows: tree.toRows(),
-    created: copies.map((copy, index) => ({ mapId: ids[index], content: cloneJson(copy.content) })),
+    created: copies.map((copy, index) => ({ mapId: ids[index], content: cloneJson(copy.content), spots: [ ...copy.spots ] })),
     removed: [],
     selection: ids,
   };
 };
 
 /**
- * Works out a duplicate: every selected map gets one copy, named as it is, with its file as it stands, right after
- * it under the same parent.
+ * Works out a duplicate: every selected map gets one copy, named as it is, with its file and its placements of
+ * blueprints as they stand, right after it under the same parent.
  * @param {MapInfoRows} rows The tree as it stands.
  * @param {readonly DuplicateSource[]} sources The maps to duplicate, with their files.
  * @param {ReadonlySet<number>} skip Free ids not to use.
@@ -409,7 +422,7 @@ const planDuplicate = (rows: MapInfoRows, sources: readonly DuplicateSource[], s
   return {
     label,
     rows: tree.toRows(),
-    created: known.map((source, index) => ({ mapId: ids[index], content: cloneJson(source.content) })),
+    created: known.map((source, index) => ({ mapId: ids[index], content: cloneJson(source.content), spots: [ ...source.spots ?? [] ] })),
     removed: [],
     selection: ids,
   };

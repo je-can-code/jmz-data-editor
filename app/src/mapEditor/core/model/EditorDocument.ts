@@ -70,6 +70,14 @@ interface EditorDocument
   toJsonWithout(patches: readonly Patch[]): JsonValue;
 
   /**
+   * Reports whether the document holds exactly some content, as its file would hold it, without copying anything: what
+   * deciding whether a document is saved compares, after every step, against what its file holds.
+   * @param {JsonValue} content The content, in its file shape.
+   * @returns {boolean} True when the two hold the same data.
+   */
+  matches(content: JsonValue): boolean;
+
+  /**
    * Works out the patches that turn this document's content into other content for the same file, as one edit
    * would have made them: applied in order they reach exactly that content, and reversed newest first they come back
    * to this one. Only what differs is addressed, so an edit elsewhere in the document can still be undone around

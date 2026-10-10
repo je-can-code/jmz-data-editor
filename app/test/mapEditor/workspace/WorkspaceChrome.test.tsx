@@ -84,6 +84,20 @@ describe('WorkspaceChrome', () =>
       .toStrictEqual([ [ '', 'jmz-common-events', 'popup,width=1280,height=860' ] ]);
   });
 
+  it('opens the switches and variables through the window shell, beside the common events', () =>
+  {
+    // Arrange.
+    const { openWindow } = renderChrome();
+
+    // Act.
+    fireEvent.click(screen.getByRole('button', { name: 'Switches & Variables' }));
+
+    // Assert: the button sits right after Common events, and opens its own window.
+    const labels = screen.getAllByRole('button').map(button => button.textContent);
+    expect([ labels[labels.indexOf('Common events') + 1], openWindow.mock.calls ])
+      .toStrictEqual([ 'Switches & Variables', [ [ '', 'jmz-switches-variables', 'popup,width=1180,height=860' ] ] ]);
+  });
+
   it('says everything is saved while nothing is waiting', () =>
   {
     // Arrange: nothing edited.
@@ -226,6 +240,7 @@ describe('WorkspaceChrome', () =>
         .toStrictEqual([
           [ 'Maps', true ],
           [ 'Tiles', true ],
+          [ 'Stamps', true ],
           [ 'Layers', true ],
           [ 'Map properties', true ],
           [ 'Quick settings', true ],

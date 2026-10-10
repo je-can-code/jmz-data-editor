@@ -32,14 +32,16 @@ type DefaultPanelSpec = Parameters<DockviewApi['addPanel']>[0];
 
 /**
  * Every panel the workspace lays out the first time or after a reset, in the order they are added: down the left,
- * the map tree, the palette and the layers panel, each in its own group so all three show at once; the start panel
- * in the middle, holding the centre maps open into (see CentreKeeper); and the map properties and quick settings on
- * the right above the history, with the events list a tab behind the history. Reopening one panel on its own (see
- * openSidePanel) adds just that one, by this same spec, so it lands exactly where a reset would put it.
+ * the map tree, the palette with the stamps a tab behind it, since both hand the map something to paint with, and the
+ * layers panel, each in its own group so all three show at once; the start panel in the middle, holding the centre
+ * maps open into (see CentreKeeper); and the map properties and quick settings on the right above the history, with the
+ * events list a tab behind the history. Reopening one panel on its own (see openSidePanel) adds just that one, by this
+ * same spec, so it lands exactly where a reset would put it.
  */
 const DEFAULT_PANEL_SPECS: readonly DefaultPanelSpec[] = [
   { id: SINGLE_PANEL_IDS.mapTree, component: PANEL_COMPONENTS.mapTree, title: 'Maps' },
   { id: SINGLE_PANEL_IDS.palette, component: PANEL_COMPONENTS.palette, title: 'Tiles', position: { referencePanel: SINGLE_PANEL_IDS.mapTree, direction: 'below' } },
+  { id: SINGLE_PANEL_IDS.stamps, component: PANEL_COMPONENTS.stamps, title: 'Stamps', position: { referencePanel: SINGLE_PANEL_IDS.palette, direction: 'within' }, inactive: true },
   { id: SINGLE_PANEL_IDS.layers, component: PANEL_COMPONENTS.layers, title: 'Layers', position: { referencePanel: SINGLE_PANEL_IDS.palette, direction: 'below' } },
   { id: SINGLE_PANEL_IDS.start, component: PANEL_COMPONENTS.start, title: 'Start', position: { direction: 'right' } },
   { id: SINGLE_PANEL_IDS.properties, component: PANEL_COMPONENTS.properties, title: 'Map properties', position: { direction: 'right' } },

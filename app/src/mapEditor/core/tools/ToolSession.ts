@@ -1,10 +1,19 @@
+import { blueprintLinkOf } from '../blueprints/blueprintLink.ts';
+import { placeBlueprint } from '../blueprints/blueprintPlacement.ts';
+import { liveBlueprintsIn } from '../blueprints/blueprints.ts';
+import { carrySpans, spansOnMap, spansWithin } from '../blueprints/placementSpans.ts';
 import type { DocumentHub } from '../history/DocumentHub.ts';
+import { mapHistoryKey } from '../history/historyKeys.ts';
 import type { MapDocument } from '../model/MapDocument.ts';
+import type { RmmzMapEvent } from '../model/rmmzTypes.ts';
 import type { MapCell } from '../renderer/camera.ts';
-import type { CellRect, GhostTile } from '../renderer/MapRenderer.ts';
+import type { CellRect, GhostEvent, GhostTile } from '../renderer/MapRenderer.ts';
+import { placeStamp, type StampOutcome } from '../stamps/stampPlacement.ts';
+import { previewStamp } from '../stamps/stampPreview.ts';
 import type { Shaping, TilesetLayering } from '../tiles/layering.ts';
 import type { TileLayerIndex } from '../tiles/tileGrid.ts';
 import { fitsTileset, type Brush, type BrushKind } from './brush.ts';
+import { ClipEventsPreview, commitClipEvents, eventsOnArea, leftOutWords, planClipEvents, type ClipEventsFrame } from './clipEvents.ts';
 import { cellsInEllipse, cellsInRect, clipRect, rectangleBetween, rectContains } from './geometry.ts';
 import {
   hasShadow,
@@ -37,13 +46,16 @@ type ToolPointer = {
 
 /**
  * What the map should show for the tools: the brush cursor (the cells a click would reach, or the extent of a shape or
- * an eyedropper drag) and its words, the ghost preview, and the selected area.
+ * an eyedropper drag) and its words, the ghost preview, the selected area, and, for the stamp, the ghosts of the events
+ * it would place and in red the tiles where another event stands in their way.
  */
 type ToolOverlay = {
   readonly hover: CellRect | null;
   readonly hoverLabel: string | null;
   readonly ghostTiles: readonly GhostTile[];
   readonly selectedCells: CellRect | null;
+  readonly ghostEvents: readonly GhostEvent[];
+  readonly blockedCells: readonly MapCell[];
 };
 
 /**
@@ -79,6 +91,24 @@ type ToolSessionHost = {
    * Takes up another tool, as the eyedropper does when it has picked.
    */
   pickTool(tool: PaintTool): void;
+
+  /**
+   * Hears what a click of the stamp tool came to: the events it placed, which take the selection, what it left out, or
+   * why it was refused. Left out, nobody hears.
+   */
+  stamped?(outcome: StampOutcome): void;
+
+  /**
+   * Hears what a drop of the select tool's area could not do, in words for the author: why it was refused, changing
+   * nothing, or what it left out. Left out, nobody hears.
+   */
+  told?(message: string, refused: boolean): void;
+
+  /**
+   * Says why a map may hold no copy of a blueprint, or null when it may (see blueprintPlacement's link gate): the stamp
+   * tool places neither a blueprint there nor a stamp carrying copies of one, and the select tool copies none there.
+   */
+  linkRefusal(mapId: number): string | null;
 };
 
 /**
@@ -115,6 +145,8 @@ type Gesture =
     readonly grab: MapCell;
     readonly copy: boolean;
     readonly mode: number;
+    readonly events: ClipEventsPreview | null;
+    readonly linksRefused: boolean;
   };
 
 /**
@@ -135,9 +167,68 @@ const STEP_LABELS = {
 const IDLE: Gesture = { kind: 'idle' };
 
 /**
+ * What the stamp tool's cursor says over a map that may hold no copy of a blueprint, with a blueprint, or a stamp
+ * carrying copies of one, in hand; and the select tool's, copying an area that carries copies of one on such a map.
+ */
+const LINKS_REFUSED_LABEL = 'Blueprints can\'t go here';
+
+/**
+ * No ghost events and no blocked tiles: shared, so the renderer sees nothing change while none show.
+ */
+const NO_GHOST_EVENTS: readonly GhostEvent[] = Object.freeze([]);
+const NO_CELLS: readonly MapCell[] = Object.freeze([]);
+
+/**
+ * Names a drop of the select tool's area for the history panel: what it did, and how many events it carried along with
+ * the tiles, when it carried any.
+ * @param {boolean} copy True for a copy, false for a move.
+ * @param {number} events How many events it moved or copied.
+ * @returns {string} The words, such as "Move tiles" or "Copy tiles and 3 events".
+ */
+const clipStepLabel = (copy: boolean, events: number): string =>
+{
+  const verb = copy ? 'Copy tiles' : 'Move tiles';
+  if (events === 0)
+  {
+    return verb;
+  }
+
+  return `${verb} and ${events === 1 ? '1 event' : `${events} events`}`;
+};
+
+/**
+ * Words what a drop of the select tool's area would do, beside the area as it is dragged: move or copy, or why a drop
+ * there would be refused, the events it carries landing on others or, moved, falling off the map.
+ * @param {boolean} copy True for a copy, false for a move.
+ * @param {ClipEventsFrame | null} frame What the events it carries show, or null for none.
+ * @returns {string} The words.
+ */
+const clipLabel = (copy: boolean, frame: ClipEventsFrame | null): string =>
+{
+  if (frame !== null && frame.blocked.length > 0)
+  {
+    return 'Another event is in the way';
+  }
+
+  if (frame !== null && frame.offMap)
+  {
+    return 'An event would leave the map';
+  }
+
+  return copy ? 'Copy' : 'Move';
+};
+
+/**
  * An overlay showing nothing of the tools: no cursor, no words, no ghosts and no selected area.
  */
-const NO_TOOL_OVERLAY: ToolOverlay = { hover: null, hoverLabel: null, ghostTiles: [], selectedCells: null };
+const NO_TOOL_OVERLAY: ToolOverlay = {
+  hover: null,
+  hoverLabel: null,
+  ghostTiles: [],
+  selectedCells: null,
+  ghostEvents: NO_GHOST_EVENTS,
+  blockedCells: NO_CELLS,
+};
 
 /**
  * One map view's painting: what the tool in hand does as the left button goes down, drags and comes up over the map,
@@ -145,9 +236,9 @@ const NO_TOOL_OVERLAY: ToolOverlay = { hover: null, hoverLabel: null, ghostTiles
  * keys, and draws the overlay it answers with.
  *
  * Every edit is one step of the map's history: a pen, eraser or shadow pen stroke from press to release, however many
- * cells it crossed, and a rectangle, ellipse, fill, swap, move or copy as it lands. Everything a stroke paints with is
- * fixed when it starts: the brush, the tool, the layer (the override's while its key is held) and whether Shift holds
- * autotiles exact, so letting a key go mid-stroke never changes what the rest of the stroke does.
+ * cells it crossed, and a rectangle, ellipse, fill, swap, move, copy or stamp as it lands. Everything a stroke paints
+ * with is fixed when it starts: the brush, the tool, the layer (the override's while its key is held) and whether Shift
+ * holds autotiles exact, so letting a key go mid-stroke never changes what the rest of the stroke does.
  */
 class ToolSession
 {
@@ -298,8 +389,9 @@ class ToolSession
 
   /**
    * Follows the tool in hand changing: the selection goes when another tool than the select tool is taken up, since
-   * only that tool shows or uses it, and every painting tool but the eyedropper is remembered as the one to go back to
-   * once the eyedropper has picked; what it picks is for painting, so it never goes back to the events.
+   * only that tool shows or uses it, and every painting tool but the eyedropper and the stamp is remembered as the one
+   * to go back to once the eyedropper has picked; what it picks is a brush to paint with, which neither the events nor
+   * the stamp read.
    * @param {PaintTool} tool The tool in hand now.
    */
   toolChanged(tool: PaintTool): void
@@ -309,7 +401,7 @@ class ToolSession
       this.#selection = null;
     }
 
-    if (tool !== 'eyedropper' && isPaintingTool(tool))
+    if (tool !== 'eyedropper' && tool !== 'stamp' && isPaintingTool(tool))
     {
       this.#toolBeforePick = tool;
     }
@@ -336,15 +428,21 @@ class ToolSession
       return this.#gestureOverlay(map, gesture, pointer);
     }
 
-    if (isPaintingTool(this.#host.settings().tool) === false)
+    const { tool } = this.#host.settings();
+    if (isPaintingTool(tool) === false)
     {
       return NO_TOOL_OVERLAY;
     }
 
-    const preview = pointer === null || pointer.cell === null
+    if (tool === 'stamp' && pointer !== null && pointer.cell !== null)
+    {
+      return this.#stampOverlay(map, pointer, pointer.cell);
+    }
+
+    const preview = pointer === null || pointer.cell === null || tool === 'stamp'
       ? NO_PREVIEW
       : this.#idlePreview(map, pointer, pointer.cell);
-    return { hover: preview.hover, hoverLabel: preview.label, ghostTiles: preview.ghosts, selectedCells };
+    return { ...NO_TOOL_OVERLAY, hover: preview.hover, hoverLabel: preview.label, ghostTiles: preview.ghosts, selectedCells };
   }
 
   /**
@@ -360,7 +458,8 @@ class ToolSession
     const mode = this.#layerMode(pointer);
     const context = paintContextFor(mode, pointer.shift ? 'exact' : 'auto', this.#host.layering(map));
 
-    // the eyedropper, the select tool and the eraser lay none of the brush's values, so its tileset is no matter.
+    // the eyedropper, the select tool, the eraser and the stamp lay none of the brush's values, so its tileset is no
+    // matter.
     switch (tool)
     {
       case 'eyedropper':
@@ -371,6 +470,9 @@ class ToolSession
         return;
       case 'eraser':
         this.#startFreehand(map, cell, inHand, inHand?.kind ?? 'tiles', context, label);
+        return;
+      case 'stamp':
+        this.#stamp(map, cell, context.shaping);
         return;
       default:
         break;
@@ -431,6 +533,32 @@ class ToolSession
   }
 
   /**
+   * Places the stamp in hand with its top-left corner on the cell clicked, as one step of the map's history, and tells
+   * the host what came of it: the events it placed, or why it was refused. A blueprint's stamp places copies linked to
+   * the blueprint, and a stamp a brush took up with a fit goes down as it fits this map at the moment of the click. With
+   * no stamp in hand nothing happens.
+   * @param {MapDocument} map The map.
+   * @param {MapCell} cell The cell clicked.
+   * @param {Shaping} shaping Whether the tiles go down exactly as copied (Shift held).
+   */
+  #stamp(map: MapDocument, cell: MapCell, shaping: Shaping): void
+  {
+    const { stamp, blueprint, fit } = this.#host.settings();
+    if (stamp === null)
+    {
+      return;
+    }
+
+    const { mode } = this.#host.layering(map);
+    const placement = { at: cell, shaping, mode, linkRefusal: this.#host.linkRefusal(map.mapId) };
+    const placing = fit === null ? stamp : fit(map).stamp;
+    const outcome = blueprint === null
+      ? placeStamp(this.#host.hub, map.mapId, placing, placement, 'Stamp')
+      : placeBlueprint(this.#host.hub, map.mapId, blueprint.id, placement);
+    this.#host.stamped?.(outcome);
+  }
+
+  /**
    * Starts a shadow pen stroke on a quarter: it takes the shadow away when the quarter has one, and adds shadows
    * otherwise, and the whole stroke does the same.
    * @param {MapDocument} map The map.
@@ -447,7 +575,8 @@ class ToolSession
 
   /**
    * Starts the select tool: a press inside the selection picks the selected area up to move it (or copy it, with
-   * Ctrl held); anywhere else starts a new selection.
+   * Ctrl held); anywhere else starts a new selection. An area lifted with every layer carries the events standing on it
+   * too, as copying it into a stamp does; one lifted from the chosen layer alone carries none.
    * @param {MapDocument} map The map.
    * @param {MapCell} cell The cell pressed.
    * @param {ToolPointer} pointer The keys held.
@@ -458,11 +587,17 @@ class ToolSession
     const selection = this.#selection;
     if (selection !== null && rectContains(selection, cell))
     {
-      const clip = captureClip(map, selection, choiceFor(mode));
+      const choice = choiceFor(mode);
+      const clip = captureClip(map, selection, choice);
       if (clip !== null)
       {
         const tilesetMode = this.#host.layering(map).mode;
-        this.#gesture = { kind: 'drag-clip', map, clip, grab: cell, copy: pointer.copy, mode: tilesetMode };
+        const carried = choice === 'auto' ? eventsOnArea(map, clip.source) : [];
+        const events = carried.length === 0 ? null : new ClipEventsPreview(map, carried);
+
+        // a copy is a copy from the press, so whether the map refuses what it carries is known as the drag starts.
+        const linksRefused = pointer.copy && this.#refusesCopyOf(map, clip, carried);
+        this.#gesture = { kind: 'drag-clip', map, clip, grab: cell, copy: pointer.copy, mode: tilesetMode, events, linksRefused };
       }
 
       return;
@@ -578,25 +713,92 @@ class ToolSession
   }
 
   /**
-   * Puts a lifted area down where it was dragged to, moving it or copying it, and keeps it selected there.
+   * Puts a lifted area down where it was dragged to, moving it or copying it, and keeps it selected there. Everything the
+   * area holds travels with its tiles in the same step, so one undo takes it all back: the events standing on it, moved
+   * with their ids, links and all, or copied as new events (see planClipEvents); and the placements of blueprints it
+   * holds whole, moved with a move, recorded again with a copy. A moved copy of a blueprint so keeps its events, their
+   * links and its spot together. Events that cannot go there refuse the whole drop, which changes nothing, and the author
+   * hears why, as does a copy carrying copies of blueprints onto a map that may hold none (see {@link #copyRefusal});
+   * events a copy leaves out past the map's edge are said too.
    * @param {Extract<Gesture, { kind: 'drag-clip' }>} gesture The drag.
    * @param {MapCell} end Where it ended.
    * @param {Shaping} shaping Whether autotiles are reshaped around it.
    */
   #finishClip(gesture: Extract<Gesture, { kind: 'drag-clip' }>, end: MapCell, shaping: Shaping): void
   {
-    const { map, clip, grab, copy, mode } = gesture;
-    const dx = end.x - grab.x;
-    const dy = end.y - grab.y;
-    if (dx === 0 && dy === 0)
+    const { map, clip, grab, copy, mode, events } = gesture;
+    const by = { x: end.x - grab.x, y: end.y - grab.y };
+    if (by.x === 0 && by.y === 0)
     {
       return;
     }
 
-    const at = { x: clip.source.x + dx, y: clip.source.y + dy };
+    // the events are planned against the map as it stands at the drop, which anything since the press may have changed.
+    const plan = planClipEvents(map, events === null ? [] : events.eventIds, by, copy);
+    if (plan.ok === false)
+    {
+      this.#host.told?.(plan.message, true);
+      return;
+    }
+
+    // copies of a blueprint stay off a map that may hold no link, whichever way they would get there; a move adds none.
+    const { hub } = this.#host;
+    const carried = spansWithin(spansOnMap(hub, map.mapId), clip.source, clip.layers, map);
+    const refusal = copy ? this.#copyRefusal(map, plan.copies, carried.length) : null;
+    if (refusal !== null)
+    {
+      this.#host.told?.(refusal, true);
+      return;
+    }
+
+    const at = { x: clip.source.x + by.x, y: clip.source.y + by.y };
     const changes = planPlaceClip(map, clip, { at, move: copy === false, shaping, mode });
-    applyTileEdit(this.#host.hub, map, copy ? 'Copy tiles' : 'Move tiles', changes);
+    hub.edit(clipStepLabel(copy, plan.moves.length + plan.copies.length), [ mapHistoryKey(map.mapId) ], tx =>
+    {
+      tx.tiles(map.key, changes);
+      commitClipEvents(tx, map, plan);
+      carrySpans(tx, hub, map.mapId, carried, by, map, copy);
+    });
     this.#selection = clipRect({ x: at.x, y: at.y, width: clip.source.width, height: clip.source.height }, map.width, map.height);
+
+    const leftOut = leftOutWords(plan.leftOut);
+    if (leftOut !== null)
+    {
+      this.#host.told?.(leftOut, false);
+    }
+  }
+
+  /**
+   * Says why a copy of a lifted area may not go down on its map, or null when it may: on a map that may hold no copy of a
+   * blueprint (see the host's linkRefusal), a copy putting down an event linked to one, or recording again a placement of
+   * one the area holds whole, is refused, as placing a blueprint or duplicating its linked events there is.
+   * @param {MapDocument} map The map.
+   * @param {readonly RmmzMapEvent[]} events The events the copy puts down, their notes as copied.
+   * @param {number} placements How many placements of blueprints the copy records again.
+   * @returns {string | null} Why, in words for the author, or null when nothing stands in its way.
+   */
+  #copyRefusal(map: MapDocument, events: readonly RmmzMapEvent[], placements: number): string | null
+  {
+    const refusal = this.#host.linkRefusal(map.mapId);
+    const linked = placements > 0 || events.some(event => blueprintLinkOf(event.note) !== null);
+    return refusal === null || linked === false
+      ? null
+      : `The selection holds copies of blueprints, which can't go here: ${refusal}.`;
+  }
+
+  /**
+   * Reports whether a copy of a lifted area would be refused for the copies of blueprints it carries (see
+   * {@link #copyRefusal}), judged against the map as the drag starts, for the words beside the area while it is dragged.
+   * @param {MapDocument} map The map.
+   * @param {TileClip} clip The area lifted.
+   * @param {readonly number[]} eventIds The events it carries, every one of them on the map.
+   * @returns {boolean} True when a drop would be refused.
+   */
+  #refusesCopyOf(map: MapDocument, clip: TileClip, eventIds: readonly number[]): boolean
+  {
+    const placements = spansWithin(spansOnMap(this.#host.hub, map.mapId), clip.source, clip.layers, map).length;
+    const events = eventIds.map(id => map.event(id) as RmmzMapEvent);
+    return this.#copyRefusal(map, events, placements) !== null;
   }
 
   /**
@@ -616,20 +818,20 @@ class ToolSession
         // the stroke paints as it goes, so the cursor needs no ghost: the tiles are already there.
         const size = gesture.brush === null ? { width: 1, height: 1 } : gesture.brush;
         const hover = cell === null ? null : { x: cell.x, y: cell.y, width: size.width, height: size.height };
-        return { hover, hoverLabel: gesture.label, ghostTiles: [], selectedCells: null };
+        return { ...NO_TOOL_OVERLAY, hover, hoverLabel: gesture.label };
       }
       case 'shadow':
-        return { hover: null, hoverLabel: gesture.adding ? 'Add shadows' : 'Remove shadows', ghostTiles: [], selectedCells: null };
+        return { ...NO_TOOL_OVERLAY, hoverLabel: gesture.adding ? 'Add shadows' : 'Remove shadows' };
       case 'shape':
         return this.#shapeOverlay(map, gesture, cell ?? gesture.anchor);
       case 'pick':
-        return { hover: rectangleBetween(gesture.anchor, cell ?? gesture.anchor), hoverLabel: null, ghostTiles: [], selectedCells: null };
+        return { ...NO_TOOL_OVERLAY, hover: rectangleBetween(gesture.anchor, cell ?? gesture.anchor) };
       case 'marquee':
-        return { hover: null, hoverLabel: null, ghostTiles: [], selectedCells: this.#selection };
+        return { ...NO_TOOL_OVERLAY, selectedCells: this.#selection };
       case 'drag-clip':
         return this.#clipOverlay(map, gesture, cell ?? gesture.grab);
       default:
-        return { hover: null, hoverLabel: null, ghostTiles: [], selectedCells: null };
+        return NO_TOOL_OVERLAY;
     }
   }
 
@@ -650,11 +852,12 @@ class ToolSession
     const hoverLabel = brush.kind === 'tiles'
       ? layerLabel(mode, underAnchor === undefined ? -1 : underAnchor.layer as TileLayerIndex, context.shaping)
       : null;
-    return { hover: rect, hoverLabel, ghostTiles, selectedCells: null };
+    return { ...NO_TOOL_OVERLAY, hover: rect, hoverLabel, ghostTiles };
   }
 
   /**
-   * Works out the overlay while a lifted area is dragged: where it would land, drawn as ghosts over the map.
+   * Works out the overlay while a lifted area is dragged: where it would land, drawn as ghosts over the map, and words
+   * saying so beside it when a copy carries copies of blueprints onto a map that may hold none.
    * @param {MapDocument} map The map.
    * @param {Extract<Gesture, { kind: 'drag-clip' }>} gesture The drag.
    * @param {MapCell} at Where the pointer is.
@@ -662,14 +865,65 @@ class ToolSession
    */
   #clipOverlay(map: MapDocument, gesture: Extract<Gesture, { kind: 'drag-clip' }>, at: MapCell): ToolOverlay
   {
-    const { clip, grab, copy } = gesture;
-    const topLeft = { x: clip.source.x + at.x - grab.x, y: clip.source.y + at.y - grab.y };
+    const { clip, grab, copy, events, linksRefused } = gesture;
+    const by = { x: at.x - grab.x, y: at.y - grab.y };
+    const topLeft = { x: clip.source.x + by.x, y: clip.source.y + by.y };
     const landed = { x: topLeft.x, y: topLeft.y, width: clip.source.width, height: clip.source.height };
+    const frame = events === null ? null : events.at(by, copy);
     return {
-      hover: null,
-      hoverLabel: copy ? 'Copy' : 'Move',
+      ...NO_TOOL_OVERLAY,
+      hoverLabel: linksRefused ? LINKS_REFUSED_LABEL : clipLabel(copy, frame),
       ghostTiles: clipGhosts(clip, topLeft, map),
       selectedCells: landed,
+      ghostEvents: frame === null || frame.ghosts.length === 0 ? NO_GHOST_EVENTS : frame.ghosts,
+      blockedCells: frame === null || frame.blocked.length === 0 ? NO_CELLS : frame.blocked,
+    };
+  }
+
+  /**
+   * Works out the overlay while the stamp tool is in hand: the stamp's footprint with its corner under the pointer, its
+   * tiles and events where a click would put them, and in red the tiles another event holds in their way. Over a map that
+   * may hold no copy of a blueprint, a blueprint in hand, or a stamp carrying copies of one, in its events or in tiles
+   * holding a placement, says so beside the footprint. A stamp a brush took up with a fit shows as it fits this map, and
+   * says what fitting it came to. With no stamp picked, only the cell under the pointer.
+   * @param {MapDocument} map The map.
+   * @param {ToolPointer} pointer The pointer and keys.
+   * @param {MapCell} cell The cell under it.
+   * @returns {ToolOverlay} The overlay.
+   */
+  #stampOverlay(map: MapDocument, pointer: ToolPointer, cell: MapCell): ToolOverlay
+  {
+    const { stamp: held, blueprint, fit } = this.#host.settings();
+    if (held === null)
+    {
+      return { ...NO_TOOL_OVERLAY, hover: { x: cell.x, y: cell.y, width: 1, height: 1 } };
+    }
+
+    // a stamp fitted to the map is shown as a click here would place it, with what fitting it came to.
+    const fitted = fit === null ? null : fit(map);
+    const stamp = fitted === null ? held : fitted.stamp;
+
+    // a map that may hold no link says so before the click that would be refused; a copy of a blueprint gone goes down
+    // plain, so it is no copy here, and tiles of another tileset are left out, placements and all.
+    const live = liveBlueprintsIn(this.#host.hub);
+    const isLive = (blueprintId: string): boolean => live === null || live(blueprintId);
+    const linkedEvents = stamp.events.some(event =>
+    {
+      const link = blueprintLinkOf(event.note);
+      return link !== null && isLive(link.blueprintId);
+    });
+    const placedTiles = stamp.tilesetId === map.tilesetId && (stamp.spots ?? []).some(spot => isLive(spot.blueprintId));
+    const linked = blueprint !== null || linkedEvents || placedTiles;
+    const refused = linked && this.#host.linkRefusal(map.mapId) !== null;
+    const words = fitted === null ? null : fitted.words;
+    const preview = previewStamp(map, stamp, cell, pointer.shift ? 'exact' : 'auto', blueprint === null ? 'stamp' : 'blueprint', words);
+    return {
+      hover: preview.hover,
+      hoverLabel: refused ? LINKS_REFUSED_LABEL : preview.label,
+      ghostTiles: preview.ghostTiles,
+      selectedCells: null,
+      ghostEvents: preview.ghostEvents.length === 0 ? NO_GHOST_EVENTS : preview.ghostEvents,
+      blockedCells: preview.blockedCells.length === 0 ? NO_CELLS : preview.blockedCells,
     };
   }
 

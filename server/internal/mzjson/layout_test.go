@@ -3,9 +3,11 @@ package mzjson
 import "testing"
 
 // Each layout owes its callers one file shape exactly: MZ's table shape for MapInfos.json and
-// Tilesets.json, MZ's map shape for Map###.json, and JSON.stringify's two-space indentation for the
-// editor's own documents. The shapes are fixed by what is already on disk, so every expected value
-// here is a literal copy of that shape rather than something derived from the code under test.
+// Tilesets.json, MZ's map shape for Map###.json, MZ's single line for System.json, JSON.stringify's
+// two-space indentation for the editor's own documents, and, for a file two apps write in two ways,
+// whichever of those last two the file already has. The shapes are fixed by what is already on disk,
+// so every expected value here is a literal copy of that shape rather than something derived from
+// the code under test.
 
 // TestTableLayoutPutsEachRowOnItsOwnLine covers the database-table shape.
 func TestTableLayoutPutsEachRowOnItsOwnLine(t *testing.T) {
@@ -128,6 +130,109 @@ func TestMapLayoutRefusesMapsTheEngineCannotEnter(t *testing.T) {
 			// Assert.
 			if err == nil {
 				t.Errorf("expected %s to be refused", document)
+			}
+		})
+	}
+}
+
+// TestCompactLayoutWritesTheWholeDocumentOnOneLine covers System.json's shape: JSON.stringify's own
+// one line, with nothing after it, and a `<` and an `&` written as MZ writes them rather than as Go
+// escapes them.
+func TestCompactLayoutWritesTheWholeDocumentOnOneLine(t *testing.T) {
+	cases := []struct {
+		name     string
+		document string
+		expected string
+	}{
+		{
+			name:     "an object over several lines",
+			document: "{\n  \"gameTitle\": \"<Chef> & Co\",\n  \"switches\": [\"\", \"Door open\"],\n  \"windowTone\": [0, 0, 0, 0]\n}\n",
+			expected: `{"gameTitle":"<Chef> & Co","switches":["","Door open"],"windowTone":[0,0,0,0]}`,
+		},
+		{name: "an empty object", document: `{}`, expected: `{}`},
+	}
+
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			// Arrange.
+			value := mustParse(t, testCase.document)
+
+			// Act.
+			actual, err := CompactLayout(value)
+
+			// Assert.
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(actual) != testCase.expected {
+				t.Errorf("wrote %q, expected %q", actual, testCase.expected)
+			}
+		})
+	}
+}
+
+// TestLayoutLikeKeepsTheLayoutOfTheFileItReplaces covers a file two apps write: whatever layout the
+// file already has, one line or indented, with its own indent, line endings and closing newline, and
+// its strings spelled as JSON.stringify or as Go spells them, is the layout it is written in again.
+// The document written is never the template's own, so what carries over is the shape alone.
+func TestLayoutLikeKeepsTheLayoutOfTheFileItReplaces(t *testing.T) {
+	const document = `{"gameTitle":"<Chef> & Co","switches":["","Door open"],"tone":[],"editor":{}}`
+	cases := []struct {
+		name     string
+		template string
+		expected string
+	}{
+		{
+			name:     "MZ's one line",
+			template: `{"gameTitle":"Chef","switches":["","Door shut"],"tone":[],"editor":{}}`,
+			expected: `{"gameTitle":"<Chef> & Co","switches":["","Door open"],"tone":[],"editor":{}}`,
+		},
+		{
+			name:     "one line with a closing newline",
+			template: "{\"gameTitle\":\"Chef & Co\"}\n",
+			expected: "{\"gameTitle\":\"<Chef> & Co\",\"switches\":[\"\",\"Door open\"],\"tone\":[],\"editor\":{}}\n",
+		},
+		{
+			name:     "no file yet",
+			template: "",
+			expected: `{"gameTitle":"<Chef> & Co","switches":["","Door open"],"tone":[],"editor":{}}`,
+		},
+		{
+			name:     "the data editor's indent, with Go's escapes",
+			template: "{\n  \"gameTitle\": \"Chef \\u0026 Co\",\n  \"switches\": [\n    \"\"\n  ]\n}",
+			expected: "{\n  \"gameTitle\": \"\\u003cChef\\u003e \\u0026 Co\",\n  \"switches\": [\n    \"\",\n    \"Door open\"\n  ],\n  \"tone\": [],\n  \"editor\": {}\n}",
+		},
+		{
+			name:     "JSON.stringify's indent, with a closing newline",
+			template: "{\n  \"gameTitle\": \"Chef & Co\"\n}\n",
+			expected: "{\n  \"gameTitle\": \"<Chef> & Co\",\n  \"switches\": [\n    \"\",\n    \"Door open\"\n  ],\n  \"tone\": [],\n  \"editor\": {}\n}\n",
+		},
+		{
+			name:     "tabs and Windows line endings",
+			template: "{\r\n\t\"gameTitle\": \"Chef\"\r\n}\r\n",
+			expected: "{\r\n\t\"gameTitle\": \"<Chef> & Co\",\r\n\t\"switches\": [\r\n\t\t\"\",\r\n\t\t\"Door open\"\r\n\t],\r\n\t\"tone\": [],\r\n\t\"editor\": {}\r\n}\r\n",
+		},
+		{
+			name:     "lines with no indent of their own",
+			template: "{\n\"gameTitle\": \"Chef\"\n}",
+			expected: "{\n  \"gameTitle\": \"<Chef> & Co\",\n  \"switches\": [\n    \"\",\n    \"Door open\"\n  ],\n  \"tone\": [],\n  \"editor\": {}\n}",
+		},
+	}
+
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			// Arrange.
+			value := mustParse(t, document)
+
+			// Act.
+			actual, err := LayoutLike([]byte(testCase.template))(value)
+
+			// Assert.
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(actual) != testCase.expected {
+				t.Errorf("wrote %q, expected %q", actual, testCase.expected)
 			}
 		})
 	}

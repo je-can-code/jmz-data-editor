@@ -56,8 +56,9 @@ describe('PluginArgField', () =>
       const { onChange } = renderArg(COUNT, '3');
       const input = screen.getByLabelText('Count') as HTMLInputElement;
 
-      // Act.
+      // Act: type, then leave the box, which ends the burst.
       fireEvent.change(input, { target: { value: '12' } });
+      fireEvent.blur(input);
 
       // Assert.
       expect([ input.value, input.getAttribute('aria-invalid'), onChange.mock.calls ])
@@ -70,8 +71,9 @@ describe('PluginArgField', () =>
       const { onChange } = renderArg({ ...COUNT, decimals: 2 }, '3');
       const input = screen.getByLabelText('Count') as HTMLInputElement;
 
-      // Act.
+      // Act: type, then leave the box, which ends the burst.
       fireEvent.change(input, { target: { value: '4.' } });
+      fireEvent.blur(input);
 
       // Assert: a whole number in bounds is not marked, whatever is still to come.
       expect([ input.value, input.getAttribute('aria-invalid'), onChange.mock.calls ])
@@ -102,8 +104,9 @@ describe('PluginArgField', () =>
       const { onChange } = renderArg(WEATHER, 'rain');
       const input = screen.getByLabelText('Weather') as HTMLInputElement;
 
-      // Act.
+      // Act: type, then leave the box, which ends the burst.
       fireEvent.change(input, { target: { value: 'hail' } });
+      fireEvent.blur(input);
 
       // Assert.
       expect([ input.value, onChange.mock.calls.at(-1) ])

@@ -1,0 +1,518 @@
+import { describe, expect, it, vi } from 'vitest';
+import { createEventPage } from '../../../../src/mapEditor/core/model/eventModel.ts';
+import type { RmmzEventPage, RmmzMapEvent } from '../../../../src/mapEditor/core/model/rmmzTypes.ts';
+import type { PageCondition, PageMoment, PageRule } from '../../../../src/mapEditor/core/pageRule/pageRule.ts';
+import { ShownPages } from '../../../../src/mapEditor/core/pageRule/ShownPages.ts';
+import { GamePreview } from '../../../../src/mapEditor/core/preview/GamePreview.ts';
+import { command, event, page } from '../../support/eventKindFixtures.ts';
+
+/*
+ * The page each event on a map shows at the window's clock and preview. With a rule, it is the game's own page at the
+ * clock's time, judged against the switches and variables the preview sets and a fresh save everywhere else, and an
+ * event no page holds for draws its first page faded; without one, every event shows its first page, as MZ's own editor
+ * shows it, and nothing is faded.
+ *
+ * Every event is read once and remembered: until whoever draws it says it changed, or it is put back in its slot as
+ * another object, or the rule changes. Moving the clock judges again only the events read so far whose pages ask
+ * something the clock can change; moving its season, only those whose pages read the date; changing the preview, only
+ * those whose pages read a switch, a variable or a piece of state it changed. Each answers the events now showing
+ * another page; an event none of them can change is never read again for it, and a clock or a season standing still,
+ * or a preview changing nothing, judges nothing at all.
+ */
+describe('ShownPages', () =>
+{
+  /**
+   * How often the stand-ins have read a page, and judged one at a moment, so a test can tell what was done again.
+   */
+  const reads = { count: 0, judged: 0 };
+
+  /**
+   * How often the stand-in flags have judged a page, by flag, so a test can tell which events the preview judged again.
+   */
+  const flagsJudged = new Map<string, number>();
+
+  /**
+   * A stand-in for a module's own kind of preview state: a comment {@code <flag:KEY>} keeps a page to the moments whose
+   * preview raises that flag under the kind {@code test.flags}.
+   */
+  const FLAGS: PageCondition = {
+    id: 'test.flags',
+    read: shown =>
+    {
+      const line = shown.list.map(each => String(each.parameters[0] ?? '')).find(text => text.startsWith('<flag:'));
+      if (line === undefined)
+      {
+        return null;
+      }
+
+      const key = line.slice('<flag:'.length, -1);
+      const holds = (moment: PageMoment) =>
+      {
+        flagsJudged.set(key, (flagsJudged.get(key) ?? 0) + 1);
+        return moment.preview?.value('test.flags', key) === true;
+      };
+      return { followsClock: false, reads: [ `test.flags:${key}` ], holds, words: [] };
+    },
+  };
+
+  /**
+   * A stand-in for a plugin's hours: a comment {@code <open:FROM-TO>} keeps a page to the minutes from FROM up to but
+   * not including TO.
+   */
+  const OPEN_HOURS: PageCondition = {
+    id: 'test.open',
+    read: shown =>
+    {
+      reads.count += 1;
+      const line = shown.list.map(each => String(each.parameters[0] ?? '')).find(text => text.startsWith('<open:'));
+      if (line === undefined)
+      {
+        return null;
+      }
+
+      const [ from, to ] = line.slice('<open:'.length, -1).split('-').map(Number);
+      const holds = (moment: PageMoment) =>
+      {
+        reads.judged += 1;
+        return moment.timeOfDay >= from && moment.timeOfDay < to;
+      };
+      return { followsClock: true, holds, words: [] };
+    },
+  };
+
+  /**
+   * How often the stand-in seasons have judged a page.
+   */
+  const seasons = { judged: 0 };
+
+  /**
+   * A stand-in for a plugin's calendar: a comment {@code <inSeason:N>} keeps a page to the moments in season N, a moment
+   * whose clock picked no season being in season 3, the one the game starts in.
+   */
+  const SEASONS: PageCondition = {
+    id: 'test.seasons',
+    read: shown =>
+    {
+      const line = shown.list.map(each => String(each.parameters[0] ?? '')).find(text => text.startsWith('<inSeason:'));
+      if (line === undefined)
+      {
+        return null;
+      }
+
+      const wanted = Number(line.slice('<inSeason:'.length, -1));
+      const holds = (moment: PageMoment) =>
+      {
+        seasons.judged += 1;
+        return (moment.season ?? 3) === wanted;
+      };
+      return { followsClock: false, followsDate: true, holds, words: [] };
+    },
+  };
+
+  /**
+   * A rule over Chef Adventure's starting party, with the stand-in hours and flags.
+   */
+  const RULE: PageRule = { save: { party: [ 1, 2 ] }, conditions: [ OPEN_HOURS, FLAGS ] };
+
+  /**
+   * The same rule with the stand-in seasons as well.
+   */
+  const SEASON_RULE: PageRule = { save: RULE.save, conditions: [ OPEN_HOURS, FLAGS, SEASONS ] };
+
+  /**
+   * A page with comments, waiting for nothing of its own unless told otherwise.
+   * @param {string[]} comments The comment lines.
+   * @param {Partial<RmmzEventPage['conditions']>} conditions What it waits for.
+   * @returns {RmmzEventPage} The page.
+   */
+  const commented = (comments: string[], conditions: Partial<RmmzEventPage['conditions']> = {}): RmmzEventPage =>
+  {
+    return page(comments.map(text => command(108, [ text ])), { conditions: { ...createEventPage().conditions, ...conditions } });
+  };
+
+  /**
+   * A lamp: unlit on its first page, lit from 18:00 to midnight on its second.
+   * @param {number} id The event id.
+   * @returns {RmmzMapEvent} The lamp.
+   */
+  const lamp = (id: number): RmmzMapEvent => event(id, [ commented([]), commented([ '<open:1080-1440>' ]) ]);
+
+  /**
+   * A guard on watch from 06:00 to 18:00 on his only page, so gone by night.
+   * @param {number} id The event id.
+   * @returns {RmmzMapEvent} The guard.
+   */
+  const guard = (id: number): RmmzMapEvent => event(id, [ commented([ '<open:360-1080>' ]) ]);
+
+  /**
+   * A sign, which nothing about the clock changes.
+   * @param {number} id The event id.
+   * @returns {RmmzMapEvent} The sign.
+   */
+  const sign = (id: number): RmmzMapEvent => event(id, [ commented([ 'a sign' ]), commented([], { switch1Valid: true, switch1Id: 4 }) ]);
+
+  describe('without a rule', () =>
+  {
+    it('shows every event\'s first page, never faded, and answers no page for an event with none', () =>
+    {
+      // Arrange: a lamp at night would show its lit page under the game's rule; an event with no pages.
+      const pages = new ShownPages(null, 1320);
+
+      // Act.
+      const shown = [ pages.shownPage(lamp(1)), pages.activePage(lamp(1)), pages.activePage(event(2, [])) ];
+
+      // Assert.
+      expect(shown)
+        .toStrictEqual([ { index: 0, faded: false }, 0, -1 ]);
+    });
+  });
+
+  describe('with a rule', () =>
+  {
+    it('shows the page the game shows at the clock\'s time, and the first page faded while none holds', () =>
+    {
+      // Arrange: at 22:00, a lamp lit, a guard gone, and a sign showing its first page.
+      const pages = new ShownPages(RULE, 1320);
+
+      // Act.
+      const shown = [ lamp(1), guard(2), sign(3) ].map(each => [ pages.shownPage(each), pages.activePage(each) ]);
+
+      // Assert.
+      expect(shown)
+        .toStrictEqual([ [ { index: 1, faded: false }, 1 ], [ { index: 0, faded: true }, -1 ], [ { index: 0, faded: false }, 0 ] ]);
+    });
+
+    it('answers which events now show another page as the clock moves, judging only those the clock can change', () =>
+    {
+      // Arrange: a lamp, a guard and a sign read at noon, the readings counted from then.
+      const pages = new ShownPages(RULE, 720);
+      const events = [ lamp(1), guard(2), sign(3) ];
+      events.forEach(each => pages.shownPage(each));
+      reads.count = 0;
+
+      // Act: 18:00, when the lamp lights and the guard leaves; then 19:00, which turns nothing.
+      const turned = [ pages.setTime(1080), pages.setTime(1140) ];
+
+      // Assert: no page read again, and only the two of them ever judged again.
+      expect([ turned, reads.count, pages.followingClock, events.map(each => pages.activePage(each)) ])
+        .toStrictEqual([ [ [ 1, 2 ], [] ], 0, 2, [ 1, -1, 0 ] ]);
+    });
+
+    it('judges nothing when the clock does not move', () =>
+    {
+      // Arrange: a lamp read at 18:00, its judgements counted from then.
+      const pages = new ShownPages(RULE, 1080);
+      pages.shownPage(lamp(1));
+      reads.judged = 0;
+
+      // Act: 18:00 again, then 19:00, which judges the lamp's lit page once.
+      const turned = pages.setTime(1080);
+      const still = reads.judged;
+      pages.setTime(1140);
+
+      // Assert.
+      expect([ turned, still, reads.judged ])
+        .toStrictEqual([ [], 0, 1 ]);
+    });
+
+    it('reads an event again once told it changed, and every event once told the list did', () =>
+    {
+      // Arrange: a lamp and a guard read at noon.
+      const pages = new ShownPages(RULE, 720);
+      const shownLamp = lamp(1);
+      const shownGuard = guard(2);
+      [ shownLamp, shownGuard ].forEach(each => pages.shownPage(each));
+      reads.count = 0;
+
+      // Act: the lamp changes, and is asked about with the guard; then the list changes, and both are asked about.
+      pages.forget(1);
+      [ shownLamp, shownGuard ].forEach(each => pages.shownPage(each));
+      const afterOne = reads.count;
+      pages.forget(null);
+      [ shownLamp, shownGuard ].forEach(each => pages.shownPage(each));
+
+      // Assert: the lamp's two pages read once; then both events' three pages.
+      expect([ afterOne, reads.count ])
+        .toStrictEqual([ 2, 5 ]);
+    });
+
+    it('reads an event put back in its slot as another object, and stops following one that no longer asks the clock anything', () =>
+    {
+      // Arrange: a lamp read at noon, then put back as a lamp with no hours, as a paste of a plain sign would.
+      const pages = new ShownPages(RULE, 720);
+      pages.shownPage(lamp(1));
+      const replaced = { ...sign(1) };
+
+      // Act.
+      const shown = pages.shownPage(replaced);
+
+      // Assert.
+      expect([ shown, pages.followingClock, pages.setTime(1320) ])
+        .toStrictEqual([ { index: 0, faded: false }, 0, [] ]);
+    });
+
+    it('forgets every event under the old rule when the rule changes', () =>
+    {
+      // Arrange: at 22:00 a lamp read lit; then a rule with no plugin conditions, under which its last page holds.
+      const pages = new ShownPages(RULE, 1320);
+      const shownLamp = lamp(1);
+      const before = pages.activePage(shownLamp);
+      const plain: PageRule = { save: RULE.save, conditions: [] };
+
+      // Act.
+      pages.setRule(plain);
+
+      // Assert.
+      expect([ before, pages.rule, pages.followingClock, pages.activePage(guard(2)) ])
+        .toStrictEqual([ 1, plain, 0, 0 ]);
+    });
+
+    it('starts at midnight with no rule unless told otherwise', () =>
+    {
+      // Arrange: the table as a renderer makes it before anything is handed over, then given the rule.
+      const pages = new ShownPages();
+      const before = pages.rule;
+      pages.setRule(RULE);
+
+      // Act: a lamp open from 18:00 to midnight, at midnight.
+      const active = pages.activePage(lamp(1));
+
+      // Assert.
+      expect([ before, active ])
+        .toStrictEqual([ null, 0 ]);
+    });
+  });
+
+  describe('with a season', () =>
+  {
+    /**
+     * A stall shut on its first page and open in Summer on its second.
+     * @param {number} id The event id.
+     * @returns {RmmzMapEvent} The stall.
+     */
+    const stall = (id: number): RmmzMapEvent => event(id, [ commented([]), commented([ '<inSeason:1>' ]) ]);
+
+    it('answers which events now show another page as the season moves, judging only those whose pages read the date', () =>
+    {
+      // Arrange: a stall, a lamp and a sign read at noon in the season the game starts in, the lamp's judgements counted
+      // from then.
+      const pages = new ShownPages(SEASON_RULE, 720);
+      const events = [ stall(1), lamp(2), sign(3) ];
+      events.forEach(each => pages.shownPage(each));
+      reads.judged = 0;
+
+      // Act: Summer, when the stall opens; then Autumn, when it shuts again.
+      const summer = [ pages.setSeason(1), events.map(each => pages.activePage(each)) ];
+      const autumn = [ pages.setSeason(2), events.map(each => pages.activePage(each)) ];
+
+      // Assert: the lamp's hours never judged again.
+      expect([ summer, autumn, reads.judged, pages.season ])
+        .toStrictEqual([ [ [ 1 ], [ 1, 0, 0 ] ], [ [ 1 ], [ 0, 0, 0 ] ], 0, 2 ]);
+    });
+
+    it('judges nothing when the season does not change', () =>
+    {
+      // Arrange: a stall read in the season the game starts in, its judgements counted from then.
+      const pages = new ShownPages(SEASON_RULE, 720);
+      pages.shownPage(stall(1));
+      seasons.judged = 0;
+
+      // Act: the game's own season again, then Spring, which judges the stall's open page once.
+      const turned = pages.setSeason(null);
+      const still = seasons.judged;
+      pages.setSeason(0);
+
+      // Assert.
+      expect([ turned, still, seasons.judged ])
+        .toStrictEqual([ [], 0, 1 ]);
+    });
+
+    it('stops following an event put back in its slot as one whose pages no longer read the date', () =>
+    {
+      // Arrange: a stall read, then put back as a plain sign, as a paste over it would.
+      const pages = new ShownPages(SEASON_RULE, 720);
+      pages.shownPage(stall(1));
+      pages.shownPage({ ...sign(1) });
+
+      // Act.
+      const turned = pages.setSeason(1);
+
+      // Assert.
+      expect(turned)
+        .toStrictEqual([]);
+    });
+
+    it('forgets which events read the date once told every event changed, and judges each read afterwards in the season', () =>
+    {
+      // Arrange: a stall read, then the whole list changed.
+      const pages = new ShownPages(SEASON_RULE, 720);
+      const shownStall = stall(1);
+      pages.shownPage(shownStall);
+      pages.forget(null);
+
+      // Act: Summer, then the stall asked about again.
+      const turned = pages.setSeason(1);
+      const shown = pages.shownPage(shownStall);
+
+      // Assert.
+      expect([ turned, shown ])
+        .toStrictEqual([ [], { index: 1, faded: false } ]);
+    });
+
+    it('starts in the season the game starts in unless told otherwise', () =>
+    {
+      // Arrange: the table as a renderer makes it.
+      const pages = new ShownPages();
+
+      // Act.
+      const { season } = pages;
+
+      // Assert.
+      expect(season)
+        .toBeNull();
+    });
+  });
+
+  describe('with a preview', () =>
+  {
+    /**
+     * A villager, and the page waiting for a switch that takes his place later in the story.
+     * @param {number} id The event id.
+     * @param {number} switchId The switch his later page waits for.
+     * @returns {RmmzMapEvent} The villager.
+     */
+    const villager = (id: number, switchId: number): RmmzMapEvent => event(id, [ commented([]), commented([], { switch1Valid: true, switch1Id: switchId }) ]);
+
+    /**
+     * A named enemy who appears only once a variable reaches a value, and shows nothing before.
+     * @param {number} id The event id.
+     * @param {number} variableId The variable.
+     * @param {number} atLeast What it must reach.
+     * @returns {RmmzMapEvent} The enemy.
+     */
+    const spawn = (id: number, variableId: number, atLeast: number): RmmzMapEvent => event(id, [ commented([], { variableValid: true, variableId, variableValue: atLeast }) ]);
+
+    it('shows the page waiting for a switch once the preview turns it on, and leaves an event waiting on a neighbour of it', () =>
+    {
+      // Arrange: at noon on a fresh save, a villager waiting on switch 74 and one waiting on switch 47, read.
+      const pages = new ShownPages(RULE, 720);
+      const events = [ villager(1, 74), villager(2, 47) ];
+      events.forEach(each => pages.shownPage(each));
+
+      // Act: switch 74 turned on.
+      const turned = pages.setPreview(GamePreview.FRESH.withSwitch(74, true));
+
+      // Assert.
+      expect([ turned, events.map(each => pages.shownPage(each)) ])
+        .toStrictEqual([ [ 1 ], [ { index: 1, faded: false }, { index: 0, faded: false } ] ]);
+    });
+
+    it('shows an event waiting for a variable once the preview sets it at the value or above, and fades it below', () =>
+    {
+      // Arrange: a named enemy waiting for variable 74 to reach 99, read on a fresh save.
+      const pages = new ShownPages(RULE, 720);
+      const enemy = spawn(1, 74, 99);
+      const before = pages.shownPage(enemy);
+
+      // Act: variable 74 at 99, at 100, then at 98.
+      const turned = [ 99, 100, 98 ].map(value => [ pages.setPreview(GamePreview.FRESH.withVariable(74, value)), pages.shownPage(enemy) ]);
+
+      // Assert.
+      expect([ before, turned ])
+        .toStrictEqual([
+          { index: 0, faded: true },
+          [ [ [ 1 ], { index: 0, faded: false } ], [ [], { index: 0, faded: false } ], [ [ 1 ], { index: 0, faded: true } ] ],
+        ]);
+    });
+
+    it('judges again only the events whose pages read what the preview changed', () =>
+    {
+      // Arrange: one event waiting on flag A, another on flag B, read on a fresh save, their judgements counted from then.
+      const pages = new ShownPages(RULE, 720);
+      [ event(1, [ commented([ '<flag:A>' ]) ]), event(2, [ commented([ '<flag:B>' ]) ]) ].forEach(each => pages.shownPage(each));
+      flagsJudged.clear();
+
+      // Act: flag A raised.
+      const turned = pages.setPreview(GamePreview.FRESH.with('test.flags', 'A', true));
+
+      // Assert: the event on flag A judged once, and the one on flag B never.
+      expect([ turned, [ ...flagsJudged.entries() ] ])
+        .toStrictEqual([ [ 1 ], [ [ 'A', 1 ] ] ]);
+    });
+
+    it('judges nothing when the preview sets everything as it was', () =>
+    {
+      // Arrange: an event on flag A read with flag A raised, its judgements counted from then.
+      const raised = GamePreview.FRESH.with('test.flags', 'A', true);
+      const pages = new ShownPages(RULE, 720, raised);
+      pages.shownPage(event(1, [ commented([ '<flag:A>' ]) ]));
+      flagsJudged.clear();
+
+      // Act: the same flag raised again, in another preview.
+      const turned = pages.setPreview(GamePreview.FRESH.with('test.flags', 'A', true));
+
+      // Assert.
+      expect([ turned, flagsJudged.size, pages.preview === raised ])
+        .toStrictEqual([ [], 0, false ]);
+    });
+
+    it('answers no event for a change no page it read reads, while still judging events read later at the new preview', () =>
+    {
+      // Arrange: a villager waiting on switch 74, read on a fresh save.
+      const pages = new ShownPages(RULE, 720);
+      pages.shownPage(villager(1, 74));
+
+      // Act: switch 147 turned on, then a villager waiting on it read for the first time.
+      const turned = pages.setPreview(GamePreview.FRESH.withSwitch(147, true));
+      const later = pages.shownPage(villager(2, 147));
+
+      // Assert.
+      expect([ turned, later ])
+        .toStrictEqual([ [], { index: 1, faded: false } ]);
+    });
+
+    it('judges the clock\'s events at the preview as it stands', () =>
+    {
+      // Arrange: a lamp lit from 18:00 only while switch 9 is on, read at noon with switch 9 on.
+      const pages = new ShownPages(RULE, 720, GamePreview.FRESH.withSwitch(9, true));
+      const shownLamp = event(1, [ commented([]), commented([ '<open:1080-1440>' ], { switch1Valid: true, switch1Id: 9 }) ]);
+      pages.shownPage(shownLamp);
+
+      // Act: 22:00.
+      const turned = pages.setTime(1320);
+
+      // Assert.
+      expect([ turned, pages.activePage(shownLamp) ])
+        .toStrictEqual([ [ 1 ], 1 ]);
+    });
+
+    it('starts at a fresh save unless told otherwise', () =>
+    {
+      // Arrange: the table as a renderer makes it.
+      const pages = new ShownPages();
+
+      // Act.
+      const { preview } = pages;
+
+      // Assert.
+      expect(preview)
+        .toBe(GamePreview.FRESH);
+    });
+  });
+
+  it('never reads an event for the clock without a rule', () =>
+  {
+    // Arrange: the hours watched, and no rule.
+    const read = vi.spyOn(OPEN_HOURS, 'read');
+    const pages = new ShownPages(null, 720);
+    pages.shownPage(lamp(1));
+
+    // Act.
+    const turned = pages.setTime(1320);
+    read.mockRestore();
+
+    // Assert.
+    expect([ turned, read.mock.calls.length ])
+      .toStrictEqual([ [], 0 ]);
+  });
+});

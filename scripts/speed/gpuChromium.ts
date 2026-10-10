@@ -16,14 +16,19 @@
  * compositing mode from chrome://gpu, and refuses to hand over a browser that is not what the mode claims.
  *
  * The environment loses WAYLAND_DISPLAY and DISPLAY, so nothing launched here can reach the desktop.
+ *
+ * Every child process the run spawns is held until the run ends ({@link holdSpawnedProcesses}), or a browser launched
+ * after another was closed can be cut off from Playwright mid-run.
  */
+import { createRequire } from 'node:module';
 import { chromium } from 'playwright-core';
 import type { Browser, Page } from 'playwright-core';
 
 /**
- * Which renderer to launch: the real GPU, or SwiftShader for comparison.
+ * Which renderer to launch: the real GPU; SwiftShader named outright, for comparison; or SwiftShader reached the way the
+ * game's own NW.js reaches it, for pictures held against the game's.
  */
-type RenderMode = 'gpu' | 'swiftshader';
+type RenderMode = 'gpu' | 'swiftshader' | 'swiftshader-as-game';
 
 /**
  * How to launch the browser.
@@ -93,16 +98,60 @@ const DESKTOP_VIEWPORT = { width: 2560, height: 1440, deviceScaleFactor: 1.5 };
 /**
  * The flags per renderer. SwiftShader is named explicitly so the comparison cannot drift onto the GPU. Every launch is
  * muted: a headless browser has no window, but it can still play sound through the machine's speakers.
+ *
+ * The game's NW.js, run for the parity check, is not told which renderer to use: it reaches SwiftShader through
+ * ANGLE's default backend. WebGL lands on the same SwiftShader either way, but naming it outright changes how a 2D
+ * canvas is rasterised, and the game paints every light's picture on a canvas: a light's gradient painted under the
+ * two launches differs by one in about a sixth of its channel values, while under the same launch the game's and the
+ * editor's are byte for byte the same (measured 2026-10-06, NW.js 147 against Chromium 149). So the comparison against
+ * the game launches the way the game does, and still refuses anything but SwiftShader.
  */
 const MODE_ARGS: Record<RenderMode, string[]> = {
-  gpu: [ '--use-angle=vulkan', '--mute-audio', '--disable-audio-output' ],
-  swiftshader: [ '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--mute-audio', '--disable-audio-output' ],
+  'gpu': [ '--use-angle=vulkan', '--mute-audio', '--disable-audio-output' ],
+  'swiftshader': [ '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--mute-audio', '--disable-audio-output' ],
+  'swiftshader-as-game': [ '--enable-unsafe-swiftshader', '--mute-audio', '--disable-audio-output' ],
 };
 
 /**
  * The flags that unlock the frame clock.
  */
 const UNTHROTTLED_ARGS = [ '--disable-frame-rate-limit', '--disable-gpu-vsync' ];
+
+/**
+ * Node's child_process module as Playwright reaches it, through require, so a change to it is the one Playwright sees.
+ */
+const childProcess = createRequire(import.meta.url)('node:child_process') as { spawn: (...args: unknown[]) => unknown };
+
+/**
+ * Every child process spawned through Node's child_process since this module loaded, held until the run ends.
+ */
+const SPAWNED: unknown[] = [];
+
+/**
+ * Holds on to every child process spawned through Node's child_process from now on, for as long as this process runs.
+ *
+ * Playwright talks to a browser it launched through two pipes it hands the browser as file descriptors 3 and 4. Under
+ * Bun, once a closed browser's child process is garbage collected, those descriptors are closed a second time, by
+ * number; by then the kernel has handed the same numbers to the pipes of a browser launched since, so the collection
+ * cuts that browser off. It exits, Playwright is never told, and whatever it was waiting on never settles. That is why a
+ * speed run used to stop dead a few maps in (on the fourth map of a single run) with no browser left and nothing said.
+ * Measured 2026-10-06, Bun 1.3.13 and Playwright 1.61.1: with a collection forced every 200 calls, the third browser
+ * launched was cut off at the first one, every time; holding the child processes kept six in a row running through
+ * three hundred collections each. Held, a closed browser's process is never collected, so its descriptors are closed
+ * only the once; each costs a few objects.
+ */
+const holdSpawnedProcesses = (): void =>
+{
+  const { spawn } = childProcess;
+  childProcess.spawn = (...args: unknown[]) =>
+  {
+    const child = spawn(...args);
+    SPAWNED.push(child);
+    return child;
+  };
+};
+
+holdSpawnedProcesses();
 
 /**
  * Renderer names that mean software rendering.

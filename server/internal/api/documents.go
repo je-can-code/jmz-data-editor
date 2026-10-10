@@ -69,6 +69,59 @@ func SaveCommonEvents(announcer WriteAnnouncer) http.HandlerFunc {
 	}
 }
 
+// SaveSystem serves PUT /api/system: the body is the whole of System.json, as the map editor holds
+// it. It is the map editor's save, where the switch and variable names are renamed and their lists
+// lengthened or shortened, and it is held to the same rules as its maps: strict, written atomically
+// in the key order of the file it replaces, and announced on the change stream with the saving
+// window's id. It answers 204.
+//
+// The names are all the map editor ever changes in System.json, so they are all this save takes from
+// the body: the switch and variable lists go into the file as it stands on disk at that moment, and
+// every other setting stays exactly as the file holds it. A copy of the settings older than the file,
+// kept by a window that went on renaming while MZ or the data editor saved the file, so never puts
+// back what they changed. A file that cannot be read strictly is never written over.
+//
+// Two apps save System.json: MZ keeps it on one line, the way JSON.stringify writes it, and the data
+// editor's POST route writes it indented, which reads far better when editing it by hand. So this
+// save writes the file in whichever of those layouts it already has (mzjson.LayoutLike), and a rename
+// changes that name in the file and nothing else, whichever app wrote it last.
+func SaveSystem(announcer WriteAnnouncer) http.HandlerFunc {
+	return func(responseWriter http.ResponseWriter, httpRequest *http.Request) {
+		projectPath, pathErr := GetProjectPath()
+		if pathErr != nil {
+			http.Error(responseWriter, pathErr.Error(), http.StatusBadRequest)
+			return
+		}
+
+		system, ok := readSavedDocument[*db.RpgSystem](responseWriter, httpRequest, wholeObject[*db.RpgSystem])
+		if ok == false {
+			return
+		}
+
+		// announce the exact bytes just before they land, so the change they cause carries the client's name.
+		const relativePath = "data/System.json"
+		withdraw := func() {}
+		announce := func(content []byte) {
+			withdraw = announcer.Expect(relativePath, httpRequest.Header.Get(ClientHeader), content)
+		}
+		// the names come from the body, and every other setting from the file as it stands.
+		namesOnly := func(current *db.RpgSystem) *db.RpgSystem {
+			current.Switches = system.Switches
+			current.Variables = system.Variables
+			return current
+		}
+		writeErr := store.UpdateInFileLayout(filepath.Join(projectPath, filepath.FromSlash(relativePath)), namesOnly, announce)
+		if writeErr != nil {
+			withdraw()
+			var res RestResponse[*db.RpgSystem]
+			res.ToRestResponse(responseWriter, projectPath, writeErr.Error(), nil, http.StatusInternalServerError)
+			return
+		}
+
+		responseWriter.WriteHeader(http.StatusNoContent)
+	}
+}
+
 // SaveMap serves PUT /api/maps/{mapId}: the body is a complete map, written to data/Map###.json and
 // creating the file when the map is new. Sent with If-None-Match: *, it only ever creates: a map whose file exists
 // is refused with a 412 and nothing is written, which is how the editor brings a new map into being without ever
@@ -332,30 +385,8 @@ func saveDocument[T any](responseWriter http.ResponseWriter, httpRequest *http.R
 		return
 	}
 
-	// read the body once, as one JSON document with nothing after it.
-	body, err := io.ReadAll(http.MaxBytesReader(responseWriter, httpRequest.Body, maxBodyBytes))
-	if err != nil {
-		refuseBody(responseWriter, err)
-		return
-	}
-	document, err := mzjson.Parse(body)
-	if err != nil {
-		refuseBody(responseWriter, err)
-		return
-	}
-
-	// refuse any key the model cannot account for...
-	var data T
-	decoder := json.NewDecoder(bytes.NewReader(body))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&data); err != nil {
-		refuseBody(responseWriter, err)
-		return
-	}
-
-	// ...and any key of the model's the body left out or sent as null.
-	if err := whole(document); err != nil {
-		refuseBody(responseWriter, err)
+	data, ok := readSavedDocument[T](responseWriter, httpRequest, whole)
+	if ok == false {
 		return
 	}
 
@@ -386,6 +417,40 @@ func saveDocument[T any](responseWriter http.ResponseWriter, httpRequest *http.R
 	}
 
 	responseWriter.WriteHeader(http.StatusNoContent)
+}
+
+// readSavedDocument reads a save's body as one document of model T, strictly in both directions, as
+// saveDocument explains: exactly one JSON value, no key the model cannot account for, and none of the
+// model's keys left out or sent as null. A body that fails any of it is answered here, with a 400
+// naming what is wrong (a 413 when it is too large), and ok is false.
+func readSavedDocument[T any](responseWriter http.ResponseWriter, httpRequest *http.Request, whole func(*mzjson.Value) error) (data T, ok bool) {
+	// read the body once, as one JSON document with nothing after it.
+	body, err := io.ReadAll(http.MaxBytesReader(responseWriter, httpRequest.Body, maxBodyBytes))
+	if err != nil {
+		refuseBody(responseWriter, err)
+		return data, false
+	}
+	document, err := mzjson.Parse(body)
+	if err != nil {
+		refuseBody(responseWriter, err)
+		return data, false
+	}
+
+	// refuse any key the model cannot account for...
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&data); err != nil {
+		refuseBody(responseWriter, err)
+		return data, false
+	}
+
+	// ...and any key of the model's the body left out or sent as null.
+	if err := whole(document); err != nil {
+		refuseBody(responseWriter, err)
+		return data, false
+	}
+
+	return data, true
 }
 
 // onlyCreates reports whether a request asks, with If-None-Match: *, for its file to be created and never replaced.

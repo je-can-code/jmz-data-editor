@@ -21,11 +21,12 @@ import { hubWith, oreChest } from '../../support/eventKindFixtures.ts';
 import { buildTreeRows } from '../../support/treeFixtures.ts';
 
 /*
- * The quick settings panel sits in the workspace and shows the events selected in the window, the very selection the
- * map views draw, so the panel and the map's highlight never disagree: whichever map is in focus, the panel shows the
- * events picked on the map the selection is on, with their quick panels. An event the data editor asks to see reaches
- * the panel only through that selection, once its map picks it out; with nothing selected, the panel says how to pick
- * something.
+ * The quick settings panel sits in the workspace and shows the events selected on the map in view, the very selection
+ * the map views draw, so the panel and the map's highlight never disagree. It follows the map in view as the properties
+ * panel does: events picked on another map stay behind when the author moves to another map's tab, since the panel
+ * names no map and would read as if they were on the map now in view, and show again when that map comes back. An event
+ * the data editor asks to see reaches the panel only through that selection, once its map picks it out; with nothing
+ * selected on the map in view, the panel says how to pick something.
  */
 describe('QuickSettingsPanel', () =>
 {
@@ -84,14 +85,53 @@ describe('QuickSettingsPanel', () =>
       .toBeInTheDocument();
   });
 
-  it('shows the quick panel of the events selected in the window, whatever map is in focus', async () =>
+  it('shows the quick panel of the events selected on the map in view', async () =>
   {
-    // Arrange: map 2 is in focus; the selection is on map 1.
+    // Arrange: map 1 is in view.
     const controller = await renderPanel();
-    act(() => controller.selectTreeMaps([ 2 ]));
+    act(() => controller.selectTreeMaps([ 1 ]));
 
     // Act.
     act(() => controller.selection.select(1, [ 3 ]));
+
+    // Assert.
+    expect((await screen.findByTestId('quick-kind-core.chest')).textContent)
+      .toContain('chest-ore · 1, 1');
+  });
+
+  it('leaves events picked on another map behind once that map is no longer in view', async () =>
+  {
+    // Arrange: the chest is picked on map 1, in view.
+    const controller = await renderPanel();
+    act(() =>
+    {
+      controller.selectTreeMaps([ 1 ]);
+      controller.selection.select(1, [ 3 ]);
+    });
+    await screen.findByTestId('quick-kind-core.chest');
+
+    // Act: map 2 comes into view, the chest still selected on map 1.
+    act(() => controller.selectTreeMaps([ 2 ]));
+
+    // Assert.
+    expect([ screen.queryByTestId('quick-kind-core.chest'), screen.queryByText(QUIET) !== null, controller.selection.get().mapId ])
+      .toStrictEqual([ null, true, 1 ]);
+  });
+
+  it('shows the events still picked on a map again when it comes back into view', async () =>
+  {
+    // Arrange: the chest is picked on map 1, then map 2 comes into view.
+    const controller = await renderPanel();
+    act(() =>
+    {
+      controller.selectTreeMaps([ 1 ]);
+      controller.selection.select(1, [ 3 ]);
+    });
+    await screen.findByTestId('quick-kind-core.chest');
+    act(() => controller.selectTreeMaps([ 2 ]));
+
+    // Act.
+    act(() => controller.selectTreeMaps([ 1 ]));
 
     // Assert.
     expect((await screen.findByTestId('quick-kind-core.chest')).textContent)
@@ -119,9 +159,13 @@ describe('QuickSettingsPanel', () =>
 
   it('empties once the selection is cleared', async () =>
   {
-    // Arrange.
+    // Arrange: the chest picked on map 1, in view.
     const controller = await renderPanel();
-    act(() => controller.selection.select(1, [ 3 ]));
+    act(() =>
+    {
+      controller.selectTreeMaps([ 1 ]);
+      controller.selection.select(1, [ 3 ]);
+    });
     await screen.findByTestId('quick-kind-core.chest');
 
     // Act.

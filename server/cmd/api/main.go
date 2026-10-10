@@ -191,6 +191,12 @@ func routes(changes *watch.Hub, policy middleware.Policy) http.Handler {
 
 	mux.HandleFunc("GET /api/config/notetag-lines", api.Load[plugins.NotetagLinesConfiguration]("data/config.notetag-lines.json"))
 	mux.HandleFunc("POST /api/config/notetag-lines", api.Save[plugins.NotetagLinesConfiguration]("data/config.notetag-lines.json"))
+
+	// the map editor draws lights with these defaults; no board edits them, so there is nothing to save.
+	mux.HandleFunc("GET /api/config/lighting", api.Load[plugins.LightingConfiguration]("data/config.lighting.json"))
+
+	// the map editor draws the sky at its clock's hour with this curve; it is edited by hand, so it is only read.
+	mux.HandleFunc("GET /api/config/lighting-time", api.Load[plugins.LightingTimeConfiguration]("data/config.lighting-time.json"))
 	//endregion plugin config endpoints
 
 	//region map editor endpoints
@@ -208,23 +214,45 @@ func routes(changes *watch.Hub, policy middleware.Policy) http.Handler {
 	// the common events read through the data editor's GET above; the map editor saves them here.
 	mux.HandleFunc("PUT /api/common-events", api.SaveCommonEvents(changes))
 
+	// System.json reads through the data editor's GET above too; the map editor renames switches and
+	// variables, and saves them here, in whichever layout the file already has.
+	mux.HandleFunc("PUT /api/system", api.SaveSystem(changes))
+
 	mux.HandleFunc("GET /api/img/{folder}", api.ListImages)
 	mux.HandleFunc("GET /api/img/{folder}/{name}", api.LoadImage)
+	mux.HandleFunc("GET /api/audio/{folder}", api.ListAudio)
 	mux.HandleFunc("GET /api/audio/{folder}/{name}", api.LoadAudio)
 	mux.HandleFunc("GET /api/plugin-source/{path...}", api.LoadPluginSource)
 
 	mux.HandleFunc("GET /api/editor-data/{key}", api.LoadEditorData)
 	mux.HandleFunc("PUT /api/editor-data/{key}", api.SaveEditorData(changes))
 
+	// the record of where blueprints are placed is never written whole: each map's part is merged into the
+	// file as it stands, so two windows saving two maps at once both land.
+	mux.HandleFunc("PUT /api/editor-data/blueprint-uses/maps", api.MergeBlueprintUses(changes))
+
+	// a change to a blueprint reaches the blueprints and every map holding a copy of it in one act, each map's file
+	// taking its patches as it stands, so the blueprint and its copies on disk never part.
+	mux.HandleFunc("PUT /api/blueprint-changes", api.WriteBlueprintChanges(changes))
+
+	// a transfer pair reaches both maps it joins in one act the same way, so its two ends on disk never part either.
+	mux.HandleFunc("PUT /api/map-changes", api.WriteMapChanges(changes))
+
+	// the party a new game seats, for showing each event's page as a fresh save would.
+	mux.HandleFunc("GET /api/new-game", api.LoadNewGame)
+
 	mux.HandleFunc("GET /api/file-changes", api.StreamFileChanges(changes, api.DefaultStreamTiming))
 	//endregion map editor endpoints
 
 	//region cross references
 	// the index listens to the change stream from its first answer on, to know which maps to read again. One
-	// index answers both, since both come from the same reading of every map.
+	// index answers all four, since all four come from the same reading of every map.
 	index := placements.NewIndex(changes)
 	mux.HandleFunc("GET /api/enemies/{enemyId}/placements", api.LoadEnemyPlacements(index))
+	mux.HandleFunc("GET /api/enemies/{enemyId}/battler-pages", api.LoadEnemyBattlerPages(index))
 	mux.HandleFunc("GET /api/maps/{mapId}/arrivals", api.LoadMapArrivals(index))
+	mux.HandleFunc("GET /api/event-notes", api.LoadEventNotes(index))
+	mux.HandleFunc("GET /api/door-sprites", api.LoadDoorSprites(index))
 	//endregion cross references
 
 	//region command list

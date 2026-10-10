@@ -1,6 +1,6 @@
 import type { DocumentKey } from './documentKeys.ts';
 import { DocumentListeners, type DocumentListener, type EditorDocument } from './EditorDocument.ts';
-import { cloneJson, type JsonValue } from './json.ts';
+import { cloneJson, jsonEquals, type JsonValue } from './json.ts';
 import {
   applyJsonPatch,
   createSetPatch,
@@ -12,7 +12,7 @@ import {
   type PatchPath,
 } from './patches.ts';
 import { patchesBetween } from './patchesBetween.ts';
-import type { RmmzMapInfo, RmmzTileset } from './rmmzTypes.ts';
+import type { RmmzMapInfo, RmmzNameList, RmmzSystem, RmmzTileset } from './rmmzTypes.ts';
 
 /**
  * A document whose whole content is one JSON value, changed by set and splice patches: the map tree, the
@@ -96,6 +96,11 @@ class JsonDocument implements EditorDocument
     });
 
     return content;
+  }
+
+  matches(content: JsonValue): boolean
+  {
+    return jsonEquals(this.#content, content);
   }
 
   patchesTo(content: JsonValue): Patch[] | null
@@ -183,4 +188,30 @@ class TilesetsDocument extends JsonDocument
   }
 }
 
-export { JsonDocument, MapInfosDocument, TilesetsDocument };
+/**
+ * The game's settings, {@code data/System.json}: one object, of which the map editor reads and renames only the names of
+ * the switches and the variables, carrying every other field through as it came.
+ */
+class SystemDocument extends JsonDocument
+{
+  /**
+   * The live settings.
+   * @returns {RmmzSystem} The settings.
+   */
+  get system(): RmmzSystem
+  {
+    return this.content as unknown as RmmzSystem;
+  }
+
+  /**
+   * Reads the names of the switches or of the variables.
+   * @param {RmmzNameList} list Which.
+   * @returns {readonly string[]} The names, by id: index 0 is no id, and an unnamed id has an empty name.
+   */
+  names(list: RmmzNameList): readonly string[]
+  {
+    return this.system[list];
+  }
+}
+
+export { JsonDocument, MapInfosDocument, SystemDocument, TilesetsDocument };
