@@ -246,11 +246,12 @@ func routes(changes *watch.Hub, policy middleware.Policy) http.Handler {
 
 	//region cross references
 	// the index listens to the change stream from its first answer on, to know which maps to read again. One
-	// index answers all three, since all three come from the same reading of every map.
+	// index answers all four, since all four come from the same reading of every map.
 	index := placements.NewIndex(changes)
 	mux.HandleFunc("GET /api/enemies/{enemyId}/placements", api.LoadEnemyPlacements(index))
 	mux.HandleFunc("GET /api/maps/{mapId}/arrivals", api.LoadMapArrivals(index))
 	mux.HandleFunc("GET /api/event-notes", api.LoadEventNotes(index))
+	mux.HandleFunc("GET /api/door-sprites", api.LoadDoorSprites(index))
 	//endregion cross references
 
 	//region command list

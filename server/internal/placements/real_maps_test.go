@@ -147,6 +147,87 @@ func TestEventNotesAcrossTheRealMaps(t *testing.T) {
 	}
 }
 
+// TestDoorSpritesAcrossTheRealMaps asks the game's own project what its doors are drawn with, as the map editor does
+// before it places a door, and holds the count against a plain reading of every map file the game loads: as many doors
+// in all as there are pages playing a door's opening on themselves, the pictures in order of use. It finds the project
+// as the placements sweep does. The floor is far below today's count (28 doors, drawn with 11 pictures), so adding doors
+// never breaks it, while a scan that quietly saw nothing would.
+func TestDoorSpritesAcrossTheRealMaps(t *testing.T) {
+	// Arrange- every door page, counted plainly: a route on this event whose codes are the opening's.
+	dataDir := gametest.DataDir(t)
+	root := filepath.Dir(dataDir)
+	entries, err := os.ReadDir(dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rawMaps := map[int][]*rawEvent{}
+	doors := 0
+	for _, entry := range entries {
+		mapId, isMap := mapIdOfFile(entry.Name())
+		if isMap == false {
+			continue
+		}
+		for _, event := range rawEventsOf(t, dataDir, mapId, rawMaps) {
+			if event == nil {
+				continue
+			}
+			for _, page := range event.Pages {
+				if rawPageOpensAsADoor(page.List) {
+					doors++
+				}
+			}
+		}
+	}
+	index, _ := newCountingIndex(t, watch.NewHub("data"))
+
+	// Act.
+	found, err := index.DoorSprites(root)
+
+	// Assert- every door counted once, under a picture, the most used first.
+	if err != nil {
+		t.Fatal(err)
+	}
+	counted := 0
+	for position, sprite := range found {
+		counted += sprite.Doors
+		if position > 0 && sprite.Doors > found[position-1].Doors {
+			t.Errorf("%+v comes after %+v", sprite, found[position-1])
+		}
+	}
+	if doors < 10 || counted != doors {
+		t.Errorf("counted %d doors in %+v, the files hold %d", counted, found, doors)
+	}
+}
+
+// rawPageOpensAsADoor reads a page's commands plainly for a door's opening played on its own event.
+func rawPageOpensAsADoor(list []struct {
+	Code       int   `json:"code"`
+	Parameters []any `json:"parameters"`
+}) bool {
+	for _, line := range list {
+		if line.Code != setMovementRoute || len(line.Parameters) != 2 || line.Parameters[0] != float64(thisEvent) {
+			continue
+		}
+		route, isRoute := line.Parameters[1].(map[string]any)
+		steps, hasSteps := route["list"].([]any)
+		if isRoute == false || hasSteps == false || len(steps) != len(doorOpening) {
+			continue
+		}
+		matches := true
+		for position, step := range steps {
+			fields, isStep := step.(map[string]any)
+			if isStep == false || fields["code"] != float64(doorOpening[position]) {
+				matches = false
+			}
+		}
+		if matches {
+			return true
+		}
+	}
+
+	return false
+}
+
 // assertLandsFromItsMap checks one arrival against the events of the map it is on, read without the models.
 func assertLandsFromItsMap(t *testing.T, events []*rawEvent, targetMapId int, arrival Arrival) {
 	t.Helper()
