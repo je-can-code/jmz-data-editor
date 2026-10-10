@@ -45,7 +45,8 @@ vi.mock('../../../../src/mapEditor/views/moveRoute/RoutePreview.tsx', () => ({ R
  * too far for a change to reach it, or whose blueprint is gone, says so and offers what can still be done; and until the
  * project's plugins are read, nothing is told, since a module's numbers would read as comments set by hand.
  */
-describe('CopyPanel', () =>
+// each test drives the whole event window through a run of edits, which takes CI's slower runner past five seconds.
+describe('CopyPanel', { timeout: 20_000 }, () =>
 {
   /**
    * The copy's map, the event and the history its window records in.

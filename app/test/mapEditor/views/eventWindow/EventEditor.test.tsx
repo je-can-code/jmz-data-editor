@@ -62,7 +62,8 @@ vi.mock('../../../../src/mapEditor/views/moveRoute/RoutePreview.tsx', () => ({
  * What gets written lives in the services the core tests cover; these check that each control reaches its service.
  * The fixture's event 2 holds pages marked 1, 2 and 3, each with a comment naming it.
  */
-describe('EventWindowView', () =>
+// each test mounts the whole event window and clicks through it, which nears five seconds on CI's slower runner.
+describe('EventWindowView', { timeout: 20_000 }, () =>
 {
   /**
    * The tilesets the fixture map draws with: tileset 4.
