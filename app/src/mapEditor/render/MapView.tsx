@@ -310,8 +310,8 @@ const MapView = (props: MapViewProps) =>
   // the plugin modules switch on once js/plugins.js is read, which can be after the bar first drew; whether any of them
   // lights the map decides whether the bar offers its Lighting switch, whether any draws weather its Weather switch,
   // whether one offers a clock, its clock, whether one offers a sky, its sky, and the kinds of state they let the preview
-  // set, what the preview chip calls them.
-  useSyncExternalStore(services.modules.subscribe, () => services.modules.revision);
+  // set, what the preview chip calls them; and the overlays and passability rules they add reach the renderer then.
+  const moduleRevision = useSyncExternalStore(services.modules.subscribe, () => services.modules.revision);
 
   // what the modules say over the map can change while they are on, such as a config read only once a map needed it.
   useSyncExternalStore(services.modules.subscribeNotices, () => services.modules.noticesRevision);
@@ -385,6 +385,10 @@ const MapView = (props: MapViewProps) =>
     // the sky's weather follows the clock too, while a module offers a sky and the author has picked one; with none
     // picked, the renderer is told nothing and nothing is read for it.
     stops.push(followSky(renderer, services.clock, services.modules));
+
+    // the marks on transfers whose landings fail are drawn again whenever the landings learn more, such as a map they
+    // land on having been read.
+    stops.push(services.landings.subscribe(() => renderer.refreshOverlays()));
 
     // the pages are judged at the window's preview too, the switches and variables set in place of a fresh save's, and a
     // change to it draws again only the events whose pages read what changed.
@@ -611,7 +615,8 @@ const MapView = (props: MapViewProps) =>
     }
   }, [ openMap, lookX, lookY, lookRequest ]);
 
-  // hand the renderer the switches, the modules' overlays and their passability rules.
+  // hand the renderer the switches, the modules' overlays and their passability rules, again whenever the modules switch
+  // on, which can be after the map first drew.
   useEffect(() =>
   {
     const renderer = rendererRef.current;
@@ -626,7 +631,7 @@ const MapView = (props: MapViewProps) =>
     renderer.setLayerVisibility(settings.visibility);
     renderer.setOverlays({ enabled, definitions });
     renderer.setPassabilityRules(services.modules.passabilityRules());
-  }, [ services, settings ]);
+  }, [ services, settings, moduleRevision ]);
 
   // tell the renderer as the view goes behind another tab and comes back.
   useEffect(() =>

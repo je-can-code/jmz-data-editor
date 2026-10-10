@@ -14,6 +14,12 @@ type PickOnMapButtonProps = {
   readonly start: MapLocation | null;
 
   /**
+   * Whether the player lands on the place picked, as on a transfer's destination, so the picker refuses the tiles the
+   * player cannot stand on. Left out, any tile can be picked, as for a ship's place.
+   */
+  readonly landing?: boolean;
+
+  /**
    * Hears the place picked; giving up says nothing.
    * @param {MapLocation} location The map and the tile.
    */
@@ -27,12 +33,12 @@ type PickOnMapButtonProps = {
  *
  * The transfer editor reaches the same picker another way, through its environment's {@code pickLocation}, since the
  * hand-built editors are bound to the window outside React; anything else rendered in place uses this button.
- * @param {PickOnMapButtonProps} props Where to start, and who hears the place picked.
+ * @param {PickOnMapButtonProps} props Where to start, whether the player lands there, and who hears the place picked.
  * @returns {React.JSX.Element} The button, and the picker while it is open.
  */
 const PickOnMapButton = (props: PickOnMapButtonProps) =>
 {
-  const { start, onPick } = props;
+  const { start, landing = false, onPick } = props;
   const [ picking, setPicking ] = useState<MapLocation | null>(null);
 
   return (
@@ -45,6 +51,7 @@ const PickOnMapButton = (props: PickOnMapButtonProps) =>
         : (
           <LocationPickerDialog
             start={picking}
+            landing={landing}
             onClose={location =>
             {
               setPicking(null);

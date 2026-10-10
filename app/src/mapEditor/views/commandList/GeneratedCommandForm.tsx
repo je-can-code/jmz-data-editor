@@ -83,7 +83,7 @@ const FieldGrid = (props: {
           </Box>
           {pickersAfter(field.key).map(({ place, onPick }) => (
             <Box key={`place:${place.map}`} sx={{ alignSelf: 'center' }}>
-              <PickOnMapButton start={placeIn(values, place)} onPick={onPick}/>
+              <PickOnMapButton start={placeIn(values, place)} landing={place.landing === true} onPick={onPick}/>
             </Box>
           ))}
         </React.Fragment>

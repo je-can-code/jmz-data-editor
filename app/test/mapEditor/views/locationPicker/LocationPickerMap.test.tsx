@@ -7,12 +7,22 @@ import { act, fireEvent, render, screen } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import type { MapEditorApi } from '../../../../src/mapEditor/core/api/MapEditorApi.ts';
 import { DocumentHub } from '../../../../src/mapEditor/core/history/DocumentHub.ts';
+import { freshSavePages, type LandingGround } from '../../../../src/mapEditor/core/locations/landingCheck.ts';
+import { TransferLandings } from '../../../../src/mapEditor/core/locations/TransferLandings.ts';
 import type { DocumentKey } from '../../../../src/mapEditor/core/model/documentKeys.ts';
 import type { JsonValue } from '../../../../src/mapEditor/core/model/json.ts';
 import type { MapDocument } from '../../../../src/mapEditor/core/model/MapDocument.ts';
 import type { RmmzTileset } from '../../../../src/mapEditor/core/model/rmmzTypes.ts';
 import type { MapCell, ScreenPoint } from '../../../../src/mapEditor/core/renderer/camera.ts';
-import type { MarkerClassifier, OverlayDefinition, OverlaySet, OverlayState, TilesetTextures } from '../../../../src/mapEditor/core/renderer/MapRenderer.ts';
+import type {
+  MarkerClassifier,
+  OverlayDefinition,
+  OverlayPainter,
+  OverlaySet,
+  OverlayState,
+  TilesetTextures,
+} from '../../../../src/mapEditor/core/renderer/MapRenderer.ts';
+import { lookAtDocument } from '../../../../src/mapEditor/core/sync/lookAtDocument.ts';
 import type { MapEditorServices } from '../../../../src/mapEditor/services/MapEditorServices.ts';
 import { MapEditorServicesProvider } from '../../../../src/mapEditor/services/MapEditorServicesContext.tsx';
 import { LocationPickerMap, type LocationPickerMapProps } from '../../../../src/mapEditor/views/locationPicker/LocationPickerMap.tsx';
@@ -33,6 +43,7 @@ const stand = vi.hoisted(() => ({
     overlaySets: OverlaySet[];
     classifiers: MarkerClassifier[];
     points: ScreenPoint[];
+    refreshes: number;
     destroyed: boolean;
     announce: (state: string) => void;
   }[],
@@ -56,6 +67,7 @@ vi.mock('../../../../src/mapEditor/render/PixiMapRenderer.ts', () =>
       overlaySets: [] as OverlaySet[],
       classifiers: [] as MarkerClassifier[],
       points: [] as ScreenPoint[],
+      refreshes: 0,
       destroyed: false,
       announce: (state: string) =>
       {
@@ -116,6 +128,11 @@ vi.mock('../../../../src/mapEditor/render/PixiMapRenderer.ts', () =>
       this.record.overlays.push(state);
     }
 
+    refreshOverlays(): void
+    {
+      this.record.refreshes += 1;
+    }
+
     cellAt(point: ScreenPoint): MapCell | null
     {
       this.record.points.push(point);
@@ -145,6 +162,11 @@ vi.mock('../../../../src/mapEditor/render/PixiMapRenderer.ts', () =>
  * the map, or while the map drawn is still the one before the map asked for. The tile under the pointer is drawn with
  * its coordinates beside it, and the tile picked is outlined, as one rectangle for as long as it stays the same tile.
  * And a map that cannot be opened says why in place of the canvas, unless the picker has already moved on from it.
+ *
+ * Choosing where the player lands, it judges the map as it opens, by the window's landings: it shades every tile the
+ * player cannot land on, says so beside the pointer, refuses a click or a double-click on one with the reason, and hands
+ * the judged map to whoever shows the reason for the tile picked; it judges afresh when what every landing is judged by
+ * changes. Choosing any other place, it judges nothing.
  */
 describe('LocationPickerMap', () =>
 {
@@ -155,11 +177,17 @@ describe('LocationPickerMap', () =>
   });
 
   /**
-   * Builds a tileset row with no sheets to load.
+   * Builds a tileset row with no sheets to load, letting every tile through but tile 20, which blocks every way: the
+   * top layer's tile at 1, 0 on the fixture's map.
    * @param {number} id The tileset id.
    * @returns {RmmzTileset} The row.
    */
-  const tilesetRow = (id: number): RmmzTileset => ({ id, flags: [ id ], mode: 1, name: `Set ${id}`, note: '', tilesetNames: [ '', '', '', '', '', '', '', '', '' ] });
+  const tilesetRow = (id: number): RmmzTileset =>
+  {
+    const flags = new Array(40).fill(0);
+    flags[20] = 0x0f;
+    return { id, flags, mode: 1, name: `Set ${id}`, note: '', tilesetNames: [ '', '', '', '', '', '', '', '', '' ] };
+  };
 
   /**
    * Builds a 3x2 map file drawn with a tileset.
@@ -209,7 +237,16 @@ describe('LocationPickerMap', () =>
     const sync = { whenHeldOrDiscovered: async () => undefined, holders: () => [], requestSnapshot: async () => null };
     const { modules = NO_MODULES } = instead;
     const api = instead.api === null ? null : { loadImage: async () => null } as unknown as MapEditorApi;
-    return { services: { api, hub, sync, modules } as unknown as MapEditorServices, hub };
+
+    // landings judged by the tiles alone, every event by its first page.
+    const landings = new TransferLandings({
+      hub,
+      look: key => lookAtDocument({ hub, sync }, key),
+      rules: () => [],
+      pages: () => freshSavePages(null, 0, null),
+      claims: () => true,
+    });
+    return { services: { api, hub, sync, modules, landings } as unknown as MapEditorServices, hub, landings };
   };
 
   /**
@@ -248,7 +285,9 @@ describe('LocationPickerMap', () =>
   {
     const onPick = vi.fn();
     const onConfirm = vi.fn();
-    const shown: LocationPickerMapProps = { mapId: 5, picked: null, focus: null, onPick, onConfirm, ...props };
+    const onRefuse = vi.fn();
+    const onGround = vi.fn();
+    const shown: LocationPickerMapProps = { mapId: 5, picked: null, focus: null, onPick, onConfirm, onRefuse, onGround, ...props };
     const view = render(
       <MapEditorServicesProvider services={services}>
         <LocationPickerMap {...shown}/>
@@ -259,7 +298,26 @@ describe('LocationPickerMap', () =>
         <LocationPickerMap {...shown} {...next}/>
       </MapEditorServicesProvider>
     );
-    return { onPick, onConfirm, show, unmount: view.unmount, host: screen.getByTestId('location-picker-map') };
+    return { onPick, onConfirm, onRefuse, onGround, show, unmount: view.unmount, host: screen.getByTestId('location-picker-map') };
+  };
+
+  /**
+   * Draws one of the overlays handed to the first renderer, keeping every rectangle it draws, at the game's tile size.
+   * @param {string} id The overlay.
+   * @returns {number[][] | null} Each rectangle's left, top, width and height, or null when no such overlay was handed over.
+   */
+  const rectanglesOf = (id: string): number[][] | null =>
+  {
+    const definition = stand.renderers[0].overlaySets[0].definitions.find(each => each.id === id);
+    if (definition === undefined)
+    {
+      return null;
+    }
+
+    const rectangles: number[][] = [];
+    const painter = { rect: (x: number, y: number, width: number, height: number) => rectangles.push([ x, y, width, height ]) } as unknown as OverlayPainter;
+    definition.draw(painter, { document: null as unknown as MapDocument, tileSize: 48, selection: [] });
+    return rectangles;
   };
 
   it('opens the map asked for with its tileset, holding neither, and centres on the focus tile at the game\'s scale', async () =>
@@ -631,5 +689,108 @@ describe('LocationPickerMap', () =>
     // Assert.
     expect([ before, listening.size, stand.renderers.map(renderer => renderer.destroyed) ])
       .toStrictEqual([ 1, 0, [ true ] ]);
+  });
+
+  it('shades the tiles the player cannot land on once the map opens, choosing where the player lands', async () =>
+  {
+    // Arrange: tile 1, 0 of map 5 blocks every way, and every other tile lets the player off it.
+    const { services } = buildServices();
+
+    // Act.
+    renderMap(services, { landing: true });
+    await landed();
+
+    // Assert: one tile shaded, switched on, and drawn again as the map was judged.
+    const [ renderer ] = stand.renderers;
+    expect([ rectanglesOf('landing.closed'), renderer.overlaySets[0].enabled.has('landing.closed'), renderer.refreshes ])
+      .toStrictEqual([ [ [ 48, 0, 48, 48 ] ], true, 2 ]);
+  });
+
+  it('shades nothing, refuses nothing and judges nothing for a place the player does not land on', async () =>
+  {
+    // Arrange: the pointer over the tile that blocks every way.
+    const { services } = buildServices();
+    const { onPick, onRefuse, onGround, host } = renderMap(services);
+    await landed();
+    stand.cell = { x: 1, y: 0 };
+
+    // Act.
+    fireEvent.pointerDown(host, { button: 0 });
+
+    // Assert.
+    expect([ rectanglesOf('landing.closed'), onPick.mock.calls, onRefuse.mock.calls, onGround.mock.calls ])
+      .toStrictEqual([ null, [ [ { x: 1, y: 0 } ] ], [], [ [ null ] ] ]);
+  });
+
+  it('refuses a click on a tile the player cannot land on, saying why, and picks one they can', async () =>
+  {
+    // Arrange.
+    const { services } = buildServices();
+    const { onPick, onRefuse, host } = renderMap(services, { landing: true });
+    await landed();
+
+    // Act: a click on the blocked tile, then on an open one.
+    stand.cell = { x: 1, y: 0 };
+    fireEvent.pointerDown(host, { button: 0 });
+    stand.cell = { x: 2, y: 1 };
+    fireEvent.pointerDown(host, { button: 0 });
+
+    // Assert.
+    expect([ onRefuse.mock.calls, onPick.mock.calls ])
+      .toStrictEqual([ [ [ { x: 1, y: 0 }, { kind: 'blocked' } ] ], [ [ { x: 2, y: 1 } ] ] ]);
+  });
+
+  it('refuses a double-click on a tile the player cannot land on, finishing nothing', async () =>
+  {
+    // Arrange: the pointer over the blocked tile.
+    const { services } = buildServices();
+    const { onConfirm, onRefuse, host } = renderMap(services, { landing: true });
+    await landed();
+    stand.cell = { x: 1, y: 0 };
+
+    // Act.
+    fireEvent.doubleClick(host);
+
+    // Assert.
+    expect([ onConfirm.mock.calls, onRefuse.mock.calls ])
+      .toStrictEqual([ [], [ [ { x: 1, y: 0 }, { kind: 'blocked' } ] ] ]);
+  });
+
+  it('says beside the pointer when the player cannot land on the tile under it', async () =>
+  {
+    // Arrange: the pointer over the blocked tile, then over an open one.
+    const { services } = buildServices();
+    const { host } = renderMap(services, { landing: true });
+    await landed();
+    const [ renderer ] = stand.renderers;
+
+    // Act.
+    stand.cell = { x: 1, y: 0 };
+    fireEvent.pointerMove(host);
+    const closed = renderer.overlays[renderer.overlays.length - 1].hoverLabel;
+    stand.cell = { x: 2, y: 1 };
+    fireEvent.pointerMove(host);
+    const open = renderer.overlays[renderer.overlays.length - 1].hoverLabel;
+
+    // Assert.
+    expect([ closed, open ])
+      .toStrictEqual([ '1, 0 · cannot land here', '2, 1' ]);
+  });
+
+  it('hands over the map judged as it opens, and judges it afresh once what every landing is judged by changes', async () =>
+  {
+    // Arrange.
+    const { services, landings } = buildServices();
+    const { onGround } = renderMap(services, { landing: true });
+    await landed();
+    const opened = onGround.mock.calls[1][0] as LandingGround;
+
+    // Act.
+    act(() => landings.refresh());
+
+    // Assert: none before the map opened, map 5 once it did, and map 5 judged anew after the refresh.
+    const again = onGround.mock.calls[2][0] as LandingGround;
+    expect([ onGround.mock.calls[0][0], opened.map.mapId, again.map.mapId, again === opened, onGround.mock.calls.length ])
+      .toStrictEqual([ null, 5, 5, false, 3 ]);
   });
 });

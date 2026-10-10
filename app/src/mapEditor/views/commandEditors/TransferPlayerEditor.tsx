@@ -23,8 +23,15 @@ const DESIGNATIONS = [
 ];
 
 /**
+ * The pick a transfer's destination asks for: where the player lands, so the picker refuses the tiles they cannot stand
+ * on.
+ */
+const LANDING_PICK = { landing: true } as const;
+
+/**
  * Edits a Transfer Player command: where it sends the player (picked from the map tree, or read from variables),
- * which way they face, and the fade. When the window can pick a spot on a map, a button offers it.
+ * which way they face, and the fade. When the window can pick a spot on a map, a button offers it, judging every tile as
+ * a landing.
  * @param {CommandEditorProps} props The command and what to do with a change.
  * @returns {React.JSX.Element} The editor.
  */
@@ -58,7 +65,7 @@ const TransferPlayerEditor = (props: CommandEditorProps) =>
               : (
                 <Button size={'small'} onClick={() =>
                 {
-                  pickLocation({ mapId: model.mapId, x: model.x, y: model.y })
+                  pickLocation({ mapId: model.mapId, x: model.x, y: model.y }, LANDING_PICK)
                     .then(picked =>
                     {
                       if (picked !== null)

@@ -12,7 +12,9 @@ import { CommandEditorRegistry } from '../../src/mapEditor/core/commands/Command
 import { registerBuiltInCommands } from '../../src/mapEditor/core/commands/builtin/builtInCommands.ts';
 import { PluginHeaderStore } from '../../src/mapEditor/core/commands/pluginHeaders/PluginHeaderLibrary.ts';
 import { DocumentHub } from '../../src/mapEditor/core/history/DocumentHub.ts';
+import { freshSavePages } from '../../src/mapEditor/core/locations/landingCheck.ts';
 import { LocationPicks } from '../../src/mapEditor/core/locations/LocationPicks.ts';
+import { TransferLandings } from '../../src/mapEditor/core/locations/TransferLandings.ts';
 import { PluginModuleRegistry } from '../../src/mapEditor/core/modules/PluginModuleRegistry.ts';
 import { WindowPreview } from '../../src/mapEditor/core/preview/WindowPreview.ts';
 import { MapEditorApp } from '../../src/mapEditor/MapEditorApp.tsx';
@@ -60,6 +62,15 @@ describe('MapEditorApp', () =>
     registerBuiltInCommands(catalog);
     const locationPicks = new LocationPicks();
 
+    // a location picker judges landings by the window's landings, which, with no server, never read another map.
+    const landings = new TransferLandings({
+      hub,
+      look: () => Promise.reject(new Error('no maps are read in this test')),
+      rules: () => [],
+      pages: () => freshSavePages(null, 0, null),
+      claims: () => false,
+    });
+
     // an event window's command list reads the catalog and editors; the window holds its map already, so it opens nothing.
     const services = {
       view,
@@ -71,6 +82,7 @@ describe('MapEditorApp', () =>
       api: null,
       pluginHeaders: new PluginHeaderStore(),
       locationPicks,
+      landings,
       loadCommandResources: async () => undefined,
     } as unknown as MapEditorServices;
     render(

@@ -1,6 +1,7 @@
 import type { MapDocument } from '../../core/model/MapDocument.ts';
-import type { RmmzTileset } from '../../core/model/rmmzTypes.ts';
+import type { RmmzMapEvent, RmmzTileset } from '../../core/model/rmmzTypes.ts';
 import type { PassabilityQuery, PassabilityRule } from '../../core/modules/PluginModule.ts';
+import type { ActivePages } from '../../core/pageRule/ShownPages.ts';
 import { TileFlag } from './tileIds.ts';
 
 /**
@@ -15,13 +16,26 @@ type Direction = typeof DIRECTIONS[number];
 
 /**
  * What stops steps out of one cell: the directions the engine's own passability blocks, and the directions a plugin
- * module's rule denies on top, each as a mask of passage bits (1 down, 2 left, 4 right, 8 up), with the rules'
- * reasons.
+ * module's rule denies on top, each as a mask of passage bits (1 down, 2 left, 4 right, 8 up), with the reason the rule
+ * gave for each direction it denies.
  */
 type CellPassage = {
   readonly blocked: number;
   readonly denied: number;
-  readonly reasons: readonly string[];
+  readonly reasons: Readonly<Partial<Record<Direction, string>>>;
+};
+
+/**
+ * Builds what a cell's rules are asked about one step out of it.
+ */
+type QueryFactory = (x: number, y: number, direction: Direction, tiles: readonly number[]) => PassabilityQuery;
+
+/**
+ * Reads every event by its first page, as MZ's own editor shows it, which is the page passability reads unless a page
+ * rule is handed over: an event with no pages shows none.
+ */
+const FIRST_PAGES: ActivePages = {
+  activePage: (event: RmmzMapEvent) => (event.pages.length > 0 ? 0 : -1),
 };
 
 /**
@@ -101,17 +115,20 @@ const cellTiles = (source: PassageSource, x: number, y: number, tileEvents: read
 /**
  * Collects the tile ids of the events that count toward passage, as Game_Map#tileEventsXy picks them: a tile image
  * with priority below characters, standing there without Through (Game_CharacterBase#posNt skips an event with it on).
- * The editor reads each event's first page, the page it draws.
+ * Each event is read by the page it shows: its first, the page the editor draws, unless a page rule says which. An event
+ * no page holds for shows none, which the engine reads as Through (Game_Event#clearPageSettings), so it counts for
+ * nothing.
  * @param {MapDocument} document The map.
+ * @param {ActivePages} pages Picks the page each event shows; each event's first by default.
  * @returns {Map<number, number[]>} Tile ids by cell ({@code y * width + x}), in event id order.
  */
-const tileEventsByCell = (document: MapDocument): Map<number, number[]> =>
+const tileEventsByCell = (document: MapDocument, pages: ActivePages = FIRST_PAGES): Map<number, number[]> =>
 {
   const cells = new Map<number, number[]>();
   document.eventIds().forEach(id =>
   {
     const event = document.event(id);
-    const page = event?.pages[0];
+    const page = event === null ? undefined : event.pages[pages.activePage(event)];
     if (event === null || page === undefined || page.image.tileId <= 0 || page.priorityType !== 0 || page.through)
     {
       return;
@@ -128,13 +145,13 @@ const tileEventsByCell = (document: MapDocument): Map<number, number[]> =>
 
 /**
  * Works out what stops steps out of one cell: the engine's passability for each direction, then each module rule for
- * the directions the engine allows.
+ * the directions the engine allows, the first rule to deny a direction giving its reason.
  * @param {PassageSource} source The map.
  * @param {number} x The column.
  * @param {number} y The row.
  * @param {readonly number[]} tileEvents The tile ids of the tile-image events there.
  * @param {readonly PassabilityRule[]} rules The modules' rules.
- * @param {(x: number, y: number, direction: Direction) => PassabilityQuery} query Builds what a rule is asked.
+ * @param {QueryFactory} query Builds what a rule is asked.
  * @returns {CellPassage} What is blocked, what is denied, and why.
  */
 const cellPassage = (
@@ -143,12 +160,12 @@ const cellPassage = (
   y: number,
   tileEvents: readonly number[],
   rules: readonly PassabilityRule[],
-  query: (x: number, y: number, direction: Direction) => PassabilityQuery): CellPassage =>
+  query: QueryFactory): CellPassage =>
 {
   const tiles = cellTiles(source, x, y, tileEvents);
   let blocked = 0;
   let denied = 0;
-  const reasons: string[] = [];
+  const reasons: Partial<Record<Direction, string>> = {};
   DIRECTIONS.forEach(direction =>
   {
     const bit = passageBit(direction);
@@ -161,11 +178,11 @@ const cellPassage = (
     // a rule only matters where the engine would let the step through.
     for (const rule of rules)
     {
-      const reason = rule.deny(query(x, y, direction));
+      const reason = rule.deny(query(x, y, direction, tiles));
       if (reason !== null)
       {
         denied |= bit;
-        reasons.push(reason);
+        reasons[direction] = reason;
         break;
       }
     }
@@ -178,12 +195,15 @@ const cellPassage = (
  * Builds the query factory a map's rules are asked through.
  * @param {MapDocument} document The map.
  * @param {RmmzTileset} tileset Its tileset.
- * @returns {(x: number, y: number, direction: Direction) => PassabilityQuery} The factory.
+ * @returns {QueryFactory} The factory.
  */
-const passabilityQuery = (document: MapDocument, tileset: RmmzTileset) =>
+const passabilityQuery = (document: MapDocument, tileset: RmmzTileset): QueryFactory =>
 {
-  return (x: number, y: number, direction: Direction): PassabilityQuery => ({ document, tileset, x, y, direction });
+  return (x: number, y: number, direction: Direction, tiles: readonly number[]): PassabilityQuery =>
+  {
+    return { document, tileset, x, y, direction, tiles };
+  };
 };
 
-export { cellPassage, cellTiles, checkPassage, DIRECTIONS, passabilityQuery, passageBit, tileEventsByCell };
-export type { CellPassage, Direction, PassageSource };
+export { cellPassage, cellTiles, checkPassage, DIRECTIONS, FIRST_PAGES, passabilityQuery, passageBit, tileEventsByCell };
+export type { CellPassage, Direction, PassageSource, QueryFactory };

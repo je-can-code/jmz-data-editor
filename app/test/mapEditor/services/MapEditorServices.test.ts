@@ -40,6 +40,9 @@ import { envelope, FakeEventSource, MemoryChannelNetwork, stubFetch } from '../s
  *
  * Once something asks, a window counts every blueprint's copies from every map's notes, and counts them again whenever a
  * map changes on disk or the stream comes back, never before it is asked and never for a file that is no map.
+ *
+ * A window with a server marks every transfer whose landing fails, and judges every landing afresh whenever what it is
+ * judged by changes: the modules' rules and kinds, the page rule, or the clock; once stopped, it judges nothing afresh.
  */
 describe('MapEditorServices', () =>
 {
@@ -1090,6 +1093,66 @@ describe('MapEditorServices', () =>
         .toStrictEqual([ true, [ [ 'map:1', 'mine' ] ] ]);
       services.stop();
     });
+  });
+
+  it('gives transfers the marks of failing landings in a window with a server, and none in one without', () =>
+  {
+    // Arrange: one window over a server, one over none.
+    const served = buildEnvironment(new MemoryChannelNetwork(), 'window-a');
+    const serverless = buildEnvironment(new MemoryChannelNetwork(), 'window-b', null);
+
+    // Act.
+    const windows = [ createMapEditorServices(served.environment), createMapEditorServices(serverless.environment) ];
+
+    // Assert.
+    const marks = windows.map(services => services.modules.overlays().map(overlay => overlay.id));
+    expect(marks)
+      .toStrictEqual([ [ 'core.landings' ], [] ]);
+  });
+
+  it('judges every landing afresh once the clock moves or the page rule changes, and no more once stopped', () =>
+  {
+    // Arrange: a started window, and what it judged landings by at first.
+    const { environment } = buildEnvironment(new MemoryChannelNetwork(), 'window-a');
+    const services = createMapEditorServices(environment);
+    services.start();
+    const first = services.landings.judge;
+
+    // Act: the clock moves; then the new game seats another party; then the window stops and the clock moves again.
+    services.clock.set(1200);
+    const afterClock = services.landings.judge;
+    services.pages.setSave({ party: [ 1, 2 ] });
+    const afterParty = services.landings.judge;
+    services.stop();
+    services.clock.set(300);
+
+    // Assert.
+    expect([ afterClock === first, afterParty === afterClock, services.landings.judge === afterParty ])
+      .toStrictEqual([ false, false, true ]);
+  });
+
+  it('judges every landing afresh once the modules switch on, by their rules and their kinds', async () =>
+  {
+    // Arrange: a project enabling J-RegionEffects.
+    const { fetch } = stubFetch(request => (request.url.endsWith('/api/plugin-metadata')
+      ? new Response('var $plugins = [\n{"name":"j/regions/J-RegionEffects","status":true,"description":"","parameters":{"globalAllowRegions":"[]","globalDenyRegions":"[\\"10\\"]","globalDenyTerrainTags":"[\\"1\\"]"}}\n];')
+      : envelope({})));
+    const { environment } = buildEnvironment(new MemoryChannelNetwork(), 'window-a');
+    const services = createMapEditorServices({ ...environment, fetch });
+    const before = services.landings.judge.rules;
+
+    // Act.
+    services.start();
+    await vi.waitFor(() =>
+    {
+      expect(services.modules.isActive('regions'))
+        .toBe(true);
+    });
+
+    // Assert: no rule before, J-RegionEffects' after.
+    expect([ before, services.landings.judge.rules.map(rule => rule.id) ])
+      .toStrictEqual([ [], [ 'regions.passage' ] ]);
+    services.stop();
   });
 
   it('works without a server: no stream, and a hub that cannot load files', async () =>

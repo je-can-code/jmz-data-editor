@@ -100,7 +100,8 @@ type PaletteEntry = {
 };
 
 /**
- * What a passability rule is asked: whether a character may step from a tile in a direction.
+ * What a passability rule is asked: whether a character may step from a tile in a direction, as Game_Map#isPassable
+ * answers it for that tile, with the tiles the engine reads the step through.
  */
 type PassabilityQuery = {
   readonly document: MapDocument;
@@ -108,11 +109,18 @@ type PassabilityQuery = {
   readonly x: number;
   readonly y: number;
   readonly direction: 2 | 4 | 6 | 8;
+
+  /**
+   * The tiles the step is read through, top first, as Game_Map#allTiles lists them: the tile images of events below
+   * characters standing there, then the four layers from the top down.
+   */
+  readonly tiles: readonly number[];
 };
 
 /**
  * A rule that forbids steps the engine's own passability allows, such as J-RegionEffects' terrain and region
- * deny rules. The passability overlay and the landing check for transfers both apply every active rule.
+ * deny rules. The passability overlay, route previews and the landing check for transfers all apply every active rule,
+ * each asked only about the steps the engine lets through.
  */
 type PassabilityRule = {
   /**
@@ -126,7 +134,9 @@ type PassabilityRule = {
   readonly title: string;
 
   /**
-   * Judges one step.
+   * Judges one step. The landing check reads the reason from either side of a step, the way out of one tile or the way
+   * into the next, so it names what forbids the step rather than which way the step points: "Region 10 keeps everyone
+   * out."
    * @param {PassabilityQuery} query The step.
    * @returns {string | null} Why it is forbidden, in the author's words, or null when this rule allows it.
    */
@@ -516,6 +526,12 @@ type PreviewKindDefinition = {
 type ModuleContributions = {
   eventKind(kind: EventKindDefinition): void;
   paletteEntry(entry: PaletteEntry): void;
+
+  /**
+   * Forbids steps the engine allows, for as long as the module is on: the passability overlay marks them, a route walks
+   * into them as walls, and a transfer's landing reads them when it asks whether the player could step off its tile.
+   * @param {PassabilityRule} rule The rule.
+   */
   passabilityRule(rule: PassabilityRule): void;
   overlay(overlay: OverlayDefinition): void;
   catalogEntry(entry: CommandCatalogEntry): void;

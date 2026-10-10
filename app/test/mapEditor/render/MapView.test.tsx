@@ -15,7 +15,7 @@ import type { DocumentKey } from '../../../src/mapEditor/core/model/documentKeys
 import { createEventPage, createMapEvent } from '../../../src/mapEditor/core/model/eventModel.ts';
 import type { JsonValue } from '../../../src/mapEditor/core/model/json.ts';
 import { MapDocument } from '../../../src/mapEditor/core/model/MapDocument.ts';
-import type { ConfigRead, OnDemandConfig } from '../../../src/mapEditor/core/modules/PluginModule.ts';
+import type { ConfigRead, OnDemandConfig, PassabilityRule } from '../../../src/mapEditor/core/modules/PluginModule.ts';
 import type { RmmzMapEvent } from '../../../src/mapEditor/core/model/rmmzTypes.ts';
 import { marksOf, TILESET_MARKS_DOCUMENT } from '../../../src/mapEditor/core/palette/tilesetMarkEdits.ts';
 import { CommandCatalog } from '../../../src/mapEditor/core/commands/CommandCatalog.ts';
@@ -55,6 +55,8 @@ const stand = vi.hoisted(() => ({
     weather: (readonly WeatherLayerDefinition[])[];
     classifiers: MarkerClassifier[];
     pageRules: PageRule[];
+    rules: (readonly PassabilityRule[])[];
+    refreshes: number;
     shown: (boolean | 'mount')[];
     times: number[];
     seasons: (number | null)[];
@@ -84,6 +86,8 @@ vi.mock('../../../src/mapEditor/render/PixiMapRenderer.ts', () =>
       weather: [] as (readonly WeatherLayerDefinition[])[],
       classifiers: [] as MarkerClassifier[],
       pageRules: [] as PageRule[],
+      rules: [] as (readonly PassabilityRule[])[],
+      refreshes: 0,
       shown: [] as (boolean | 'mount')[],
       times: [] as number[],
       seasons: [] as (number | null)[],
@@ -212,9 +216,14 @@ vi.mock('../../../src/mapEditor/render/PixiMapRenderer.ts', () =>
       this.record.overlaySets.push(overlays);
     }
 
-    setPassabilityRules(): void
+    setPassabilityRules(rules: readonly PassabilityRule[]): void
     {
-      // the switches are not what these tests look at.
+      this.record.rules.push(rules);
+    }
+
+    refreshOverlays(): void
+    {
+      this.record.refreshes += 1;
     }
 
     setEventMarkers(classify: MarkerClassifier): void
@@ -289,6 +298,9 @@ vi.mock('../../../src/mapEditor/render/MapViewController.ts', () =>
  * Events that draw no picture show markers from the start, picking their symbol by the kind the window's registry makes
  * of them, or by their trigger when no kind claims them; the registry reads events differently once the plugin modules
  * switch on, after js/plugins.js is read, so the renderer is handed the classifier again then and redraws the markers.
+ * Their passability rules are handed over again then too, so the Passability overlay marks what a module forbids, such
+ * as J-RegionEffects' regions, however late the modules switch on. The marks on transfers whose landings fail are drawn
+ * again whenever the window's landings learn more, such as a map a transfer lands on having been read.
  *
  * What the modules draw into the lighting layer is handed to the renderer from the start and again as they switch on,
  * and the bar offers its Lighting switch, after Shadows, only while some module draws there: a project without such a
@@ -364,8 +376,30 @@ describe('MapView', () =>
     const clock = new WindowClock(840);
     const pages = new WindowPageRule(NO_MODULES);
     const preview = new WindowPreview();
-    const services = { view: { kind: 'workspace' }, api: null, shell, hub, openDocument, paints, locationPicks, modules: NO_MODULES, clock, pages, preview };
+    const landings = landingsHeard();
+    const services = { view: { kind: 'workspace' }, api: null, shell, hub, openDocument, paints, locationPicks, modules: NO_MODULES, clock, pages, preview, landings };
     return { ...services, resolveConflict: vi.fn(() => true) } as unknown as MapEditorServices;
+  };
+
+  /**
+   * The window's landings as a view hears them: whoever listens, and a way for the test to say they learned more.
+   * @returns {{ subscribe: (listener: () => void) => () => void, learn: () => void, listening: () => number }} The landings.
+   */
+  const landingsHeard = () =>
+  {
+    const listeners = new Set<() => void>();
+    return {
+      subscribe: (listener: () => void) =>
+      {
+        listeners.add(listener);
+        return () =>
+        {
+          listeners.delete(listener);
+        };
+      },
+      learn: () => listeners.forEach(listener => listener()),
+      listening: () => listeners.size,
+    };
   };
 
   /**
@@ -852,6 +886,69 @@ describe('MapView', () =>
     const parallelPage = { ...createEventPage(), trigger: 4 };
     expect([ classifiers.length, classifiers.map(classify => events.map(event => classify(event, 5))), events.map(event => classifiers[1](event, 5, parallelPage)) ])
       .toStrictEqual([ 2, [ [ 'chest', 'autorun', 'player-touch' ], [ 'chest', 'autorun', 'player-touch' ] ], [ 'chest', 'parallel', 'parallel' ] ]);
+  });
+
+  it('hands the renderer the modules\' passability rules from the start, and again once they switch on after it drew', () =>
+  {
+    // Arrange: modules with no rule until they switch on, and one after.
+    const activations = new Set<() => void>();
+    const ledge: PassabilityRule = { id: 'test.ledge', title: 'Ledge', deny: () => null };
+    const modules = {
+      ...NO_MODULES,
+      rules: [] as PassabilityRule[],
+      passabilityRules()
+      {
+        return this.rules;
+      },
+      subscribe: (listener: () => void) =>
+      {
+        activations.add(listener);
+        return () => activations.delete(listener);
+      },
+    };
+    render(
+      <MapEditorServicesProvider services={{ ...served(), modules } as unknown as MapEditorServices}>
+        <MapView mapId={5}/>
+      </MapEditorServicesProvider>
+    );
+
+    // Act: the modules switch on.
+    act(() =>
+    {
+      modules.rules = [ ledge ];
+      modules.revision += 1;
+      activations.forEach(listener => listener());
+    });
+
+    // Assert: none at first, then the rule.
+    expect(stand.renderers[0].rules)
+      .toStrictEqual([ [], [ ledge ] ]);
+  });
+
+  it('draws its marks on failing landings again whenever the landings learn more, until the view goes', () =>
+  {
+    // Arrange: a view over a project.
+    const services = served();
+    const { unmount } = render(
+      <MapEditorServicesProvider services={services}>
+        <MapView mapId={5}/>
+      </MapEditorServicesProvider>
+    );
+    const landings = services.landings as unknown as ReturnType<typeof landingsHeard>;
+    const before = stand.renderers[0].refreshes;
+
+    // Act: the landings learn more twice, then the view goes.
+    act(() =>
+    {
+      landings.learn();
+      landings.learn();
+    });
+    const drawn = stand.renderers[0].refreshes - before;
+    unmount();
+
+    // Assert.
+    expect([ drawn, landings.listening() ])
+      .toStrictEqual([ 2, 0 ]);
   });
 
   it('hands the renderer the window\'s page rule from the start, and again whenever it changes', () =>
