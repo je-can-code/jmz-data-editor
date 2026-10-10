@@ -197,6 +197,17 @@ class PairWriter
   #answering = 0;
 
   /**
+   * Settles once the failed act being answered has its moves taken back, which may wait for a stroke to end: what a wait
+   * for everything to land waits on meanwhile, since nothing is sent until then.
+   */
+  #answered: Promise<void> = Promise.resolve();
+
+  /**
+   * Settles {@link #answered}.
+   */
+  #settleAnswered: () => void = () => undefined;
+
+  /**
    * The waits for an edit under way to end before a failure is answered.
    */
   #answerTimers = new Set<ReturnType<typeof setTimeout>>();
@@ -254,13 +265,15 @@ class PairWriter
   }
 
   /**
-   * Stops writing; an act on its way still lands.
+   * Stops writing; an act on its way still lands. A failure still waiting to be answered never will be, so nothing waits
+   * on it any more.
    */
   stop(): void
   {
     this.#unsubscribe();
     this.#answerTimers.forEach(timer => clearTimeout(timer));
     this.#answerTimers.clear();
+    this.#settleAnswered();
   }
 
   /**
@@ -275,18 +288,26 @@ class PairWriter
 
   /**
    * Settles once nothing is on its way: what a save and opening a map wait for, so a map's file is never read, or written
-   * whole, under a pair still on its way to it. A write that fails meanwhile ends the wait.
-   * @returns {Promise<void>} Settles once every act asked for has landed, or one has failed; never rejects.
+   * whole, under a pair still on its way to it. A write that fails meanwhile ends the wait, once its moves are taken back
+   * out of the window: until then the window holds a pair the disk refused, which a save would write into one map alone.
+   * Taking them back may wait for a stroke to end, and so may this.
+   * @returns {Promise<void>} Settles once every act asked for has landed, or one has failed and been answered; never
+   * rejects.
    */
   async whenWritten(): Promise<void>
   {
     const failures = this.#failures;
     this.#send();
-    while ((this.#sending !== null || this.#queue.length > 0) && this.#failures === failures)
+
+    // nothing is sent while a failure is being answered, so the loop stops there rather than wait on an act long settled.
+    while ((this.#sending !== null || this.#queue.length > 0) && this.#answering === 0 && this.#failures === failures)
     {
       await this.#sent;
       this.#send();
     }
+
+    // a failure being answered, from before the wait or during it, is waited out.
+    await this.#answered;
   }
 
   /**
@@ -473,6 +494,10 @@ class PairWriter
         this.#sending = null;
         this.#failures += 1;
         this.#answering += 1;
+        this.#answered = new Promise(resolve =>
+        {
+          this.#settleAnswered = resolve;
+        });
         this.#answer(moves, error);
       },
     );
@@ -517,6 +542,7 @@ class PairWriter
     {
       this.#takingBack = false;
       this.#answering -= 1;
+      this.#settleAnswered();
     }
 
     stranded.forEach(step => this.#stranded.add(step.id));

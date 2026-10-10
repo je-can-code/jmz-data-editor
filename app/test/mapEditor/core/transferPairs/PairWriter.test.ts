@@ -315,6 +315,67 @@ describe('PairWriter', () =>
       .toStrictEqual([ 'Transfer (Entrance)', null, 1, false ]);
   });
 
+  it('waits for a refused pair to be taken back, after the stroke it waits on, before saying everything is written', async () =>
+  {
+    // Arrange: the placing act held on its way and then refused, the pair undone meanwhile, and a stroke open as it fails.
+    const window = pairWindow({ held: [ OUTSIDE, INSIDE ] });
+    const release = window.holdNextWrite();
+    window.failNextWrite(new Error('the disk is full'));
+    const plan = pairPlanOf(DOOR_PAIR, pairMapOf(window.disk, OUTSIDE), pairMapOf(window.disk, INSIDE), PAIR_LOOKS) as PairPlan;
+    const before = [ OUTSIDE, INSIDE ].map(mapId => structuredClone(window.disk.get(mapId)));
+    await placeTransfers(window.sources, plan);
+    window.hub.undo(mapHistoryKey(OUTSIDE));
+    const stroke = window.hub.begin('Paint', [ mapHistoryKey(INSIDE) ]);
+    release();
+    await settlePairs();
+
+    // Act: a wait for everything to land, as a save makes, through the stroke and past its end.
+    let written = false;
+    const waiting = window.writer.whenWritten().then(() =>
+    {
+      written = true;
+    });
+    await new Promise(resolve =>
+    {
+      setTimeout(resolve, 60);
+    });
+    const duringStroke = written;
+    stroke.cancel();
+    await waiting;
+
+    // Assert: the wait held through the stroke and ended once both moves were taken back, the pair standing undone.
+    expect([ duringStroke, written, window.hub.history(mapHistoryKey(OUTSIDE)).position, window.acts.length, [ OUTSIDE, INSIDE ].map(mapId => window.disk.get(mapId)), window.writer.hasUnwritten() ])
+      .toStrictEqual([ false, true, 0, 1, before, false ]);
+  });
+
+  it('stops waiting for a refused pair\'s answer once stopped, as the stroke it waits on may never end', async () =>
+  {
+    // Arrange: the placing act refused while a stroke is open, so its answer waits.
+    const window = pairWindow({ held: [ OUTSIDE, INSIDE ] });
+    window.failNextWrite(new Error('the disk is full'));
+    const plan = pairPlanOf(DOOR_PAIR, pairMapOf(window.disk, OUTSIDE), pairMapOf(window.disk, INSIDE), PAIR_LOOKS) as PairPlan;
+    const release = window.holdNextWrite();
+    await placeTransfers(window.sources, plan);
+    window.hub.begin('Paint', [ mapHistoryKey(INSIDE) ]);
+    release();
+    await settlePairs();
+    let written = false;
+    const waiting = window.writer.whenWritten().then(() =>
+    {
+      written = true;
+    });
+    await settlePairs();
+    const beforeStop = written;
+
+    // Act.
+    window.writer.stop();
+    await waiting;
+
+    // Assert: the wait held until the stop, which ended it with the door still standing, never taken back.
+    expect([ beforeStop, written, window.hub.map(mapDocumentKey(OUTSIDE)).event(1)?.name ])
+      .toStrictEqual([ false, true, 'Transfer (Entrance)' ]);
+  });
+
   it('alarms over a refused pair no history can take back any more, forgotten while it was on its way', async () =>
   {
     // Arrange: the placing act held on its way and then refused with something that is no error.
