@@ -235,7 +235,8 @@ type RemoteOperation =
  * only by histories that live on other documents), since no history can move them but a check still needs them.
  * {@code saved} names the steps the document held when its file was last saved or read (see DocumentHub's savedSteps).
  * {@code file} is what the file holds, present only when that differs from the content, and null when the window did
- * not know it: a document without it holds exactly what its file does.
+ * not know it: a document without it holds exactly what its file does. {@code removed} is there, true, when the file was
+ * removed from disk, {@code file} then being what it held when last known.
  */
 type DocumentSnapshot = {
   readonly document: DocumentKey;
@@ -245,6 +246,7 @@ type DocumentSnapshot = {
   readonly moves: readonly string[];
   readonly saved: readonly string[];
   readonly file?: JsonValue | null;
+  readonly removed?: true;
   readonly histories: readonly { key: HistoryKey; done: readonly HistoryStep[]; undone: readonly HistoryStep[] }[];
   readonly unlisted: readonly HistoryStep[];
 };
@@ -535,7 +537,9 @@ const carriedStepFinder = (snapshot: DocumentSnapshot): (id: string) => HistoryS
  * the map, so a map can come to hold its file's content by many roads, and leave it by as many. Whatever writes a file
  * says what it wrote: a save its content ({@link save}), and anything else the content or the patches it wrote
  * ({@link noteWritten}, {@link notePatched}). Saving writes a document's committed content; it never touches history, so
- * undo after a save works, and undoing back to what the file holds makes the document read as saved again.
+ * undo after a save works, and undoing back to what the file holds makes the document read as saved again. A document
+ * whose file was removed from disk matches no file, and reads as unsaved until a save writes the file back or the file
+ * comes back, since closing it would lose the only copy left.
  *
  * A file changed outside the editor never clears history either. On a document with no unsaved edits, the file's
  * version arrives as one more step, named {@link OUTSIDE_CHANGE_LABEL}, which the file already reflects: undoing it
@@ -595,6 +599,13 @@ class DocumentHub
    * null while that is not known, after a write this window could not follow, until the file is read again.
    */
   #files = new Map<DocumentKey, JsonValue | null>();
+
+  /**
+   * The held documents whose file was removed from disk, as far as this window knows. Each reads as unsaved, holding the
+   * only copy left, until its file is written again or comes back; {@link #files} keeps what the file held when last known,
+   * which tells whether the document holds edits of its own once the file is back.
+   */
+  #removed = new Set<DocumentKey>();
 
   /**
    * For each held document, when what its file holds was last learnt, counted by {@link #learnings}: a read of the file
@@ -793,11 +804,24 @@ class DocumentHub
    * @param {DocumentKey} key The document.
    * @returns {JsonValue | null} The file's content, not to be changed; null when the document is not held, is kept
    * alongside others (whose keeper writes its file a part at a time), or what its file holds is not known, after a write
-   * this window could not follow, until the file is read again.
+   * this window could not follow, until the file is read again; and null while its file is removed from disk.
    */
   fileContent(key: DocumentKey): JsonValue | null
   {
-    return this.#files.get(key) ?? null;
+    return this.#removed.has(key)
+      ? null
+      : this.#files.get(key) ?? null;
+  }
+
+  /**
+   * Reports whether a held document's file was removed from disk, as far as this window knows: the document holds the
+   * only copy left, and reads as unsaved until a save writes the file back or the file comes back.
+   * @param {DocumentKey} key The document.
+   * @returns {boolean} True while its file is removed; false for a document not held.
+   */
+  isFileRemoved(key: DocumentKey): boolean
+  {
+    return this.#removed.has(key);
   }
 
   /**
@@ -863,8 +887,10 @@ class DocumentHub
     const listed = new Set(histories.flatMap(({ done, undone }) => [ ...done, ...undone ]).map(step => step.id));
     const unlisted = [ ...applied, ...moves ].filter(step => listed.has(step.id) === false);
 
-    // what the file holds rides along only when it differs from the content, so a clean copy keeps its exact shape.
+    // what the file holds rides along only when it differs from the content, so a clean copy keeps its exact shape, and so
+    // does a file removed from disk, which the other window reads as unsaved too.
     const file = this.isDirty(key) ? { file: cloneJson(this.#files.get(key) ?? null) } : {};
+    const removed = this.#removed.has(key) ? { removed: true as const } : {};
     return {
       document: key,
       content,
@@ -873,6 +899,7 @@ class DocumentHub
       moves: moves.map(step => step.id),
       saved: [ ...this.#saved.get(key) ?? [] ],
       ...file,
+      ...removed,
       histories,
       unlisted: [ ...new Map(unlisted.map(step => [ step.id, step ])).values() ],
     };
@@ -909,6 +936,10 @@ class DocumentHub
     this.#lineage.set(key, [ ...snapshot.lineage ]);
     this.#saved.set(key, [ ...snapshot.saved ]);
     this.#learnFile(key, snapshot.file === undefined ? cloneJson(snapshot.content) : cloneJson(snapshot.file));
+    if (snapshot.removed === true)
+    {
+      this.#learnRemoved(key);
+    }
 
     // one object per step, however many histories and snapshots mention it.
     const intern = (step: HistoryStep): HistoryStep =>
@@ -1015,6 +1046,7 @@ class DocumentHub
     this.#moves.delete(key);
     this.#saved.delete(key);
     this.#files.delete(key);
+    this.#removed.delete(key);
     this.#fileLearnt.delete(key);
     this.#dirty.delete(key);
     this.#conflicts.delete(key);
@@ -1743,8 +1775,9 @@ class DocumentHub
   /**
    * Reports whether a document reads as unsaved: whether its committed content differs from what its file holds (see
    * {@link fileContent}), whatever moved either there. A document whose file is not known is unsaved, since nothing says
-   * the file holds it. A document kept alongside others never is: each of its parts is unsaved exactly while the document
-   * that part describes is, and is saved with it.
+   * the file holds it, and so is one whose file was removed from disk, which holds nothing: closing it would lose the only
+   * copy left. A document kept alongside others never is: each of its parts is unsaved exactly while the document that
+   * part describes is, and is saved with it.
    * @param {DocumentKey} key The document.
    * @returns {boolean} True when unsaved; false when it holds what its file holds, is not held, or is kept alongside others.
    */
@@ -1767,12 +1800,38 @@ class DocumentHub
   }
 
   /**
-   * Compares a held document's committed content with what its file holds. An edit still open is left out, as it is from
-   * a save, so a stroke under way never makes a map read as unsaved before it is done.
+   * Compares a held document's committed content with what its file holds: a file removed from disk holds nothing the
+   * document could match.
    * @param {DocumentKey} key The document, held.
-   * @returns {boolean} True when they differ, or what the file holds is not known.
+   * @returns {boolean} True when they differ, what the file holds is not known, or the file is removed.
    */
   #differsFromFile(key: DocumentKey): boolean
+  {
+    return this.#removed.has(key) || this.#differsFromLastFile(key);
+  }
+
+  /**
+   * Reports whether a held document holds edits its file never held: whether it reads as unsaved, but for a document
+   * whose file was removed from disk, which is unsaved for that alone and holds edits of its own only where it differs
+   * from what the file held when last known. What a version of the file found on disk is weighed against.
+   * @param {DocumentKey} key The document, held.
+   * @returns {boolean} True when it holds such edits, or what its file held is not known.
+   */
+  #holdsUnsavedEdits(key: DocumentKey): boolean
+  {
+    return this.#removed.has(key)
+      ? this.#differsFromLastFile(key)
+      : this.isDirty(key);
+  }
+
+  /**
+   * Compares a held document's committed content with what its file held when this window last knew it, whether or not
+   * the file was removed since. An edit still open is left out, as it is from a save, so a stroke under way never makes a
+   * map read as unsaved before it is done.
+   * @param {DocumentKey} key The document, held.
+   * @returns {boolean} True when they differ, or what the file held is not known.
+   */
+  #differsFromLastFile(key: DocumentKey): boolean
   {
     const file = this.#files.get(key) ?? null;
     if (file === null)
@@ -1797,9 +1856,9 @@ class DocumentHub
   }
 
   /**
-   * Learns what a held document's file holds, and works out afresh whether the document is saved. A document kept
-   * alongside others keeps no copy of its file here: its keeper writes the file a part at a time, so no copy here could
-   * say what it holds.
+   * Learns what a held document's file holds, and works out afresh whether the document is saved: a file removed from disk
+   * that this learns of is back, or written again. A document kept alongside others keeps no copy of its file here: its
+   * keeper writes the file a part at a time, so no copy here could say what it holds.
    * @param {DocumentKey} key The document.
    * @param {JsonValue | null} content What the file holds, never shared with anything else; null when it is not known.
    */
@@ -1807,6 +1866,21 @@ class DocumentHub
   {
     this.#learnings += 1;
     this.#files.set(key, isKeptAlongside(key) ? null : content);
+    this.#removed.delete(key);
+    this.#fileLearnt.set(key, this.#learnings);
+    this.#dirty.delete(key);
+  }
+
+  /**
+   * Learns that a held document's file was removed from disk, and works out afresh whether the document is saved, which it
+   * no longer is: it holds the only copy left. What the file held when last known is kept, to tell whether the document
+   * holds edits of its own once the file comes back.
+   * @param {DocumentKey} key The document.
+   */
+  #learnRemoved(key: DocumentKey): void
+  {
+    this.#learnings += 1;
+    this.#removed.add(key);
     this.#fileLearnt.set(key, this.#learnings);
     this.#dirty.delete(key);
   }
@@ -1884,7 +1958,7 @@ class DocumentHub
    */
   notePatched(key: DocumentKey, patches: readonly Patch[]): void
   {
-    const known = this.#files.get(key) ?? null;
+    const known = this.fileContent(key);
     if (this.has(key) === false || patches.length === 0)
     {
       return;
@@ -2077,6 +2151,11 @@ class DocumentHub
    * into work the person has not saved, and nothing is thrown away without them choosing to. So is a removed file,
    * and a file whose whole value changed kind, which no patch can say.
    *
+   * A removed file leaves the document reading as unsaved, since it holds the only copy left, until a save writes the file
+   * back or the file comes back. One that comes back is taken as any version found on disk is, the document counting as
+   * holding unsaved edits only where it differs from what the file held before it went: holding just that, it takes the
+   * file's version as a step, as a clean document does, and one holding what the file came back with reads as saved.
+   *
    * A document kept alongside others is none of these: its file holds each part as the document that part describes
    * was last saved, so it differs from the copy here wherever any of those holds unsaved edits. The content is handed
    * on as an {@code outside} event, untouched, for its keeper to merge a part at a time; while an edit is open it waits
@@ -2084,7 +2163,8 @@ class DocumentHub
    * @param {DocumentKey} key The document.
    * @param {JsonValue | null} content The file's content, or null when the file was removed.
    * @param {boolean} recheck True when the file was re-read because the change stream came back, not because it
-   * changed: a document with unsaved edits is left alone then, only learning what its file holds.
+   * changed: a document with unsaved edits is left alone then, only learning what its file holds, unless its file had been
+   * removed, which coming back is a change.
    * @returns {ExternalChangeResult} What was done.
    */
   applyOutsideContent(key: DocumentKey, content: JsonValue | null, recheck = false): ExternalChangeResult
@@ -2095,7 +2175,7 @@ class DocumentHub
     }
 
     // a document with unsaved edits takes nothing from a file read again, but learns what it holds all the same.
-    if (recheck && this.isDirty(key))
+    if (recheck && this.#removed.has(key) === false && this.isDirty(key))
     {
       if (content !== null)
       {
@@ -2120,16 +2200,18 @@ class DocumentHub
       return 'kept';
     }
 
-    // the document's content is the only copy left of a removed file, so nothing is taken over it.
+    // the document's content is the only copy left of a removed file, so nothing is taken over it, and it reads as
+    // unsaved until a save writes the file back or the file comes back.
     if (content === null)
     {
+      this.#learnRemoved(key);
       this.flagConflict(key, { kind: 'disk', content: null });
       return 'conflicted';
     }
 
-    // whether the document held unsaved edits is asked of the file as it was known before this version of it arrived; an
-    // edit in progress counts as unsaved work too.
-    const unsaved = this.isDirty(key) || this.#transaction !== null;
+    // whether the document held unsaved edits is asked of the file as it was known before this version of it arrived, as
+    // it was before it went for a file removed since; an edit in progress counts as unsaved work too.
+    const unsaved = this.#holdsUnsavedEdits(key) || this.#transaction !== null;
     const held = this.#stepsHeldByFile(key, content);
     const learnt = this.#learnOutsideFile(key, content, false);
 
@@ -2171,11 +2253,11 @@ class DocumentHub
    * @param {JsonValue} content The file's content.
    * @param {boolean} announce True to say so to everything listening, as a file written otherwise than by a save; false
    * when what becomes of the document will say it.
-   * @returns {boolean} True when the version was new to this window.
+   * @returns {boolean} True when the version was new to this window, as any version is of a file removed since.
    */
   #learnOutsideFile(key: DocumentKey, content: JsonValue, announce = true): boolean
   {
-    const known = this.#files.get(key) ?? null;
+    const known = this.fileContent(key);
     if (known !== null && jsonEquals(known, content))
     {
       return false;
@@ -2207,8 +2289,9 @@ class DocumentHub
       return (this.#applied.get(key) as HistoryStep[]).map(step => step.id);
     }
 
-    // a clean document's committed content is the saved content, already compared.
-    return this.isDirty(key)
+    // a clean document's committed content is the saved content, already compared, as it is for one unsaved only for its
+    // file having been removed.
+    return this.#holdsUnsavedEdits(key)
       ? this.#passedThrough(key, content)
       : null;
   }

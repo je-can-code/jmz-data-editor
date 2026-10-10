@@ -2392,6 +2392,112 @@ describe('DocumentHub', () =>
         .toStrictEqual([ [ 'conflicted', 'ignored' ], { kind: 'disk', content: null }, before, false ]);
     });
 
+    /*
+     * A map whose file is removed outside the editor holds the only copy left, so it matches no file: it reads as unsaved,
+     * which is what makes closing its window ask first, until a save writes the file back. A map that read as saved there
+     * would be let go of with nobody warned, and the map lost. The file coming back is a version found on disk like any
+     * other, weighed against what the file held before it went: a map holding just that takes it as a clean map would.
+     */
+    describe('a file removed from disk', () =>
+    {
+      it('reads a clean map as unsaved once its file is removed, the map beside it still saved, and saved once a save writes it back', async () =>
+      {
+        // Arrange: map 1's file removed from disk, and taken as removed.
+        const { store, files } = buildStore();
+        const hub = buildHub(store);
+        files.delete(MAP_A);
+        hub.applyOutsideContent(MAP_A, null);
+        const removed = [ hub.dirtyKeys(), hub.isFileRemoved(MAP_A), hub.fileContent(MAP_A), hub.isFileRemoved(MAP_B) ];
+
+        // Act: the author keeps the map, and saves it.
+        hub.clearConflict(MAP_A);
+        await hub.save(MAP_A);
+
+        // Assert: the save wrote the map back as it stands, and it reads as saved again.
+        expect([ removed, files.get(MAP_A), hub.isDirty(MAP_A), hub.isFileRemoved(MAP_A), hub.fileContent(MAP_A) ])
+          .toStrictEqual([ [ [ MAP_A ], true, null, false ], fileOf(hub, MAP_A), false, false, fileOf(hub, MAP_A) ]);
+      });
+
+      it('takes a removed file come back as the map holds it as nothing new, the map saved and the removal no longer flagged', () =>
+      {
+        // Arrange.
+        const hub = buildHub();
+        hub.applyOutsideContent(MAP_A, null);
+
+        // Act.
+        const result = hub.applyOutsideContent(MAP_A, buildMapJson() as unknown as JsonValue);
+
+        // Assert.
+        expect([ result, hub.isDirty(MAP_A), hub.isConflicted(MAP_A), hub.isFileRemoved(MAP_A), rowsOf(hub, mapHistoryKey(1)) ])
+          .toStrictEqual([ 'unchanged', false, false, false, [] ]);
+      });
+
+      it('records a removed file come back changed as a step on a map holding no edits of its own, saved and no longer flagged', () =>
+      {
+        // Arrange.
+        const hub = buildHub();
+        hub.applyOutsideContent(MAP_A, null);
+        const changed = { ...buildMapJson(), displayName: 'Back again' } as unknown as JsonValue;
+
+        // Act.
+        const result = hub.applyOutsideContent(MAP_A, changed);
+
+        // Assert.
+        expect([ result, fileOf(hub, MAP_A).displayName, rowsOf(hub, mapHistoryKey(1)), hub.isDirty(MAP_A), hub.isConflicted(MAP_A) ])
+          .toStrictEqual([ 'recorded', 'Back again', [ 'Externally modified' ], false, false ]);
+      });
+
+      it('flags a removed file come back changed on a map holding edits of its own, which keeps them and stays unsaved', () =>
+      {
+        // Arrange: map 1 renamed and unsaved before its file was removed.
+        const hub = buildHub();
+        hub.edit('Rename', [ mapHistoryKey(1) ], tx => tx.set(MAP_A, [ 'displayName' ], 'Harbor'));
+        hub.applyOutsideContent(MAP_A, null);
+        const changed = { ...buildMapJson(), displayName: 'Back again' } as unknown as JsonValue;
+
+        // Act.
+        const result = hub.applyOutsideContent(MAP_A, changed);
+
+        // Assert.
+        expect([ result, hub.conflict(MAP_A), fileOf(hub, MAP_A).displayName, hub.isDirty(MAP_A), hub.isFileRemoved(MAP_A) ])
+          .toStrictEqual([ 'conflicted', { kind: 'disk', content: changed }, 'Harbor', true, false ]);
+      });
+
+      it('takes a removed file come back when only re-read after the stream came back, though the map read as unsaved', () =>
+      {
+        // Arrange: map 1's file removed; map 2 holds an unsaved rename, so a re-read leaves it alone.
+        const hub = buildHub();
+        hub.applyOutsideContent(MAP_A, null);
+        hub.edit('Rename', [ mapHistoryKey(2) ], tx => tx.set(MAP_B, [ 'displayName' ], 'Harbor'));
+        const file = buildMapJson() as unknown as JsonValue;
+
+        // Act.
+        const results = [ hub.applyOutsideContent(MAP_A, file, true), hub.applyOutsideContent(MAP_B, file, true) ];
+
+        // Assert.
+        expect([ results, hub.isDirty(MAP_A), hub.isConflicted(MAP_A), hub.isDirty(MAP_B) ])
+          .toStrictEqual([ [ 'unchanged', 'ignored' ], false, false, true ]);
+      });
+
+      it('hands a removed file to another window, which reads the map as unsaved and takes the file back as this one would', () =>
+      {
+        // Arrange: map 1's file removed here; map 2's still there.
+        const source = buildHub();
+        const target = new DocumentHub({ clientId: 'window-b', now: () => 1000 });
+        source.applyOutsideContent(MAP_A, null);
+        const snapshots = [ source.snapshot(MAP_A), source.snapshot(MAP_B) ];
+        snapshots.forEach(snapshot => target.adoptSnapshot(snapshot));
+        const adopted = [ target.isDirty(MAP_A), target.isFileRemoved(MAP_A), target.isDirty(MAP_B) ];
+
+        // Act: the file comes back as it was before it went.
+        const result = target.applyOutsideContent(MAP_A, buildMapJson() as unknown as JsonValue);
+
+        // Assert.
+        expect([ snapshots.map(snapshot => snapshot.removed), adopted, result, target.isDirty(MAP_A) ])
+          .toStrictEqual([ [ true, undefined ], [ true, true, false ], 'unchanged', false ]);
+      });
+    });
+
     it('leaves a document with unsaved edits alone when its file is only re-read, and takes a clean one\'s change', () =>
     {
       // Arrange: map 1 has an unsaved rename; both files changed while the change stream was down.
