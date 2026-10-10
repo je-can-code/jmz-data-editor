@@ -17,7 +17,8 @@ type HeldBattler = {
 
 /**
  * Words what the brush places for the enemy picked: a copy of the most common of the enemy's battlers already placed,
- * or the game's most common battler for an enemy placed nowhere yet.
+ * at the enemy's own level where those give one of their own, or the game's most common battler for an enemy placed
+ * nowhere yet.
  * @param {BattlerLook} look What it places.
  * @returns {string} The line.
  */
@@ -28,9 +29,12 @@ const lookWords = (look: BattlerLook): string =>
     return 'No battler of this enemy stands on any saved map yet, so each click places the game\'s most common battler, with no picture.';
   }
 
-  return look.of === 1
-    ? 'Each click places a battler like the one this enemy already has.'
-    : `Each click places a battler like ${look.copies} of the ${look.of} this enemy already has.`;
+  const like = look.of === 1
+    ? 'Each click places a battler like the one this enemy already has'
+    : `Each click places a battler like ${look.copies} of the ${look.of} this enemy already has`;
+  return look.levelLeft
+    ? `${like}, but at the enemy's own level.`
+    : `${like}.`;
 };
 
 /**

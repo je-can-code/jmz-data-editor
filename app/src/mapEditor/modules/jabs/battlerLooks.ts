@@ -15,6 +15,11 @@ type BattlerLook = {
   readonly page: RmmzEventPage;
   readonly copies: number;
   readonly of: number;
+
+  /**
+   * Whether any of the battlers it copies gives a level of its own, which the battler placed leaves to its enemy.
+   */
+  readonly levelLeft: boolean;
 };
 
 /**
@@ -144,10 +149,17 @@ const battlerLookOf = (enemyId: number, enemyName: string, battlers: readonly En
   const name = mostCommon(battlers.map(battler => battler.eventName), each => each);
   if (look === null || name === null)
   {
-    return { name: battlerName(enemyName), page: commonPage(enemyId), copies: 0, of: 0 };
+    return { name: battlerName(enemyName), page: commonPage(enemyId), copies: 0, of: 0, levelLeft: false };
   }
 
-  return { name: name.value, page: look.value, copies: look.count, of: battlers.length };
+  // the battlers copied are those shaped like the look, a level aside; any of them giving one has it left out.
+  const key = JSON.stringify(look.value);
+  const levelLeft = battlers.some((battler, index) =>
+  {
+    const levelled = parsableCommentLines(battler.page).some(line => LEVEL_TAG.pattern.test(line.text));
+    return levelled && JSON.stringify(looks[index]) === key;
+  });
+  return { name: name.value, page: look.value, copies: look.count, of: battlers.length, levelLeft };
 };
 
 /**
