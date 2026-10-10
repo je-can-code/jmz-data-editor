@@ -6,7 +6,7 @@ import { mapDocumentKey, parseDocumentKey, type DocumentKey } from '../model/doc
 import { MapDocument } from '../model/MapDocument.ts';
 import { invertPatch, PatchConflictError, type Patch } from '../model/patches.ts';
 import type { RmmzMap } from '../model/rmmzTypes.ts';
-import { documentLabel, documentName } from '../../views/documentLabels.ts';
+import { documentName, mapLabel } from '../../views/documentLabels.ts';
 
 /**
  * How long taking a failed write back waits before looking again while an edit is open, in milliseconds: nothing may move
@@ -321,7 +321,7 @@ class PairWriter
    * @param {(mapId: number) => string} mapName Names a map as the map tree shows it; each is "Map N" unless said.
    * @returns {string | null} Why, with no full stop of its own, or null when nothing stands in its way.
    */
-  guard(step: HistoryStep, direction: 'forward' | 'backward', mapName = (mapId: number) => documentLabel(mapDocumentKey(mapId))): string | null
+  guard(step: HistoryStep, direction: 'forward' | 'backward', mapName: (mapId: number) => string = mapLabel): string | null
   {
     if (isPairStep(step) === false)
     {

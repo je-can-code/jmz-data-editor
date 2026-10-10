@@ -1,5 +1,5 @@
 import type { DocumentConflict } from '../core/history/DocumentHub.ts';
-import { parseDocumentKey, type DocumentKey } from '../core/model/documentKeys.ts';
+import { mapDocumentKey, parseDocumentKey, type DocumentKey } from '../core/model/documentKeys.ts';
 
 /**
  * What each editor-only document is called.
@@ -37,6 +37,16 @@ const documentLabel = (key: DocumentKey): string =>
     case 'editor-data':
       return EDITOR_DATA_LABELS[parsed.name] ?? parsed.name;
   }
+};
+
+/**
+ * Names a map by its label alone, as a window knowing no map's name in the tree does.
+ * @param {number} mapId The map.
+ * @returns {string} Its label, such as "Map 12".
+ */
+const mapLabel = (mapId: number): string =>
+{
+  return documentLabel(mapDocumentKey(mapId));
 };
 
 /**
@@ -106,5 +116,5 @@ const describeConflict = (key: DocumentKey, conflict: DocumentConflict, name = d
   };
 };
 
-export { describeConflict, documentLabel, documentName };
+export { describeConflict, documentLabel, documentName, mapLabel };
 export type { ConflictWording };

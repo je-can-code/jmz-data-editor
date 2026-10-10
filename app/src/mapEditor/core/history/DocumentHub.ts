@@ -2063,7 +2063,7 @@ class DocumentHub
         },
         () =>
         {
-          // a document let go of, or whose file this window learnt otherwise meanwhile, needs the read no more.
+          // the read is tried again a while later, unless the document was let go of, or its file learnt otherwise, by then.
           setTimeout(() =>
           {
             if (this.#fileLearnt.get(key) === learnt)

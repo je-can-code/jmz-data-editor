@@ -4,7 +4,7 @@ import type { HistoryStep } from '../history/HistoryStep.ts';
 import { mapDocumentKey, parseDocumentKey, type DocumentKey } from '../model/documentKeys.ts';
 import type { JsonValue } from '../model/json.ts';
 import type { Patch } from '../model/patches.ts';
-import { documentLabel, documentName } from '../../views/documentLabels.ts';
+import { documentName, mapLabel } from '../../views/documentLabels.ts';
 import { BLUEPRINTS_DOCUMENT } from './blueprints.ts';
 import { isBlueprintChange, type CopyMaps } from './copyMaps.ts';
 
@@ -376,7 +376,7 @@ class BlueprintWriter
    * @param {(mapId: number) => string} mapName Names a map as the map tree shows it; each is "Map N" unless said.
    * @returns {string | null} Why, with no full stop of its own, or null when nothing stands in its way.
    */
-  guard(step: HistoryStep, direction: 'forward' | 'backward', mapName = (mapId: number) => documentLabel(mapDocumentKey(mapId))): string | null
+  guard(step: HistoryStep, direction: 'forward' | 'backward', mapName: (mapId: number) => string = mapLabel): string | null
   {
     const blocked = isBlueprintChange(step) ? this.#blockedBy([ step ]) : null;
     if (blocked !== null)

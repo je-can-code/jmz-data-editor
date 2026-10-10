@@ -2,9 +2,8 @@ import { untrackedWords, type DocumentHub, type HistoryCheck, type HistoryFailur
 import { TREE_HISTORY_KEY, type HistoryKey } from '../history/historyKeys.ts';
 import type { HistoryStep } from '../history/HistoryStep.ts';
 import type { LeftPart } from '../history/stepParts.ts';
-import { mapDocumentKey } from '../model/documentKeys.ts';
 import type { MapTreeService, TreeOutcome } from '../tree/MapTreeService.ts';
-import { documentLabel, documentName } from '../../views/documentLabels.ts';
+import { documentName, mapLabel } from '../../views/documentLabels.ts';
 
 /**
  * What an undo, a redo or a history jump came to. {@code nothing} marks the quiet failure (there was no step that
@@ -144,7 +143,7 @@ class HistoryRouter
     this.#tree = tree;
     this.#guard = guard;
     this.#leftWords = leftWords;
-    this.#mapName = mapName ?? (mapId => documentLabel(mapDocumentKey(mapId)));
+    this.#mapName = mapName ?? mapLabel;
   }
 
   /**
