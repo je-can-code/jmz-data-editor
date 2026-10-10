@@ -3,8 +3,10 @@ import { DocumentHub, type DocumentStore, type HistoryCheck } from '../../../../
 import { blueprintHistoryKey, eventHistoryKey, mapHistoryKey, type HistoryKey } from '../../../../src/mapEditor/core/history/historyKeys.ts';
 import type { HistoryStep } from '../../../../src/mapEditor/core/history/HistoryStep.ts';
 import type { Transaction } from '../../../../src/mapEditor/core/history/Transaction.ts';
+import { createDocument } from '../../../../src/mapEditor/core/model/createDocument.ts';
 import type { DocumentKey } from '../../../../src/mapEditor/core/model/documentKeys.ts';
 import type { JsonValue } from '../../../../src/mapEditor/core/model/json.ts';
+import type { Patch } from '../../../../src/mapEditor/core/model/patches.ts';
 import type { RmmzMap, RmmzMapEvent } from '../../../../src/mapEditor/core/model/rmmzTypes.ts';
 import { operationFor } from '../../../../src/mapEditor/core/sync/SyncPeer.ts';
 import { buildMapJson } from '../../support/fixtures.ts';
@@ -19,10 +21,12 @@ import { buildMapJson } from '../../support/fixtures.ts';
  * the author hears which, with the edit in its way. Its other documents, the blueprint's own, keep the rule whole, and so
  * does every step marking no follower at all: the tree's, a door pair's.
  *
- * Nothing about it may leave the window lying to itself. The step moves as the part that moved, by its own id, in every
- * history; the part an undo left stays applied as a forgotten step, so an older edit's undo is still checked against its
- * patches; a file known to hold the whole step holds the part left once nothing else moves there; and another window
- * repeats the move exactly. A redo mirrors it, leaving out what changed since the undo, which is then gone.
+ * Nothing about it may leave the window lying to itself, or the disk parted from the blueprint. The step moves as the part
+ * that moved, by its own id, in every history; the part an undo left stays applied as a forgotten step, so an older edit's
+ * undo is still checked against its patches; a map's file is judged apart from the map, so a part the map keeps under an
+ * edit not yet saved goes back in the file with the rest, while a file holding that edit keeps the part, and is known to
+ * hold it once nothing else moves there; a map whose file gave a part back never reads as saved until it is; and another
+ * window repeats the move exactly. A redo mirrors it, leaving out what changed since the undo, which is then gone.
  *
  * The fixture is two maps, each 3 by 2, with a door (event 1) and a chest (event 3), and the blueprints. The change raises
  * the guard's sight in the blueprints and renames both maps' doors and map 1's chest, so a copy changed since always has a
@@ -120,6 +124,48 @@ describe('DocumentHub, steps whose copies follow their change', () =>
    * @returns {unknown} The parts left, or the reason it refused.
    */
   const leftOf = (check: HistoryCheck): unknown => (check.ok ? check.left : check.reason);
+
+  /**
+   * A store keeping each document's file in memory, as the disk would.
+   * @returns {{ files: Map<DocumentKey, JsonValue>, store: DocumentStore }} The files, and the store writing them.
+   */
+  const storeOnDisk = (): { files: Map<DocumentKey, JsonValue>; store: DocumentStore } =>
+  {
+    const files = new Map<DocumentKey, JsonValue>();
+    const store: DocumentStore = {
+      load: async key => files.get(key) as JsonValue,
+      save: async (key, content) =>
+      {
+        files.set(key, content);
+      },
+    };
+    return { files, store };
+  };
+
+  /**
+   * Tells how much of a patch a file kept in memory would take, as the window's kept files do: the patch whole when it goes
+   * into a copy of the file, and nothing when it does not; a document with no file kept takes it whole.
+   * @param {ReadonlyMap<DocumentKey, JsonValue>} files The files.
+   * @returns {(key: DocumentKey, patch: Patch) => Patch | null} The fit.
+   */
+  const fitFrom = (files: ReadonlyMap<DocumentKey, JsonValue>) => (key: DocumentKey, patch: Patch): Patch | null =>
+  {
+    const content = files.get(key);
+    if (content === undefined)
+    {
+      return patch;
+    }
+
+    try
+    {
+      createDocument(key, structuredClone(content)).apply(patch);
+      return patch;
+    }
+    catch
+    {
+      return null;
+    }
+  };
 
   /**
    * Captures everything an undo could change in a hub: each held document's file and lineage, and the rows of the given
@@ -299,25 +345,53 @@ describe('DocumentHub, steps whose copies follow their change', () =>
     it('counts a file holding the whole change as holding the part left, once nothing else of the change is on it', async () =>
     {
       // Arrange: only map 1's door follows; renamed by hand and saved, so its file holds the change and the rename.
-      const files = new Map<DocumentKey, JsonValue>();
-      const store: DocumentStore = {
-        load: async key => files.get(key) as JsonValue,
-        save: async (key, content) =>
-        {
-          files.set(key, content);
-        },
-      };
+      const { files, store } = storeOnDisk();
       const hub = buildHub({ store });
+      hub.setFileFit(fitFrom(files));
       changeWith(hub, tx => tx.set(MAP_A, [ 'events', 1, 'name' ], 'Guard (sight 5)'), [ MAP_A ]);
       renameDoor(hub, MAP_A, 'Front door');
       await hub.save(MAP_A);
 
       // Act.
-      hub.undo(BLUEPRINT_HISTORY);
+      const undone = hub.undo(BLUEPRINT_HISTORY);
 
-      // Assert: the map still reads saved, its file holding the part left and the rename, as the map does.
-      expect([ hub.isDirty(MAP_A), hub.savedSteps(MAP_A).length, hub.savedSteps(MAP_A)[0] === hub.appliedSteps(MAP_A)[0].id, (files.get(MAP_A) as unknown as RmmzMap).events[1]?.name ])
-        .toStrictEqual([ false, 2, true, 'Front door' ]);
+      // Assert: the map still reads saved, its file holding the part left and the rename, as the map does; the file takes
+      // nothing for the undo.
+      expect([
+        hub.isDirty(MAP_A),
+        hub.savedSteps(MAP_A).length,
+        hub.savedSteps(MAP_A)[0] === hub.appliedSteps(MAP_A)[0].id,
+        (files.get(MAP_A) as unknown as RmmzMap).events[1]?.name,
+        undone.ok && undone.step.fileVersions,
+      ])
+        .toStrictEqual([ false, 2, true, 'Front door', undefined ]);
+    });
+
+    it('gives the part left back in the file of a map whose edit in its way is not saved, the map reading unsaved however it moves after', async () =>
+    {
+      // Arrange: only map 1's door follows; saved with the change in, then renamed by hand and not saved, so its file still
+      // holds the change's name.
+      const { files, store } = storeOnDisk();
+      const hub = buildHub({ store });
+      hub.setFileFit(fitFrom(files));
+      changeWith(hub, tx => tx.set(MAP_A, [ 'events', 1, 'name' ], 'Guard (sight 5)'), [ MAP_A ]);
+      await hub.save(MAP_A);
+      renameDoor(hub, MAP_A, 'Front door');
+
+      // Act: the change undone, then the hand's rename undone in its own window, which shows the part left again.
+      const undone = hub.undo(BLUEPRINT_HISTORY);
+      const dirtyAfterUndo = hub.isDirty(MAP_A);
+      hub.undo(eventHistoryKey(1, 1));
+
+      // Assert: the file takes the door's name back though the map keeps the rename; with the rename undone the map shows
+      // the change's name, which its file no longer holds, so it still reads unsaved.
+      expect([ undone.ok && undone.step.fileVersions, dirtyAfterUndo, eventOf(hub, MAP_A, 1).name, hub.isDirty(MAP_A) ])
+        .toStrictEqual([
+          [ { document: MAP_A, patches: [ { kind: 'set', path: [ 'events', 1, 'name' ], before: 'Door', after: 'Guard (sight 5)' } ] } ],
+          true,
+          'Guard (sight 5)',
+          true,
+        ]);
     });
   });
 
@@ -474,10 +548,12 @@ describe('DocumentHub, steps whose copies follow their change', () =>
         .toStrictEqual([ true, undefined ]);
     });
 
-    it('leaves in the file of a map with unsaved edits what the map left, so the file holds the map but for those edits', () =>
+    it('judges the file of a map with unsaved edits by its own version, giving back what the map left as far as the file holds it', () =>
     {
-      // Arrange: map 1's file took its own version of the change; map 1's door renamed by hand since.
+      // Arrange: map 1's file took its own version of the change; map 1's door renamed by hand since. The file still holds
+      // the change's name for the door, but its door as a whole was changed on disk since.
       const hub = buildHub();
+      hub.setFileFit((_key, patch) => (patch.kind === 'set' && patch.path.length === 2 ? null : patch));
       hub.edit('Raise guard sight', [ BLUEPRINT_HISTORY, mapHistoryKey(1) ], tx =>
       {
         tx.set(BLUEPRINTS, [ 'data', 'blueprints', 0, 'sight' ], 5);
@@ -497,20 +573,48 @@ describe('DocumentHub, steps whose copies follow their change', () =>
       // Act.
       const undone = hub.undo(BLUEPRINT_HISTORY);
 
-      // Assert: the file version keeps its patches reaching the door's name, the whole door's or its name's, and gives back
-      // the rest, event 10's name among them, whose place in the list merely starts like the door's.
+      // Assert: the file version gives back the door's name, which the file still holds as the change left it, while the
+      // map keeps the rename; it keeps the whole door, changed on disk since; and it gives back the rest, event 10's name
+      // among them, whose place in the list merely starts like the door's and so is never asked about.
       const moved = undone.ok ? undone.step : null;
-      expect(moved?.fileVersions)
+      expect([ moved?.fileVersions, eventOf(hub, MAP_A, 1).name ])
         .toStrictEqual([
-          {
-            document: MAP_A,
-            patches: [
-              { kind: 'set', path: [ 'events', 10, 'name' ], before: 'Gate', after: 'Gate (sight 5)' },
-              { kind: 'set', path: [ 'events', 3, 'name' ], before: 'Chest', after: 'Chest (sight 5)' },
-              { kind: 'tiles', indices: [ 4, 5 ], before: [ 5, 6 ], after: [ 50, 60 ] },
-            ],
-          },
+          [
+            {
+              document: MAP_A,
+              patches: [
+                { kind: 'set', path: [ 'events', 1, 'name' ], before: 'Door', after: 'Guard (sight 5)' },
+                { kind: 'set', path: [ 'events', 10, 'name' ], before: 'Gate', after: 'Gate (sight 5)' },
+                { kind: 'set', path: [ 'events', 3, 'name' ], before: 'Chest', after: 'Chest (sight 5)' },
+                { kind: 'tiles', indices: [ 4, 5 ], before: [ 5, 6 ], after: [ 50, 60 ] },
+              ],
+            },
+          ],
+          'Front door',
         ]);
+    });
+
+    it('judges the file by the way the window says it took the change, the map\'s own patches once the map was saved with it', () =>
+    {
+      // Arrange: map 1's file took its own version, then the map was saved whole, which the window's file way tells; the
+      // door renamed by hand since, unsaved.
+      const hub = buildHub();
+      hub.setFileWay((key, step) => step.entries.filter(entry => entry.document === key).map(entry => entry.patch));
+      hub.edit('Raise guard sight', [ BLUEPRINT_HISTORY, mapHistoryKey(1) ], tx =>
+      {
+        tx.set(BLUEPRINTS, [ 'data', 'blueprints', 0, 'sight' ], 5);
+        tx.set(MAP_A, [ 'events', 1, 'name' ], 'Guard (sight 5)');
+        tx.fileVersion(MAP_A, [ { kind: 'set', path: [ 'events', 1, 'name' ], before: 'Old door', after: 'Old door (sight 5)' } ]);
+        tx.markFollower(MAP_A);
+      });
+      renameDoor(hub, MAP_A, 'Front door');
+
+      // Act.
+      const undone = hub.undo(BLUEPRINT_HISTORY);
+
+      // Assert: the file gives back the map's own name for the door, not the version's.
+      expect(undone.ok && undone.step.fileVersions)
+        .toStrictEqual([ { document: MAP_A, patches: [ { kind: 'set', path: [ 'events', 1, 'name' ], before: 'Door', after: 'Guard (sight 5)' } ] } ]);
     });
   });
 });

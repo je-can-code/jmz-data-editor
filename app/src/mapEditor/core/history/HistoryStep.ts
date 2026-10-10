@@ -50,6 +50,10 @@ type FileEffect = {
  * blueprint's change reached it, whose copies on disk are not the ones it holds. The document takes the step's entries
  * on top of its unsaved edits; the file takes these, made against what the file held, and none at all when nothing the
  * step changes was in the file yet. Whoever writes the step to disk writes these in place of the document's entries.
+ *
+ * A move that leaves parts of a step in a document under edits made since says here too what that document's file took
+ * for the move, judged against the file alone: the parts left whose edits are not on disk go with the rest in the file,
+ * which the document's own entries, holding what moved in the document alone, cannot say (see stepParts' fileShareOf).
  */
 type FileVersion = {
   readonly document: DocumentKey;

@@ -154,6 +154,23 @@ const takenOut = (patches: readonly Patch[]): Patch[] =>
 };
 
 /**
+ * Finds the one way an undo or a redo leaving parts of a step on a map held here reaches that map's file: what the move
+ * judged the file to take, apart from the map (see stepParts' fileShareOf), which the part of the step that moved carries
+ * as its file version there; or, where that came to what moved on the map itself, the map's own patches.
+ * @param {HistoryStep} step The part of the step that moved.
+ * @param {DocumentKey} key The map.
+ * @param {'forward' | 'backward'} direction Redone, or undone.
+ * @returns {{ patches: Patch[], version: boolean }} The way, turned the way the step moves, with whether it is the file
+ * version.
+ */
+const judgedWay = (step: HistoryStep, key: DocumentKey, direction: 'forward' | 'backward'): { readonly patches: Patch[]; readonly version: boolean } =>
+{
+  const version = step.fileVersions?.find(each => each.document === key);
+  const patches = version === undefined ? entriesOn(step, key) : [ ...version.patches ];
+  return { patches: direction === 'forward' ? patches : takenOut(patches), version: version !== undefined };
+};
+
+/**
  * Reads a step as a blueprint's change: a step changing a blueprint opened as a map, which reaches the files of the maps
  * its copies stand on the moment it is made, undone or redone.
  * @param {HistoryStep} step The step.
@@ -481,17 +498,21 @@ class CopyMaps
    * whoever writes it to disk writes it, and says what each map's file takes. A map's file takes what the step recorded
    * for it in place of the map's own patches (see HistoryStep's fileVersions), or else the map's own patches: the way the
    * file took the change before, until the map is saved whole, and the map's own from then on (see {@link #waysFor}). A
-   * kept file the way does not fit is no longer known, and is read again once needed. When this window writes the change,
-   * each map it reaches counts one more write on its way (see {@link landed}); a map nobody here holds keeps the changes
-   * this window wrote through to it, for it to take up once opened here.
-   * @param {HistoryStep} step The step.
+   * map an undo or a redo left parts of the step on takes exactly what that move judged its file to take, apart from the
+   * map (see {@link judgedWay}), which is then the way its file took the change. A kept file the way does not fit is no
+   * longer known, and is read again once needed. When this window writes the change, each map it reaches counts one more
+   * write on its way (see {@link landed}); a map nobody here holds keeps the changes this window wrote through to it, for it
+   * to take up once opened here.
+   * @param {HistoryStep} step The step, or the part of it that moved.
    * @param {'forward' | 'backward'} direction Made or redone, or undone.
    * @param {boolean} writes True when this window writes the change to disk, false when another window does, or when it
    * is being taken back after its write failed, which leaves the files as they were.
+   * @param {HistoryStep | null} left For an undo or a redo that left parts of the step on maps held here, those parts;
+   * null for any other move.
    * @returns {Map<number, Patch[]>} What each map's file takes, by map id, in the order the patches go; none for a step
    * that is no blueprint's change.
    */
-  follow(step: HistoryStep, direction: 'forward' | 'backward', writes: boolean): Map<number, Patch[]>
+  follow(step: HistoryStep, direction: 'forward' | 'backward', writes: boolean, left: HistoryStep | null = null): Map<number, Patch[]>
   {
     const taken = new Map<number, Patch[]>();
     if (isBlueprintChange(step) === false)
@@ -499,9 +520,12 @@ class CopyMaps
       return taken;
     }
 
+    // a map the move left parts on has its file judged by the move itself.
+    const judged = new Set(left === null ? [] : documentsOfStep(left));
     mapsChangedBy(step).forEach(mapId =>
     {
-      const ways = this.#waysFor(mapId, step, direction);
+      const key = mapDocumentKey(mapId);
+      const ways = judged.has(key) ? [ judgedWay(step, key, direction) ] : this.#waysFor(mapId, step, direction);
       const file = this.#files.get(mapId);
       const way = file === undefined ? ways[0] : ways.find(each => each.patches.every(patch => fits(file, patch)));
       if (way === undefined)
@@ -526,6 +550,34 @@ class CopyMaps
     });
 
     return taken;
+  }
+
+  /**
+   * Says which patches a map held here took a blueprint's change by, as the change made them (see DocumentHub's
+   * setFileWay): the way {@link follow} would move the change in the map's file now, the file version while the map has
+   * not been saved whole since its file took that, and the map's own patches once it has (see {@link #waysFor}). Where the
+   * kept file has not shown which, the first way that fits it whole; the likeliest when none does, or no file is kept. A
+   * document that is no map cannot be told.
+   * @param {DocumentKey} key The document.
+   * @param {HistoryStep} step The step.
+   * @param {'forward' | 'backward'} direction Made or redone, or undone.
+   * @returns {readonly Patch[] | null} The patches, in the order they went in; null for a document that is no map.
+   */
+  fileWayOf(key: DocumentKey, step: HistoryStep, direction: 'forward' | 'backward'): readonly Patch[] | null
+  {
+    const parsed = parseDocumentKey(key);
+    if (parsed.kind !== 'map')
+    {
+      return null;
+    }
+
+    const ways = this.#waysFor(parsed.mapId, step, direction);
+    const file = this.#files.get(parsed.mapId);
+    const way = (file === undefined ? undefined : ways.find(each => each.patches.every(patch => fits(file, patch)))) ?? ways[0];
+    const version = step.fileVersions?.find(each => each.document === key);
+    return way.version && version !== undefined
+      ? version.patches
+      : entriesOn(step, key);
   }
 
   /**

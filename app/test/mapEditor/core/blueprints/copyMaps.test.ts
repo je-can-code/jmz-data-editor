@@ -2,9 +2,10 @@ import { describe, expect, it } from 'vitest';
 import { MapEditorApiError } from '../../../../src/mapEditor/core/api/MapEditorApi.ts';
 import { BlueprintCopyCounter } from '../../../../src/mapEditor/core/blueprints/blueprintCopies.ts';
 import { withBlueprintLink } from '../../../../src/mapEditor/core/blueprints/blueprintLink.ts';
+import { BLUEPRINTS_DOCUMENT } from '../../../../src/mapEditor/core/blueprints/blueprints.ts';
 import { BLUEPRINT_USES_DOCUMENT } from '../../../../src/mapEditor/core/blueprints/blueprintUses.ts';
 import { CopyMaps } from '../../../../src/mapEditor/core/blueprints/copyMaps.ts';
-import { blueprintHistoryKey, mapHistoryKey } from '../../../../src/mapEditor/core/history/historyKeys.ts';
+import { blueprintHistoryKey, eventHistoryKey, mapHistoryKey } from '../../../../src/mapEditor/core/history/historyKeys.ts';
 import type { HistoryStep } from '../../../../src/mapEditor/core/history/HistoryStep.ts';
 import { mapDocumentKey } from '../../../../src/mapEditor/core/model/documentKeys.ts';
 import type { JsonValue } from '../../../../src/mapEditor/core/model/json.ts';
@@ -36,7 +37,9 @@ import {
  *
  * Each kept file follows every blueprint change, made, undone or redone, exactly as the writer writes it, so it is the
  * file as it will be once every write has landed; one that fits neither way is forgotten, and a change about to move
- * names it first. A failed write forgets the files it would have changed. A map's save keeps its file as the save left
+ * names it first. A map an undo or a redo left parts on takes exactly what that move judged its file to take, and the
+ * hub hears which way each held map's file took a change, its own version until the map is saved, so the move judges the
+ * file by the very patches the file holds. A failed write forgets the files it would have changed. A map's save keeps its file as the save left
  * it; a map let go of, or one whose file changed on disk by anything but this session, is read again. A map opened here
  * from a file this window wrote through takes up the steps that file holds, or, holding something else, has its file
  * forgotten.
@@ -71,6 +74,19 @@ describe('CopyMaps', () =>
     {
       tx.set(window.blueprintKey, [ 'events', 1, 'name' ], 'Captain');
     }) as HistoryStep;
+  };
+
+  /**
+   * Renames map 1's guard by hand, unsaved, then renames the blueprint's guard: map 1's own guard keeps the hand's name,
+   * while its file, whose guard still has the blueprint's old name, follows, so the change records a version of its own
+   * for map 1's file, and changes nothing on the map itself.
+   * @param {PropagationWindow} window The window.
+   * @returns {HistoryStep} The change.
+   */
+  const versionedChange = (window: PropagationWindow): HistoryStep =>
+  {
+    window.hub.edit('Rename by hand', [ eventHistoryKey(1, 5) ], tx => tx.set('map:1', [ 'events', 5, 'name' ], 'Sentry'));
+    return renameGuard(window);
   };
 
   /**
@@ -459,6 +475,38 @@ describe('CopyMaps', () =>
         .toStrictEqual([ [ null, 1 ], [ 3, 3 ], false ]);
     });
 
+    it('takes for a map a move left parts on exactly what the move judged its file to take, whatever way the file took the change', async () =>
+    {
+      // Arrange: in two windows alike, map 1's guard renamed by hand before the change, so its file took a version of its
+      // own, then map 1 saved, after which its file gives the change back by the map's own patches; the move's judged
+      // share names the guard's name, which only the window told of the parts left takes.
+      const windows = [ await propagationWindow(), await propagationWindow() ];
+      const moves = windows.map(window =>
+      {
+        const step = versionedChange(window);
+        window.maps.follow(step, 'forward', false);
+        window.hub.noteSaved('map:1', window.hub.appliedSteps('map:1').map(each => each.id));
+        const share = { kind: 'set' as const, path: [ 'events', 5, 'name' ], before: 'Guard', after: 'Sentry' };
+        const moving: HistoryStep = { ...step, fileVersions: [ { document: 'map:1', patches: [ share ] } ] };
+        const left: HistoryStep = { id: 'window-a#99', label: step.label, histories: [], entries: [ { document: 'map:1', patch: share } ], origin: 'window-a', at: 0 };
+        return { moving, left };
+      });
+
+      // Act.
+      const taken = [
+        windows[0].maps.follow(moves[0].moving, 'backward', false, moves[0].left).get(1),
+        windows[1].maps.follow(moves[1].moving, 'backward', false).get(1),
+      ];
+
+      // Assert: the window told takes the guard's name back in map 1's file; the other gives back the map's own patches,
+      // of which there are none on map 1.
+      expect([ taken, windows.map(window => eventOf(fileOf(window, 1), 5).name) ])
+        .toStrictEqual([
+          [ [ { kind: 'set', path: [ 'events', 5, 'name' ], before: 'Sentry', after: 'Guard' } ], [] ],
+          [ 'Guard', 'Sentry' ],
+        ]);
+    });
+
     it('never takes a map whose read failed for any reason but a missing file for gone', async () =>
     {
       // Arrange: a second set of maps whose reads the server fails.
@@ -494,6 +542,36 @@ describe('CopyMaps', () =>
       // Assert.
       expect([ before, window.reads ])
         .toStrictEqual([ [ 3 ], [ 3, 3 ] ]);
+    });
+  });
+
+  describe('fileWayOf', () =>
+  {
+    it('says a map took a change by its file version until the map is saved, then by its own patches, and tells nothing of a document that is no map', async () =>
+    {
+      // Arrange: map 1's file took a version of its own; map 2's, the map's own patches.
+      const window = await propagationWindow();
+      const step = versionedChange(window);
+      const version = step.fileVersions?.find(each => each.document === 'map:1')?.patches;
+
+      // Act: asked before the change reaches the kept files, after, and after map 1 is saved.
+      const before = window.maps.fileWayOf('map:1', step, 'forward');
+      window.maps.follow(step, 'forward', false);
+      const after = window.maps.fileWayOf('map:1', step, 'backward');
+      window.hub.noteSaved('map:1', window.hub.appliedSteps('map:1').map(each => each.id));
+      const saved = window.maps.fileWayOf('map:1', step, 'backward');
+
+      // Assert.
+      expect([ before, after, saved, window.maps.fileWayOf('map:2', step, 'backward'), window.maps.fileWayOf(BLUEPRINTS_DOCUMENT, step, 'backward') ])
+        .toStrictEqual([
+          version,
+          version,
+          [],
+          step.entries.filter(entry => entry.document === 'map:2').map(entry => entry.patch),
+          null,
+        ]);
+      expect(version)
+        .toStrictEqual([ { kind: 'set', path: [ 'events', 5, 'name' ], before: 'Guard', after: 'Captain' } ]);
     });
   });
 

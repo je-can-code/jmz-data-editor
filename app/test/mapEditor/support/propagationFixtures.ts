@@ -251,6 +251,11 @@ type WrittenWindow = PropagationWindow & {
   readonly problems: { readonly message: string; readonly alarm: boolean }[];
   readonly blueprintsOnDisk: () => JsonValue | null;
   readonly failNextWrite: (error: Error) => void;
+
+  /**
+   * Holds the next act on its way until the function handed back is called, as a slow disk would.
+   */
+  readonly holdNextWrite: () => () => void;
 };
 
 /**
@@ -266,6 +271,7 @@ const writtenWindow = async (setUp: PropagationSetUp = {}): Promise<WrittenWindo
   const problems: { message: string; alarm: boolean }[] = [];
   let blueprints: JsonValue | null = null;
   let failure: Error | null = null;
+  let held: Promise<void> | null = null;
   const write = async (act: BlueprintWrite): Promise<void> =>
   {
     acts.push(structuredClone(act) as BlueprintWrite);
@@ -274,6 +280,14 @@ const writtenWindow = async (setUp: PropagationSetUp = {}): Promise<WrittenWindo
       const error = failure;
       failure = null;
       throw error;
+    }
+
+    // a held act waits for its release before reaching the disk, as one on a slow disk does.
+    if (held !== null)
+    {
+      const waiting = held;
+      held = null;
+      await waiting;
     }
 
     // every map is checked before any is written, as the server does.
@@ -296,6 +310,11 @@ const writtenWindow = async (setUp: PropagationSetUp = {}): Promise<WrittenWindo
   };
 
   const writer = new BlueprintWriter({ hub: window.hub, maps: window.maps, write, onProblem: (message, alarm) => problems.push({ message, alarm }), settleMs: 0 });
+
+  // with the writer moving the kept files, they tell what each file holds, judged apart from its map, as the map
+  // editor's own window has them do.
+  window.hub.setFileFit((key, patch) => window.maps.fileTakes(key, patch));
+  window.hub.setFileWay((key, step, direction) => window.maps.fileWayOf(key, step, direction));
   return {
     ...window,
     writer,
@@ -305,6 +324,15 @@ const writtenWindow = async (setUp: PropagationSetUp = {}): Promise<WrittenWindo
     failNextWrite: (error: Error) =>
     {
       failure = error;
+    },
+    holdNextWrite: () =>
+    {
+      let release = () => undefined as void;
+      held = new Promise<void>(resolve =>
+      {
+        release = resolve;
+      });
+      return () => release();
     },
   };
 };

@@ -41,10 +41,12 @@ import { notesOn, settle } from '../../support/propagationFixtures.ts';
  *
  * So this owes him, in the same steps, on the same map: the undo, from the map or from the blueprint's tab, takes the
  * graphic back on every copy and leaves the speed alone, and the redo puts the graphic back. Where a copy's very graphic
- * was changed by hand since, that copy keeps its own graphic and the rest go back, and he is told which copy, where, and
- * where its change can be undone; a redo does the same for a copy changed since the undo. After every step the disk holds
- * what the window does, but for its unsaved edits, and the blueprints on disk are the blueprints here. A step across two
- * maps that no blueprint made, as a door pair is, still refuses an undo a later edit stands in the way of.
+ * was changed by hand since, that copy keeps its own graphic on the map and the rest go back, and he is told which copy,
+ * and where; a redo does the same for a copy changed since the undo. The disk is judged apart from the map: the hand's
+ * change reaches it only once saved, so until then the copy's file follows the blueprint with the rest, and throwing the
+ * map's edits away shows every copy following it; a change saved by hand stays on disk. After every step the blueprints
+ * on disk are the blueprints here. A step across two maps that no blueprint made, as a door pair is, still refuses an undo
+ * a later edit stands in the way of.
  *
  * It runs against the project JMZ_PROJECT_ROOT names, or the sibling checkout, and skips when neither is there.
  */
@@ -152,6 +154,7 @@ const foothillsWindow = (): FoothillsWindow =>
   maps.start();
   hub.addCommitCheck(blueprintPropagationCheck({ hub, maps, tags: () => [] }));
   hub.setFileFit((key, patch) => maps.fileTakes(key, patch));
+  hub.setFileWay((key, step, direction) => maps.fileWayOf(key, step, direction));
 
   let blueprints: JsonValue | null = null;
   const problems: string[] = [];
@@ -229,12 +232,11 @@ const diskAgrees = (window: FoothillsWindow, unsaved: readonly HistoryStep[]): b
 };
 
 /**
- * Plays his first four steps: the stamp, the blueprint, four placements and a save of the map, then the blueprint opened
- * and the second ghastroom's graphic changed there, in its event's own window, from the seventh character to the fifth.
+ * Plays his first three steps: the stamp, the blueprint, four placements and a save of the map, then the blueprint opened.
  * @param {FoothillsWindow} window The window.
- * @returns {Promise<HistoryStep>} The graphic change, once written.
+ * @returns {Promise<RmmzMap>} Foothills' file as the save left it.
  */
-const changeGraphic = async (window: FoothillsWindow): Promise<HistoryStep> =>
+const placeFour = async (window: FoothillsWindow): Promise<RmmzMap> =>
 {
   const { hub } = window;
   const key = mapDocumentKey(MAP_ID);
@@ -244,11 +246,42 @@ const changeGraphic = async (window: FoothillsWindow): Promise<HistoryStep> =>
   await hub.save(key);
   holdBlueprintMap(hub, BLUEPRINT);
   await settle();
+  return structuredClone(window.disk.get(MAP_ID) as RmmzMap);
+};
 
+/**
+ * Plays his fourth step on the blueprint already placed: the second ghastroom's graphic changed in its event's own window,
+ * from the seventh character to the fifth.
+ * @param {FoothillsWindow} window The window.
+ * @returns {Promise<HistoryStep>} The graphic change, once written.
+ */
+const changePlacedGraphic = async (window: FoothillsWindow): Promise<HistoryStep> =>
+{
+  const { hub } = window;
   const [ { image } ] = eventOf(hub.map(blueprintMapKey(BLUEPRINT)), 21).pages;
   const changed = setPageImage(hub, { mapId: blueprintMapId(BLUEPRINT), eventId: 21 }, 0, { ...image, characterIndex: 5 });
   await settle();
   return (changed.ok ? changed.step : null) as HistoryStep;
+};
+
+/**
+ * Plays his first four steps: the blueprint placed four times and saved, then its second ghastroom's graphic changed.
+ * @param {FoothillsWindow} window The window.
+ * @returns {Promise<HistoryStep>} The graphic change, once written.
+ */
+const changeGraphic = async (window: FoothillsWindow): Promise<HistoryStep> =>
+{
+  await placeFour(window);
+  return changePlacedGraphic(window);
+};
+
+/**
+ * Throws away Foothills' unsaved edits, the map taking its file again, as choosing the version on disk does.
+ * @param {FoothillsWindow} window The window.
+ */
+const discardFoothills = (window: FoothillsWindow): void =>
+{
+  window.hub.reload(mapDocumentKey(MAP_ID), structuredClone(window.disk.get(MAP_ID)) as unknown as JsonValue);
 };
 
 /**
@@ -378,52 +411,92 @@ describe.skipIf(project === null)('undoing a blueprint\'s change on the shipped 
       ]);
   });
 
-  it('leaves a copy whose graphic was changed by hand since as it is when the change is undone, naming it, and redoes the rest', async () =>
+  it('leaves on the map a copy whose graphic was changed by hand since when the change is undone, naming it, its file following the blueprint back', async () =>
   {
-    // Arrange: the copy he sped up given the third character by hand after the blueprint's change.
+    // Arrange: the copy he sped up given the third character by hand after the blueprint's change, and not saved.
     const window = foothillsWindow();
-    await changeGraphic(window);
+    const saved = await placeFour(window);
+    await changePlacedGraphic(window);
     const byHand = changeCopyGraphic(window, SPED_UP);
 
     // Act.
     const undone = await window.router.undo(mapHistoryKey(MAP_ID));
     await settle();
-    const afterUndo = [ ghastroomFaces(window), blueprintFace(window), diskAgrees(window, [ byHand ]) ];
+    const afterUndo = [ ghastroomFaces(window), blueprintFace(window), JSON.stringify(window.disk.get(MAP_ID)) === JSON.stringify(saved) ];
     const redone = await window.router.redo(mapHistoryKey(MAP_ID));
     await settle();
 
-    // Assert: on disk the copy keeps the blueprint's fifth character, since the hand's third is not saved.
-    expect([ undone, afterUndo, redone, ghastroomFaces(window), diskAgrees(window, [ byHand ]), window.problems ])
+    // Assert: on the map the copy keeps the hand's third character; on disk, where the hand's change never went, every
+    // copy goes back with the blueprint, the whole file byte for byte as it was saved, and comes forward again on redo.
+    expect([ undone, afterUndo, redone, ghastroomFaces(window), diskAgrees(window, [ byHand ]), window.hub.isDirty(mapDocumentKey(MAP_ID)), window.problems ])
       .toStrictEqual([
         { ok: true, message: 'Undone, except on 1 copy changed since: ghastroom (event 67) on Foothills, whose own change can be undone in its event window.' },
-        [ [ [ 7, 7, 3, 7 ], [ 7, 7, 5, 7 ] ], 7, true ],
+        [ [ [ 7, 7, 3, 7 ], [ 7, 7, 7, 7 ] ], 7, true ],
         { ok: true },
         [ [ 5, 5, 3, 5 ], [ 5, 5, 5, 5 ] ],
+        true,
         true,
         [],
       ]);
   });
 
-  it('leaves out of a redo a copy whose graphic was changed by hand since the undo, naming it', async () =>
+  it('shows the copy following the blueprint on the map and on disk once the map\'s unsaved edits are thrown away after the undo', async () =>
+  {
+    // Arrange: as above, the change undone with the hand's third character still unsaved on the copy.
+    const window = foothillsWindow();
+    const saved = await placeFour(window);
+    await changePlacedGraphic(window);
+    changeCopyGraphic(window, SPED_UP);
+    await window.router.undo(mapHistoryKey(MAP_ID));
+    await settle();
+
+    // Act.
+    discardFoothills(window);
+
+    // Assert.
+    expect([ ghastroomFaces(window), blueprintFace(window), window.hub.isDirty(mapDocumentKey(MAP_ID)), JSON.stringify(window.disk.get(MAP_ID)) === JSON.stringify(saved) ])
+      .toStrictEqual([ [ [ 7, 7, 7, 7 ], [ 7, 7, 7, 7 ] ], 7, false, true ]);
+  });
+
+  it('keeps on disk a copy\'s graphic changed by hand and saved since, when the change is undone', async () =>
+  {
+    // Arrange: the copy he sped up given the third character by hand, and the map saved.
+    const window = foothillsWindow();
+    await changeGraphic(window);
+    changeCopyGraphic(window, SPED_UP);
+    await window.hub.save(mapDocumentKey(MAP_ID));
+
+    // Act.
+    await window.router.undo(mapHistoryKey(MAP_ID));
+    await settle();
+
+    // Assert: the file holds the hand's third character as the map does, and the map reads saved.
+    expect([ ghastroomFaces(window), diskAgrees(window, []), window.hub.isDirty(mapDocumentKey(MAP_ID)), window.problems ])
+      .toStrictEqual([ [ [ 7, 7, 3, 7 ], [ 7, 7, 3, 7 ] ], true, false, [] ]);
+  });
+
+  it('leaves out of a redo a copy whose graphic was changed by hand since the undo, naming it, its file following the blueprint forward', async () =>
   {
     // Arrange: the change undone whole, then the second placement's ghastroom given the third character by hand.
     const window = foothillsWindow();
     await changeGraphic(window);
     await window.router.undo(blueprintHistoryKey(BLUEPRINT));
     await settle();
-    const byHand = changeCopyGraphic(window, 62);
+    changeCopyGraphic(window, 62);
 
-    // Act.
+    // Act: redone, then the map's unsaved edits thrown away.
     const redone: HistoryOutcome = await window.router.redo(blueprintHistoryKey(BLUEPRINT));
     await settle();
+    const afterRedo = [ ghastroomFaces(window), blueprintFace(window) ];
+    discardFoothills(window);
 
-    // Assert.
-    expect([ redone, ghastroomFaces(window), blueprintFace(window), diskAgrees(window, [ byHand ]), window.problems ])
+    // Assert: the copy keeps the hand's character on the map, and takes the blueprint's fifth on disk, which is what the
+    // map shows once its edits are thrown away.
+    expect([ redone, afterRedo, ghastroomFaces(window), window.problems ])
       .toStrictEqual([
         { ok: true, message: 'Redone, except on 1 copy changed since: ghastroom (event 62) on Foothills, whose own change can be undone in its event window.' },
-        [ [ 5, 3, 5, 5 ], [ 5, 7, 5, 5 ] ],
-        5,
-        true,
+        [ [ [ 5, 3, 5, 5 ], [ 5, 5, 5, 5 ] ], 5 ],
+        [ [ 5, 5, 5, 5 ], [ 5, 5, 5, 5 ] ],
         [],
       ]);
   });

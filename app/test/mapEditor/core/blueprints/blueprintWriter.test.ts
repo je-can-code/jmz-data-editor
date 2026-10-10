@@ -36,8 +36,11 @@ import {
  * very change it took in place, and reads as saved after; a map held with unsaved edits takes its file's own version,
  * which never carries those edits, and still reads as unsaved; a map nobody has open takes the change written through. A
  * map saved with the change in it gives it back on undo by the version it was saved with. An undo that left copies or cells
- * changed since as they stand writes exactly what moved, a map nothing moved on not at all, and a map whose file then holds
- * what it does reads as saved. An act the disk refuses writes nothing, and the change, with everything made since, is
+ * changed since as they stand on a map judges the map's file apart: a part whose edit in the way is not saved goes back in
+ * the file all the same, so throwing the map's edits away shows the blueprint, and a redo puts it back; one whose edit is
+ * saved stays in the file too; a map nothing moved on, in it or in its file, is not written at all; and a map reads as
+ * saved once its file holds what it does, and never while the map shows a part its file gave back. An act the disk
+ * refuses writes nothing, and the change, with everything made since, is
  * taken back here so the window and the disk agree, cells painted over by hand meanwhile keeping their paint, and the
  * author hears why; one that cannot be taken back is an alarm, and stays unwritten. Moves made in another window are that
  * window's to write. Before an undo moves anything, a file changed on disk since is named.
@@ -390,6 +393,106 @@ describe('BlueprintWriter', () =>
     const act = window.acts[window.acts.length - 1];
     expect([ act.maps.map(({ map }) => map), window.disk.get(1), window.hub.dirtyKeys() ])
       .toStrictEqual([ [ 2, 3 ], fileBefore, [] ]);
+  });
+
+  it('takes back in the file a cell an undo left on a map under paint not saved, the map keeping its paint and reading unsaved', async () =>
+  {
+    // Arrange: one cell written everywhere, then map 1's corner painted over by hand and left unsaved.
+    const window = await writtenWindow();
+    const original = structuredClone(window.disk.get(1));
+    paintCorner(window, a5(9));
+    await settle();
+    window.hub.edit('Paint by hand', [ mapHistoryKey(1) ], tx => tx.tiles('map:1', [ [ cellIndex(MAP_WIDTH, MAP_HEIGHT, 1, 1, 0), a5(15) ] ]));
+
+    // Act.
+    window.hub.undo(blueprintHistoryKey(BLUEPRINT));
+    await settle();
+
+    // Assert: map 1's file goes back with the blueprint, byte for byte, though the map keeps the hand's paint on top.
+    expect([ groundOf(window.hub.map('map:1'), 1, 1), window.disk.get(1), window.hub.isDirty('map:1'), window.problems ])
+      .toStrictEqual([ a5(15), original, true, [] ]);
+  });
+
+  it('shows the cell following the blueprint once the map\'s unsaved paint is thrown away after the undo', async () =>
+  {
+    // Arrange: as above, the undo written.
+    const window = await writtenWindow();
+    paintCorner(window, a5(9));
+    await settle();
+    window.hub.edit('Paint by hand', [ mapHistoryKey(1) ], tx => tx.tiles('map:1', [ [ cellIndex(MAP_WIDTH, MAP_HEIGHT, 1, 1, 0), a5(15) ] ]));
+    window.hub.undo(blueprintHistoryKey(BLUEPRINT));
+    await settle();
+
+    // Act: the map's edits thrown away, the map taking its file again.
+    window.hub.reload('map:1', structuredClone(window.disk.get(1)) as unknown as JsonValue);
+
+    // Assert: the corner is the blueprint's own again, on the map and on disk, and the map reads saved.
+    expect([ groundOf(window.hub.map('map:1'), 1, 1), cornerOnDisk(window, 1), window.blueprintMap.cells[0], window.hub.isDirty('map:1') ])
+      .toStrictEqual([ a5(1), a5(1), a5(1), false ]);
+  });
+
+  it('puts the cell back in the file with the rest when the change is redone, the map still keeping its paint', async () =>
+  {
+    // Arrange: as above, the undo written, the map's paint kept.
+    const window = await writtenWindow();
+    paintCorner(window, a5(9));
+    await settle();
+    window.hub.edit('Paint by hand', [ mapHistoryKey(1) ], tx => tx.tiles('map:1', [ [ cellIndex(MAP_WIDTH, MAP_HEIGHT, 1, 1, 0), a5(15) ] ]));
+    window.hub.undo(blueprintHistoryKey(BLUEPRINT));
+    await settle();
+
+    // Act.
+    window.hub.redo(blueprintHistoryKey(BLUEPRINT));
+    await settle();
+
+    // Assert.
+    expect([ groundOf(window.hub.map('map:1'), 1, 1), [ 1, 2, 3 ].map(mapId => cornerOnDisk(window, mapId)), window.hub.isDirty('map:1'), window.problems ])
+      .toStrictEqual([ a5(15), [ a5(9), a5(9), a5(9) ], true, [] ]);
+  });
+
+  it('never counts a map saved by an undo whose file gave back a cell the map shows again once the paint in its way is undone', async () =>
+  {
+    // Arrange: one cell written everywhere; map 1's corner painted over by hand, unsaved; a rename of the blueprint on its
+    // way to a slow disk, so the undo that follows waits behind it.
+    const window = await writtenWindow();
+    paintCorner(window, a5(9));
+    await settle();
+    window.hub.edit('Paint by hand', [ mapHistoryKey(1) ], tx => tx.tiles('map:1', [ [ cellIndex(MAP_WIDTH, MAP_HEIGHT, 1, 1, 0), a5(15) ] ]));
+    const release = window.holdNextWrite();
+    window.hub.edit('Rename', [ blueprintHistoryKey(BLUEPRINT) ], tx => tx.set(BLUEPRINTS_DOCUMENT, [ 'data', 'blueprints', BLUEPRINT, 'name' ], 'Fort'));
+    await settle();
+
+    // Act: the change undone from map 2, then the hand's paint undone on map 1, which shows the cell the change left, before
+    // the undo reaches the disk.
+    window.hub.undo(mapHistoryKey(2));
+    window.hub.undo(mapHistoryKey(1));
+    release();
+    await settle();
+
+    // Assert: map 1 shows the change's cell, its file the blueprint's own, so it reads unsaved.
+    expect([ groundOf(window.hub.map('map:1'), 1, 1), cornerOnDisk(window, 1), window.hub.isDirty('map:1'), window.problems ])
+      .toStrictEqual([ a5(9), a5(1), true, [] ]);
+  });
+
+  it('gives a copy\'s field back on disk by the map\'s own patches once the map was saved, though the map keeps a later edit unsaved', async () =>
+  {
+    // Arrange: the guard sped up while map 4's copy was unsaved, map 4 saved whole, then its copy's speed set by hand and
+    // not saved.
+    const window = await writtenWindow();
+    await holdUnsavedCopy(window);
+    speedGuard(window, 4);
+    await settle();
+    window.disk.set(4, window.hub.committedContent('map:4') as unknown as RmmzMap);
+    window.hub.noteSaved('map:4', window.hub.appliedSteps('map:4').map(step => step.id));
+    window.hub.edit('Change movement', [ mapHistoryKey(4) ], tx => tx.set('map:4', [ 'events', 2, 'pages', 0, 'moveSpeed' ], 6));
+
+    // Act.
+    window.hub.undo(blueprintHistoryKey(BLUEPRINT));
+    await settle();
+
+    // Assert: the copy keeps the hand's speed on the map, and goes back to the blueprint's on disk.
+    expect([ copySpeeds(window), window.hub.isDirty('map:4'), window.problems ])
+      .toStrictEqual([ [ 6, 3 ], true, [] ]);
   });
 
   /**
