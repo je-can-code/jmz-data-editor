@@ -567,9 +567,9 @@ describe('stepLabelIn', () =>
     // Act.
     const label = stepLabelIn(step, mapHistoryKey(301), named);
 
-    // Assert.
+    // Assert: the blueprint's name in double quotes, as every other name in a history is.
     expect(label)
-      .toBe('Blueprint \'Needler nest\': Paint tiles');
+      .toBe('Blueprint "Needler nest": Paint tiles');
   });
 
   it('keeps the label in the blueprint\'s own history, an event\'s history, and for a step on a map no blueprint made', () =>

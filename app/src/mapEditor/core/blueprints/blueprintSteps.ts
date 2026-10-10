@@ -363,8 +363,9 @@ const blueprintChangesIn = (hub: Pick<DocumentHub, 'document'>, entries: readonl
 /**
  * Names a step as a row of a history lists it. A change to a blueprint is listed in the history of every map it reached,
  * where its own label, a stroke or an edit made in the blueprint's tab or its event's window, would read as though it
- * were made on that map; there it is named for its blueprint: "Blueprint 'Needler nest': Paint tiles". In the blueprint's
- * own history, and any other but a map's, the label stands as it is.
+ * were made on that map; there it is named for its blueprint, in double quotes as every other name in a history is:
+ * {@code Blueprint "Needler nest": Paint tiles}. In the blueprint's own history, and any other but a map's, the label stands
+ * as it is.
  * @param {HistoryStep} step The step.
  * @param {HistoryKey} history The history whose row it is.
  * @param {(blueprintId: string) => string} blueprintName Names a blueprint as the author knows it.
@@ -379,7 +380,7 @@ const stepLabelIn = (step: HistoryStep, history: HistoryKey, blueprintName: (blu
   const onMap = home === history && parseDocumentKey(home).kind === 'map';
   return changed === undefined || changed.kind !== 'blueprint-map' || onMap === false
     ? step.label
-    : `Blueprint '${blueprintName(changed.blueprintId)}': ${step.label}`;
+    : `Blueprint "${blueprintName(changed.blueprintId)}": ${step.label}`;
 };
 
 export { blueprintChangesIn, blueprintStepChange, pageLineage, stepLabelIn };

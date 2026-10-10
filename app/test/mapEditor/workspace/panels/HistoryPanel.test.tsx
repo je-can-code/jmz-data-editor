@@ -165,7 +165,7 @@ describe('HistoryPanel: blueprints\' names', () =>
 
     // Assert.
     expect(rows())
-      .toStrictEqual([ 'Blueprint \'Needler nest\': Paint tiles', 'Rename event' ]);
+      .toStrictEqual([ 'Blueprint "Needler nest": Paint tiles', 'Rename event' ]);
   });
 
   it('keeps a deleted blueprint\'s name in its history\'s title', () =>
