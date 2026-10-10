@@ -47,6 +47,8 @@ import { notesOn } from '../../support/propagationFixtures.ts';
  * maps opened and closed. After every step, once every write has landed:
  *
  * - every open map, and the blueprints, read as saved exactly when they hold what their files hold;
+ * - what the window knows each open map's file holds, and every map file it keeps to plan changes against, is the very
+ *   file on disk;
  * - no name typed by hand is on disk unless a save of that map carried it there;
  * - every copy's name on disk is what the blueprints on disk say it should be: a copy holding the blueprint's old name
  *   follows each change to it, and one holding anything else, a name typed by hand and saved, stays;
@@ -97,14 +99,13 @@ const STEPS_PER_RUN = 16;
 const HAND = 'hand-';
 
 /**
- * What the runs play on, as it stands once the blueprint is placed: every map's file, the blueprints' file, and which maps
- * a window holds from the start.
+ * What the runs play on, as it stands once the blueprint is placed: every map's file, the blueprints' file, which maps a
+ * window holds from the start, and the blueprint's own events, by id.
  */
 type Setting = {
   readonly disk: ReadonlyMap<number, RmmzMap>;
   readonly blueprints: JsonValue;
   readonly held: readonly number[];
-  readonly unheld: readonly number[];
   readonly blueprintEvents: readonly number[];
 };
 
@@ -253,8 +254,7 @@ const freeRowOn = (map: MapDocument): { x: number; y: number } =>
 
 /**
  * Lays out what every run plays on: the maps read from the game, a blueprint saved from three of the source map's events
- * standing in a row, and placed twice on every map, each map saved; the first two maps, and every other but the last, held
- * from the start.
+ * standing in a row, and placed twice on every map, each map saved; every map but the last held from the start.
  * @returns {Setting} The setting.
  */
 const layOut = (): Setting =>
@@ -296,7 +296,6 @@ const layOut = (): Setting =>
     disk,
     blueprints: hub.committedContent(BLUEPRINTS_DOCUMENT),
     held: mapIds.slice(0, -1),
-    unheld: mapIds.slice(-1),
     blueprintEvents: stamp.events.map(event => event.id),
   };
 };
