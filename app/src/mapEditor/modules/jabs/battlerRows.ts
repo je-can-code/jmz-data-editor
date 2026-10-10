@@ -167,18 +167,30 @@ const moveSpeedRow = (readings: readonly BattlerReading[], pageSpeeds: readonly 
 
 /**
  * Builds one of the switches being inanimate hides (idling, the HP bar or the name): the page's word, the enemy's, its
- * default, or off while inanimate.
+ * default, or off while inanimate. A battler inanimate in the end is left with it off once its page's own word is taken
+ * out, whatever its enemy says, so that is what the row says taking it out leaves.
  * @param {readonly BattlerValue<boolean>[]} values Each battler's value.
  * @param {boolean} fallback J-ABS's default.
  * @param {readonly boolean[]} enemyInanimate Whether each battler's enemy is inanimate in the database, which keeps it
  * off too.
+ * @param {readonly boolean[]} inanimate Whether each battler is inanimate in the end, by its page or its enemy.
  * @returns {RowModel<boolean>} The row.
  */
-const hiddenRow = (values: readonly BattlerValue<boolean>[], fallback: boolean, enemyInanimate: readonly boolean[]): RowModel<boolean> =>
+const hiddenRow = (
+  values: readonly BattlerValue<boolean>[],
+  fallback: boolean,
+  enemyInanimate: readonly boolean[],
+  inanimate: readonly boolean[],
+): RowModel<boolean> =>
 {
   // an enemy inanimate in its note says off for its battlers, as plainly as its note saying so outright would.
   const said = values.map((value, index) => ({ ...value, enemy: value.enemy ?? (enemyInanimate[index] ? false : null) }));
-  return rowOf(said, switchWords, value => value.enemy ?? fallback);
+
+  // taken out, a word on an inanimate battler's page leaves it off, as being inanimate hides it.
+  const row = rowOf(said, switchWords, (value, index) => (inanimate[index] ? false : value.enemy ?? fallback));
+  return row.note !== null && inanimate.every(each => each)
+    ? { ...row, note: `${SOURCE_WORDS.inanimate}: ${switchWords(false)}` }
+    : row;
 };
 
 /**

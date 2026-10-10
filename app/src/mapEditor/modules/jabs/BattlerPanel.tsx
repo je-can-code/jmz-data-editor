@@ -166,10 +166,16 @@ const RowFrame = (props: {
 /**
  * What a row's button taking the page's own value out says it leaves.
  * @param {RowModel<unknown>} model The row.
- * @returns {string} Such as "Use the enemy's", or "Use the default".
+ * @returns {string} Such as "Use the enemy's", "Use the default", or, for an inanimate battler, "Leave it off while
+ * inanimate".
  */
 const clearTipOf = (model: RowModel<unknown>): string =>
 {
+  if (model.note !== null && model.note.startsWith(SOURCE_WORDS.inanimate))
+  {
+    return 'Leave it off while inanimate';
+  }
+
   return model.note !== null && model.note.startsWith('Default')
     ? 'Use the default'
     : 'Use the enemy\'s';
@@ -751,6 +757,7 @@ const BattlerPanel = (props: BattlerPanelProps) =>
   const enemyOf = (enemyId: number) => enemies[enemyId] ?? null;
   const readings = battlers.map(({ event, pageIndex }) => readBattlerPage(event.pages[pageIndex], enemyOf, setup.defaults) as BattlerReading);
   const enemyInanimate = readings.map(reading => reading.inanimate.enemy ?? setup.defaults.inanimate);
+  const endsInanimate = readings.map(reading => reading.inanimate.value);
   const values = (pick: (reading: BattlerReading) => BattlerValue<number>) => readings.map(pick);
   const inanimate = rowOf(readings.map(reading => reading.inanimate), switchWords, value => value.enemy ?? setup.defaults.inanimate);
   return (
@@ -805,9 +812,9 @@ const BattlerPanel = (props: BattlerPanelProps) =>
         onChange={onChange}
       />
       <TeamField model={teamRow(readings)} inanimate={inanimate.value === true} onChange={onChange}/>
-      <SwitchField label={'Idles'} model={hiddenRow(readings.map(reading => reading.idle), setup.defaults.canIdle, enemyInanimate)} row={'idle'} onChange={onChange}/>
-      <SwitchField label={'HP bar'} model={hiddenRow(readings.map(reading => reading.hpBar), setup.defaults.showHpBar, enemyInanimate)} row={'hpBar'} onChange={onChange}/>
-      <SwitchField label={'Name'} model={hiddenRow(readings.map(reading => reading.name), setup.defaults.showName, enemyInanimate)} row={'name'} onChange={onChange}/>
+      <SwitchField label={'Idles'} model={hiddenRow(readings.map(reading => reading.idle), setup.defaults.canIdle, enemyInanimate, endsInanimate)} row={'idle'} onChange={onChange}/>
+      <SwitchField label={'HP bar'} model={hiddenRow(readings.map(reading => reading.hpBar), setup.defaults.showHpBar, enemyInanimate, endsInanimate)} row={'hpBar'} onChange={onChange}/>
+      <SwitchField label={'Name'} model={hiddenRow(readings.map(reading => reading.name), setup.defaults.showName, enemyInanimate, endsInanimate)} row={'name'} onChange={onChange}/>
       {setup.passives && <PassivesField readings={readings} stateNames={stateNames} onChange={onChange}/>}
       {setup.motions && <MotionsField battlers={battlers} setup={setup} onChange={onChange}/>}
     </Stack>

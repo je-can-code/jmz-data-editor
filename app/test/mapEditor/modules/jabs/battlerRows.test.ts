@@ -160,10 +160,10 @@ describe('battlerRows', () =>
 
       // Act.
       const rows = [
-        hiddenRow([ inanimate.hpBar ], DEFAULTS.showHpBar, [ false ]),
-        hiddenRow([ animate.hpBar ], DEFAULTS.showHpBar, [ true ]),
-        hiddenRow([ animate.idle ], DEFAULTS.canIdle, [ true ]),
-        hiddenRow([ still.idle ], DEFAULTS.canIdle, [ false ]),
+        hiddenRow([ inanimate.hpBar ], DEFAULTS.showHpBar, [ false ], [ true ]),
+        hiddenRow([ animate.hpBar ], DEFAULTS.showHpBar, [ true ], [ false ]),
+        hiddenRow([ animate.idle ], DEFAULTS.canIdle, [ true ], [ false ]),
+        hiddenRow([ still.idle ], DEFAULTS.canIdle, [ false ], [ false ]),
       ];
 
       // Assert: the idling the page asks for would, taken out, fall back to the inanimate enemy's off, and the idling
@@ -174,6 +174,33 @@ describe('battlerRows', () =>
           { value: false, mixed: false, from: 'enemy', set: false, note: null },
           { value: true, mixed: false, from: 'event', set: true, note: 'Enemy: off' },
           { value: false, mixed: false, from: 'event', set: true, note: 'Default: on' },
+        ]);
+    });
+
+    it('says a word on an inanimate battler\'s page leaves it off once taken out, whatever the enemy says', () =>
+    {
+      // Arrange: an HP bar shown by the page of a battler its page makes inanimate, over an enemy saying nothing; another
+      // over an enemy showing it outright; and beside them, the same page word on an animate battler, which the default
+      // would leave on.
+      const quiet = battler([ '<jabsConfig:inanimate>', '<jabsConfig:showHpBar>' ]);
+      const shown = battler([ '<jabsConfig:inanimate>', '<jabsConfig:showHpBar>' ], '<jabsConfig:showHpBar>');
+      const animate = battler([ '<jabsConfig:showHpBar>' ]);
+
+      // Act.
+      const rows = [
+        hiddenRow([ quiet.hpBar ], DEFAULTS.showHpBar, [ false ], [ quiet.inanimate.value ]),
+        hiddenRow([ shown.hpBar ], DEFAULTS.showHpBar, [ false ], [ shown.inanimate.value ]),
+        hiddenRow([ quiet.hpBar, animate.hpBar ], DEFAULTS.showHpBar, [ false, false ], [ quiet.inanimate.value, animate.inanimate.value ]),
+        hiddenRow([ animate.hpBar ], DEFAULTS.showHpBar, [ false ], [ animate.inanimate.value ]),
+      ];
+
+      // Assert: picked together, the inanimate battler and the animate one would be left differently, so nothing is said.
+      expect(rows)
+        .toStrictEqual([
+          { value: true, mixed: false, from: 'event', set: true, note: 'Inanimate: off' },
+          { value: true, mixed: false, from: 'event', set: true, note: 'Inanimate: off' },
+          { value: true, mixed: false, from: 'event', set: true, note: null },
+          { value: true, mixed: false, from: 'event', set: true, note: 'Default: on' },
         ]);
     });
   });
