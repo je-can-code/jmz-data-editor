@@ -592,6 +592,112 @@ describe('BlueprintWriter', () =>
       ]);
   });
 
+  /**
+   * Repaints the corner of the placement on map 3's file, as MZ would, so an act still on its way to it no longer fits
+   * there and the disk refuses the whole act.
+   * @param {WrittenWindow} window The window.
+   */
+  const repaintMap3OnDisk = (window: WrittenWindow): void =>
+  {
+    const changed = structuredClone(window.disk.get(3) as RmmzMap);
+    changed.data[cellIndex(MAP_WIDTH, MAP_HEIGHT, 1, 1, 0)] = a5(30);
+    window.disk.set(3, changed);
+  };
+
+  /**
+   * Waits a while longer than a refused change waits before looking again whether the stroke in its way has ended.
+   * @returns {Promise<void>} Settles then.
+   */
+  const aWhile = (): Promise<void> => new Promise(resolve =>
+  {
+    setTimeout(resolve, 60);
+  });
+
+  it('waits for a refused change to be taken back, after the stroke it waits on, before saying everything is written', async () =>
+  {
+    // Arrange: the change's act held on its way and then refused, map 3's file repainted meanwhile; the change undone
+    // meanwhile, so its undo waits behind the act, and a stroke open as the act fails.
+    const window = await writtenWindow();
+    const before = [ 1, 2 ].map(mapId => structuredClone(window.disk.get(mapId)));
+    const release = window.holdNextWrite();
+    paintCorner(window, a5(9));
+    await settle();
+    window.hub.undo(blueprintHistoryKey(BLUEPRINT));
+    repaintMap3OnDisk(window);
+    const stroke = window.hub.begin('Stroke', [ mapHistoryKey(2) ]);
+    release();
+    await settle();
+
+    // Act: a wait for everything to land, as a save makes, through the stroke and past its end.
+    let written = false;
+    const waiting = window.writer.whenWritten().then(() =>
+    {
+      written = true;
+    });
+    await aWhile();
+    const duringStroke = written;
+    stroke.cancel();
+    await waiting;
+
+    // Assert: the wait held through the stroke and ended once both moves were taken back, the change standing undone and
+    // nothing more written.
+    expect([ duringStroke, written, window.hub.history(blueprintHistoryKey(BLUEPRINT)).position, window.blueprintMap.cells[0], window.acts.length, [ 1, 2 ].map(mapId => window.disk.get(mapId)), window.writer.hasUnwritten() ])
+      .toStrictEqual([ false, true, 0, a5(1), 1, before, false ]);
+  });
+
+  it('waits out a change refused while it waits, until the stroke under way ends and the change is taken back', async () =>
+  {
+    // Arrange: the change's act held on its way, to be refused once map 3's file is repainted, and a stroke open.
+    const window = await writtenWindow();
+    const release = window.holdNextWrite();
+    paintCorner(window, a5(9));
+    await settle();
+    repaintMap3OnDisk(window);
+    const stroke = window.hub.begin('Stroke', [ mapHistoryKey(2) ]);
+    let written = false;
+    const waiting = window.writer.whenWritten().then(() =>
+    {
+      written = true;
+    });
+
+    // Act: the act refused while the wait is under way, then the stroke ended.
+    release();
+    await aWhile();
+    const refusedMidStroke = [ written, window.blueprintMap.cells[0] ];
+    stroke.cancel();
+    await waiting;
+
+    // Assert: the refusal never ended the wait while the change still stood in the window; taking it back did.
+    expect([ refusedMidStroke, written, window.blueprintMap.cells[0], window.hub.history(blueprintHistoryKey(BLUEPRINT)).position ])
+      .toStrictEqual([ [ false, a5(9) ], true, a5(1), 0 ]);
+  });
+
+  it('stops waiting for a refused change\'s answer once stopped, as the stroke it waits on may never end', async () =>
+  {
+    // Arrange: a change whose act the disk refuses while a stroke is open, so its answer waits, and a wait begun after.
+    const window = await writtenWindow();
+    window.failNextWrite(new Error('the disk is full'));
+    paintCorner(window, a5(9));
+    const stroke = window.hub.begin('Stroke', [ mapHistoryKey(2) ]);
+    await settle();
+    let written = false;
+    const waiting = window.writer.whenWritten().then(() =>
+    {
+      written = true;
+    });
+    await settle();
+    const beforeStop = written;
+
+    // Act.
+    window.writer.stop();
+    await waiting;
+
+    // Assert: the wait held until the stop, which ended it with the change still standing, never taken back.
+    expect([ beforeStop, written, window.blueprintMap.cells[0] ])
+      .toStrictEqual([ false, true, a5(9) ]);
+    stroke.cancel();
+  });
+
   it('writes nothing when the blueprints change only by a version of their file found on disk, which it holds already', async () =>
   {
     // Arrange.
