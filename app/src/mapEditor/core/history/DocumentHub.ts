@@ -333,6 +333,18 @@ const OUTSIDE_CHANGE_LABEL = 'Externally modified';
 const RECENT_STATES_COMPARED = 32;
 
 /**
+ * How long a read of a file this window lost track of waits after failing before it is tried again, in milliseconds: a
+ * file held open elsewhere for a moment, or a server busy for one, is likely readable by then. Each failure after that
+ * waits twice as long as the one before, up to {@link READ_AGAIN_LONGEST_MS}.
+ */
+const READ_AGAIN_FIRST_MS = 1000;
+
+/**
+ * The longest a failed read of a file this window lost track of waits before it is tried again, in milliseconds.
+ */
+const READ_AGAIN_LONGEST_MS = 30_000;
+
+/**
  * Names the step an outside change to a file is recorded as, the same way in every window: the document, the latest
  * operation its copy had seen, and the version of the file it took. Every window hears each change on its own, and
  * every window holding the document at that head records the very same step from the very same file, so their
@@ -2004,10 +2016,14 @@ class DocumentHub
 
   /**
    * Reads a document's file again, when this window lost track of what it holds, and learns it, unless something newer was
-   * learnt while the read was on its way. A window with no store, or a read that fails, leaves it unknown.
+   * learnt while the read was on its way. Until it lands the document reads as unsaved, which once the file can be read is
+   * a false alarm, so a read that fails is tried again a while later, each wait twice the one before (see
+   * {@link READ_AGAIN_FIRST_MS}), for as long as nothing newer is learnt and the document is held. A window with no store
+   * leaves it unknown.
    * @param {DocumentKey} key The document.
+   * @param {number} wait How long to wait before trying again should this read fail, in milliseconds.
    */
-  #readFileAgain(key: DocumentKey): void
+  #readFileAgain(key: DocumentKey, wait = READ_AGAIN_FIRST_MS): void
   {
     if (this.#store === null)
     {
@@ -2016,14 +2032,27 @@ class DocumentHub
 
     const learnt = this.#fileLearnt.get(key);
     this.#store.load(key)
-      .then(content =>
-      {
-        if (this.#fileLearnt.get(key) === learnt)
+      .then(
+        content =>
         {
-          this.#learnFile(key, cloneJson(content));
-          this.#emit({ type: 'written', document: key, content, source: 'local', origin: this.clientId });
-        }
-      })
+          if (this.#fileLearnt.get(key) === learnt)
+          {
+            this.#learnFile(key, cloneJson(content));
+            this.#emit({ type: 'written', document: key, content, source: 'local', origin: this.clientId });
+          }
+        },
+        () =>
+        {
+          // a document let go of, or whose file this window learnt otherwise meanwhile, needs the read no more.
+          setTimeout(() =>
+          {
+            if (this.#fileLearnt.get(key) === learnt)
+            {
+              this.#readFileAgain(key, Math.min(wait * 2, READ_AGAIN_LONGEST_MS));
+            }
+          }, wait);
+        },
+      )
       .catch(() => undefined);
   }
 

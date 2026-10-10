@@ -21,7 +21,7 @@ import { createEventPage, createMapEvent } from '../../../../src/mapEditor/core/
 import type { DocumentKey } from '../../../../src/mapEditor/core/model/documentKeys.ts';
 import type { JsonValue } from '../../../../src/mapEditor/core/model/json.ts';
 import type { MapDocument } from '../../../../src/mapEditor/core/model/MapDocument.ts';
-import type { MapTiles } from '../../../../src/mapEditor/core/model/patches.ts';
+import type { MapTiles, Patch } from '../../../../src/mapEditor/core/model/patches.ts';
 import type { RmmzMap, RmmzMapEvent } from '../../../../src/mapEditor/core/model/rmmzTypes.ts';
 import { operationFor } from '../../../../src/mapEditor/core/sync/SyncPeer.ts';
 import { buildMapJson } from '../../support/fixtures.ts';
@@ -3732,6 +3732,95 @@ describe('DocumentHub', () =>
       // Assert.
       expect([ hub.fileContent(MAP_A), hub.isDirty(MAP_A) ])
         .toStrictEqual([ null, true ]);
+    });
+
+    /**
+     * A store over the fixture's files whose reads fail for a while, as a file held open elsewhere for a moment, or a
+     * server busy for one, makes them, counting every read of each document.
+     * @param {number} failing How many reads fail before they go through.
+     * @returns {{ store: DocumentStore, files: Map<DocumentKey, JsonValue>, reads: Map<DocumentKey, number> }} The store,
+     * its files and its reads.
+     */
+    const buildFlakyStore = (failing: number) =>
+    {
+      const { store, files } = buildStore();
+      const reads = new Map<DocumentKey, number>();
+      let left = failing;
+      const flaky: DocumentStore = {
+        load: key =>
+        {
+          reads.set(key, (reads.get(key) ?? 0) + 1);
+          left -= 1;
+          return left >= 0
+            ? Promise.reject(new Error('the file is busy'))
+            : store.load(key);
+        },
+        save: store.save,
+      };
+
+      return { store: flaky, files, reads };
+    };
+
+    /**
+     * A patch a file takes that assumed something the window never knew the file held, so the file is read again.
+     * @returns {Patch} The patch.
+     */
+    const unforeseenPatch = (): Patch => ({ kind: 'set', path: [ 'note' ], before: 'renamed', after: 'took it' });
+
+    it('tries a failed read of a file again a while later, each wait twice the last, the map reading as saved once the file can be read', async () =>
+    {
+      // Arrange: map 1 holds just what its file does; its first two reads fail.
+      vi.useFakeTimers();
+      try
+      {
+        const { store, reads } = buildFlakyStore(2);
+        const hub = buildHub(store);
+        hub.notePatched(MAP_A, [ unforeseenPatch() ]);
+        const seen: [ number, boolean ][] = [];
+
+        // Act: just short of each wait, and at it.
+        for (const wait of [ 999, 1, 1999, 1 ])
+        {
+          await vi.advanceTimersByTimeAsync(wait);
+          seen.push([ reads.get(MAP_A) ?? 0, hub.isDirty(MAP_A) ]);
+        }
+
+        // Assert: read again at a second and three seconds, unsaved until the third read landed, saved after.
+        expect([ seen, hub.fileContent(MAP_A) ])
+          .toStrictEqual([ [ [ 1, true ], [ 2, true ], [ 2, true ], [ 3, false ] ], buildMapJson() ]);
+      }
+      finally
+      {
+        vi.useRealTimers();
+      }
+    });
+
+    it('stops trying a failed read of a file once something newer is learnt of it, or its map is let go of', async () =>
+    {
+      // Arrange: three maps whose files are read again, every read failing; map 3 is left alone, so it shows the reads
+      // going on.
+      vi.useFakeTimers();
+      try
+      {
+        const { store, reads } = buildFlakyStore(Number.POSITIVE_INFINITY);
+        const hub = buildHub(store);
+        hub.adopt('map:3', buildMapJson() as unknown as JsonValue);
+        [ MAP_A, MAP_B, 'map:3' as DocumentKey ].forEach(key => hub.notePatched(key, [ unforeseenPatch() ]));
+        await vi.advanceTimersByTimeAsync(0);
+
+        // Act: map 1 saved, its file learnt from what the save wrote; map 2 let go of.
+        await hub.save(MAP_A);
+        hub.release(MAP_B);
+        await vi.advanceTimersByTimeAsync(60_000);
+
+        // Assert.
+        expect([ reads.get(MAP_A), reads.get(MAP_B), (reads.get('map:3') ?? 0) > 1, hub.isDirty(MAP_A) ])
+          .toStrictEqual([ 1, 1, true, false ]);
+      }
+      finally
+      {
+        vi.useRealTimers();
+      }
     });
 
     it('takes no read of a file that lands after something newer was learnt about it', async () =>
