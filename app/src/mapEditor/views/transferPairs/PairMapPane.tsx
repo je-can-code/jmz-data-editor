@@ -15,7 +15,7 @@ import { useMapEditorServices } from '../../services/MapEditorServicesContext.ts
 
 /**
  * What a pane marks on its map: the tiles the new ends will stand on, the door's picture where it will stand, and the
- * tile the player lands on there, green where they can stand and red where they cannot.
+ * tile the player lands on there, cyan where they can stand and red where they cannot.
  */
 type PaneMarks = {
   readonly areas: readonly CellRect[];
@@ -92,10 +92,11 @@ const PANE_OVERLAYS: readonly OverlayId[] = [ 'grid', 'hover', 'ghost', 'markers
 const AREA_STYLE: OverlayStyle = { fill: 0xffb300, fillAlpha: 0.3, stroke: 0xffb300, strokeAlpha: 1, strokeWidth: 3 };
 
 /**
- * How the tile the player lands on is drawn: green where they can stand, red where they cannot.
+ * How the tile the player lands on is drawn: cyan where they can stand, which reads on grass and stone alike, and red
+ * where they cannot.
  */
-const LANDING_STYLE: OverlayStyle = { fill: 0x43a047, fillAlpha: 0.55, stroke: 0xffffff, strokeAlpha: 0.9, strokeWidth: 2 };
-const REFUSED_STYLE: OverlayStyle = { fill: 0xd32f2f, fillAlpha: 0.6, stroke: 0xffffff, strokeAlpha: 0.9, strokeWidth: 2 };
+const LANDING_STYLE: OverlayStyle = { fill: 0x00e5ff, fillAlpha: 0.75, stroke: 0xffffff, strokeAlpha: 0.9, strokeWidth: 2 };
+const REFUSED_STYLE: OverlayStyle = { fill: 0xd32f2f, fillAlpha: 0.75, stroke: 0xffffff, strokeAlpha: 0.9, strokeWidth: 2 };
 
 /**
  * Hands a renderer what a pane shows over the map besides its marks: the tile under the pointer with its words beside it,

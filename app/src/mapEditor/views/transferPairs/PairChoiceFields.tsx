@@ -1,5 +1,5 @@
 import React, { useContext, useEffect, useRef, useState } from 'react';
-import { Box, FormControl, IconButton, InputLabel, MenuItem, Select, Stack, Tooltip, Typography } from '@mui/material';
+import { Box, FormControl, IconButton, InputLabel, MenuItem, Select, Stack, TextField, Tooltip, Typography } from '@mui/material';
 import { PlayArrow } from '@mui/icons-material';
 import type { MapEditorApi } from '../../core/api/MapEditorApi.ts';
 import type { TextureImage } from '../../core/renderer/MapRenderer.ts';
@@ -97,16 +97,21 @@ const SoundField = (props: {
 
   // a sound chosen that the folder lacks still shows, so a choice never drops out of its own list.
   const offered = value === '' || names.includes(value) ? names : [ value, ...names ];
-  const labelId = `${testId}-label`;
   return (
     <Stack direction={'row'} alignItems={'center'} spacing={0.5}>
-      <FormControl size={'small'} sx={{ minWidth: 160 }}>
-        <InputLabel id={labelId}>{label}</InputLabel>
-        <Select labelId={labelId} label={label} value={value} data-testid={testId} onChange={event => onChange(String(event.target.value))}>
-          <MenuItem value={''}>None</MenuItem>
-          {offered.map(name => <MenuItem key={name} value={name}>{name}</MenuItem>)}
-        </Select>
-      </FormControl>
+      <TextField
+        select
+        label={label}
+        value={value}
+        size={'small'}
+        sx={{ minWidth: 160 }}
+        data-testid={testId}
+        slotProps={{ inputLabel: { shrink: true }, select: { displayEmpty: true, renderValue: selected => (selected === '' ? 'None' : String(selected)) } }}
+        onChange={event => onChange(String(event.target.value))}
+      >
+        <MenuItem value={''}>None</MenuItem>
+        {offered.map(name => <MenuItem key={name} value={name}>{name}</MenuItem>)}
+      </TextField>
       <Tooltip title={`Play ${label.toLowerCase()}`}>
         <span>
           <IconButton

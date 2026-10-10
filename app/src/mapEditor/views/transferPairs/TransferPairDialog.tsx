@@ -525,7 +525,7 @@ const TransferPairBody = (props: TransferPairDialogProps) =>
  * arriving one tile north of it; a map's edge is a strip dragged along an edge on the left, its partner centred on the
  * opposite edge on the right until clicked elsewhere along it; either may go one way only, the landing clicked on the
  * right. The door's picture, its creak and the sound of passing through are chosen above, each remembered for as long as
- * the window is open. Where the player lands is marked on each map, green where they can stand and red where they
+ * the window is open. Where the player lands is marked on each map, cyan where they can stand and red where they
  * cannot, with the reason under the maps, and nothing is placed until every landing passes. Placing makes every end in
  * one step, which undoes from either map; a click outside the placer does nothing, so picks are never lost to a stray
  * click.

@@ -4,6 +4,7 @@ import { mapHistoryKey } from '../../../../src/mapEditor/core/history/historyKey
 import { blueprintMapId, mapDocumentKey } from '../../../../src/mapEditor/core/model/documentKeys.ts';
 import { createMapEvent } from '../../../../src/mapEditor/core/model/eventModel.ts';
 import type { RmmzMap } from '../../../../src/mapEditor/core/model/rmmzTypes.ts';
+import { stripEvent } from '../../../../src/mapEditor/core/transferPairs/pairEvents.ts';
 import { placeTransfers, type PlacementOutcome } from '../../../../src/mapEditor/core/transferPairs/pairPlacement.ts';
 import { NO_PICKS, pairPlanOf, type PairMap, type PairPicks, type PairPlan } from '../../../../src/mapEditor/core/transferPairs/pairPlans.ts';
 import {
@@ -25,10 +26,11 @@ import {
  * - the other map is changed in place when this window holds it, brought in first when another window holds it, and
  *   otherwise read from its file and written through, never opened;
  * - a held map with unsaved edits records what its file takes apart from them, so the step reaches the file without them;
- * - nothing is placed, and the author hears why, when an end would run off its map or stand on another event's tile, when
- *   the player could not land where an end sends them (judged with every new end standing, a door on its own way in's
- *   landing included), when the map it leaves from is not open, when the other map has no file or cannot be read, on a
- *   blueprint opened as a map, or when one of the window's checks refuses the step;
+ * - nothing is placed, and the author hears why, when an end would run off its map, stand on another event's tile or on
+ *   tiles an edge exit already spreads along, when the player could not land where an end sends them (judged with every
+ *   new end standing, a door on its own way in's landing included), when the map it leaves from is not open, when the
+ *   other map has no file or cannot be read, on a blueprint opened as a map, or when one of the window's checks refuses
+ *   the step;
  * - a one-way transfer stands on its own map alone, its landing judged on a map only looked at.
  *
  * The fixtures' outside map is 12 by 10 and the inside map 10 by 8, each walled along its top row.
@@ -194,6 +196,25 @@ describe('placeTransfers', () =>
     // Assert.
     expect([ refusalOf(onBarrel), refusalOf(overLamp) ])
       .toStrictEqual([ 'Barrel (event 1) already stands on 5, 3 in Northeast Section.', 'An event (event 2) already stands on 4, 9 in Northeast Section.' ]);
+  });
+
+  it('refuses a strip over tiles an edge exit already spreads along, and takes the tile just past it', async () =>
+  {
+    // Arrange: a three-tile strip along the outside map's bottom edge from 2, spread there by its area tag.
+    const disk = pairDisk();
+    const outside = disk.get(OUTSIDE) as RmmzMap;
+    const existing = stripEvent(1, { x: 2, y: 9, width: 3, height: 1 }, 'Transfer (Elsewhere)', 'Move1', { mapId: 5, x: 3, y: 1, facing: 2 });
+    disk.set(OUTSIDE, { ...outside, events: [ null, existing ] });
+    const window = pairWindow({ disk });
+    const strip = (start: number) => ({ kind: 'edge' as const, ways: 'one' as const, strip: { edge: 'bottom' as const, start, length: 3 }, landing: { x: 4, y: 6 } });
+
+    // Act.
+    const over = await placeTransfers(window.sources, planOn(window, strip(4)));
+    const beside = await placeTransfers(window.sources, planOn(window, strip(5)));
+
+    // Assert.
+    expect([ refusalOf(over), beside.ok ])
+      .toStrictEqual([ 'Transfer (Elsewhere) (event 1) already covers some of those tiles in Northeast Section.', true ]);
   });
 
   it('refuses a strip running off the map it is planned for', async () =>

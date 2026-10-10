@@ -1,5 +1,6 @@
 import { MapEditorApiError } from '../api/MapEditorApi.ts';
 import { BLUEPRINT_EVENTS_ADDED } from '../blueprints/blueprintShape.ts';
+import { areaEventTag } from '../commandList/commandGuards.ts';
 import type { DocumentHub } from '../history/DocumentHub.ts';
 import { mapHistoryKey } from '../history/historyKeys.ts';
 import type { HistoryStep } from '../history/HistoryStep.ts';
@@ -256,8 +257,25 @@ const overlaps = (left: CellRect, right: CellRect): boolean =>
 };
 
 /**
+ * Lists the tiles an event covers: its own, and on any of its pages, the area J-Pixelistics' tag spreads it over, as a
+ * map's edge exits are spread along their edge.
+ * @param {RmmzMapEvent} event The event.
+ * @returns {CellRect[]} The areas, its own tile first.
+ */
+const tilesCoveredBy = (event: RmmzMapEvent): CellRect[] =>
+{
+  const spread = event.pages.flatMap(page => page.list.flatMap((_command, index) =>
+  {
+    const tag = areaEventTag(page.list, index);
+    return tag === null ? [] : [ { x: event.x, y: event.y, width: tag.width, height: tag.height } ];
+  }));
+  return [ { x: event.x, y: event.y, width: 1, height: 1 }, ...spread ];
+};
+
+/**
  * Says why an end cannot go where it is planned, or null when it can: its tiles must all lie on its map, no event may
- * stand on any of them, as MZ never stacks two events on one tile, and no other end on the same map may share one.
+ * stand on any of them, as MZ never stacks two events on one tile, nor spread over any of them, as an edge exit already
+ * along the edge is, and no other end on the same map may share one.
  * @param {PlannedEnd} end The end.
  * @param {EndMap} side Its map.
  * @param {PairPlan} plan The plan, for the other ends.
@@ -273,10 +291,17 @@ const areaProblem = (end: PlannedEnd, side: EndMap, plan: PairPlan, name: string
     return `That runs off ${name}, which is ${map.width} by ${map.height} tiles.`;
   }
 
-  const standing = map.eventIds().map(id => map.event(id) as RmmzMapEvent).find(event => overlaps(area, { x: event.x, y: event.y, width: 1, height: 1 }));
+  const events = map.eventIds().map(id => map.event(id) as RmmzMapEvent);
+  const standing = events.find(event => overlaps(area, { x: event.x, y: event.y, width: 1, height: 1 }));
   if (standing !== undefined)
   {
     return `${standing.name === '' ? 'An event' : standing.name} (event ${standing.id}) already stands on ${standing.x}, ${standing.y} in ${name}.`;
+  }
+
+  const spread = events.find(event => tilesCoveredBy(event).some(covered => overlaps(area, covered)));
+  if (spread !== undefined)
+  {
+    return `${spread.name === '' ? 'An event' : spread.name} (event ${spread.id}) already covers some of those tiles in ${name}.`;
   }
 
   const shared = plan.ends.some(other => other !== end && other.mapId === end.mapId && overlaps(area, other.area));
