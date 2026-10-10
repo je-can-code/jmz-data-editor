@@ -1,8 +1,12 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import type { EventEdit } from '../../../../src/mapEditor/core/eventKinds/quickFields.ts';
+import { DocumentHub } from '../../../../src/mapEditor/core/history/DocumentHub.ts';
+import { eventHistoryKey, mapHistoryKey } from '../../../../src/mapEditor/core/history/historyKeys.ts';
+import { mapDocumentKey } from '../../../../src/mapEditor/core/model/documentKeys.ts';
 import type { JsonValue } from '../../../../src/mapEditor/core/model/json.ts';
 import type { RmmzEventCommand, RmmzEventPage, RmmzMap, RmmzMapEvent } from '../../../../src/mapEditor/core/model/rmmzTypes.ts';
+import { changeBattlerPage, changeBattlers } from '../../../../src/mapEditor/modules/jabs/battlerChanges.ts';
 import { planBattlerChange, type BattlerChange, type BattlerContext } from '../../../../src/mapEditor/modules/jabs/battlerEdits.ts';
 import { jabsDefaultsOf, pageEnemyId, readBattlerPage, type BattlerReading, type EnemyRecord } from '../../../../src/mapEditor/modules/jabs/battlerReading.ts';
 import { motionDefaultsFrom, motionLinesOf } from '../../../../src/mapEditor/modules/jabs/motionTags.ts';
@@ -20,6 +24,9 @@ import { applyEdits } from '../../support/eventKindFixtures.ts';
  * either, every command not carrying the row's tag is exactly as it was, and every other row reads from the page as it
  * did. Writing a row back as it was leaves the page byte for byte as the game shipped it, and so does clearing a value
  * the page never set, where every way back exists.
+ *
+ * And every change made through a window's history, from a battler's quick panel or from its event window, undoes: each
+ * shipped map, every battler on it changed and undone in turn, comes back byte for byte.
  *
  * It runs against the project JMZ_PROJECT_ROOT names, or the sibling checkout, and skips when neither is there.
  */
@@ -331,6 +338,46 @@ describe.skipIf(project === null)('the battler panel\'s writes on every shipped 
     // still reading as shipped with nothing else moved.
     expect([ pages.length > 4500, wrong.slice(0, 5), wrong.length, respelled.length < pages.length / 100 ])
       .toStrictEqual([ true, [], 0, true ]);
+  }, 120_000);
+
+  it('undoes every change on every shipped map byte for byte, from the map\'s history and from the event\'s', () =>
+  {
+    // Arrange: every map holding battlers, each held in a window of its own.
+    const maps = listMapFiles(root).flatMap(file =>
+    {
+      const map = readDataFile(root, file) as RmmzMap;
+      const battlers = (map.events.filter(each => each !== null) as RmmzMapEvent[]).filter(each => each.pages.some(shown => pageEnemyId(shown) !== null));
+      return battlers.length === 0 ? [] : [ { mapId: Number(file.slice(3, -5)), map, battlers } ];
+    });
+
+    // Act: on each battler's first battler page, a sight written and a move speed cleared from the quick panel, and the
+    // enemy changed from the event window, each undone at once; then every map read back whole.
+    const wrong = maps.flatMap(({ mapId, map, battlers }) =>
+    {
+      const hub = new DocumentHub({ clientId: 'window-a' });
+      hub.adopt(mapDocumentKey(mapId), map as unknown as JsonValue);
+      const before = JSON.stringify(hub.map(mapDocumentKey(mapId)).toJson());
+      const steps = battlers.flatMap(battler =>
+      {
+        const pageIndex = battler.pages.findIndex(shown => pageEnemyId(shown) !== null);
+        const reading = readBattlerPage(battler.pages[pageIndex], context.enemyOf, context.defaults) as BattlerReading;
+        const made = [
+          changeBattlers(hub, mapId, () => pageIndex, [ battler.id ], { row: 'sight', value: reading.sight.value + 1 }, context),
+          hub.undo(mapHistoryKey(mapId)),
+          changeBattlers(hub, mapId, () => pageIndex, [ battler.id ], { row: 'moveSpeed', value: null }, context),
+          hub.undo(mapHistoryKey(mapId)),
+          changeBattlerPage(hub, { mapId, eventId: battler.id }, pageIndex, { row: 'enemy', value: reading.enemyId + 1 }, context),
+          hub.undo(eventHistoryKey(mapId, battler.id)),
+        ];
+        return made[0] === null ? [ `${mapId}/${battler.id} wrote no sight` ] : [];
+      });
+      const after = JSON.stringify(hub.map(mapDocumentKey(mapId)).toJson());
+      return after === before ? steps : [ ...steps, `Map${mapId} did not come back byte for byte` ];
+    });
+
+    // Assert.
+    expect([ maps.length > 200, wrong.slice(0, 5), wrong.length ])
+      .toStrictEqual([ true, [], 0 ]);
   }, 120_000);
 
   it('changes, takes off and adds motions on every battler page, moving nothing else', () =>
