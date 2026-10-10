@@ -18,9 +18,10 @@ import { blueprintHistoryKey, eventHistoryKey, mapHistoryKey } from '../../../..
 import { mapDocumentKey } from '../../../../src/mapEditor/core/model/documentKeys.ts';
 import { cloneJson } from '../../../../src/mapEditor/core/model/json.ts';
 import type { RmmzMapEvent } from '../../../../src/mapEditor/core/model/rmmzTypes.ts';
+import { cellIndex } from '../../../../src/mapEditor/core/tiles/tileGrid.ts';
 import { contextOf, copyOf, fieldOf, later, needler, needlerNest } from '../../support/copyFixtures.ts';
 import { hubWithMaps, mapWithEvents } from '../../support/eventFixtures.ts';
-import { BLUEPRINT, eventOf, propagationWindow } from '../../support/propagationFixtures.ts';
+import { a5, BLUEPRINT, eventOf, groundOf, propagationWindow } from '../../support/propagationFixtures.ts';
 
 /*
  * Every action of a copy's panel is one step on the copy's map, in the history it is asked to go in (the event's own from
@@ -33,6 +34,10 @@ import { BLUEPRINT, eventOf, propagationWindow } from '../../support/propagation
  * And the way back the panel exists for: a blueprint change, the same field changed by hand on a copy, the blueprint
  * change undone (which leaves that copy as it is) and the hand change undone, leaves the copy behind, at the value of a
  * blueprint change that no longer is; reading it shows that, and following the blueprint again brings it back.
+ *
+ * Unlinking a copy placed with tiles touches its map alone: the record of placements keeps the placement, whose tiles go
+ * on following the blueprint, and the copies placed with it go on following too, while the event, plain now, follows
+ * nothing.
  */
 describe('copy edits', () =>
 {
@@ -228,26 +233,27 @@ describe('copy edits', () =>
       .toStrictEqual([ [ { ok: false, message: FIELD_GONE }, { ok: true, step: null } ], 0 ]);
   });
 
+  /**
+   * Reads what a copy of the camp on map 1 is read against in a propagation window: the blueprints and the record of
+   * placements it holds, the copy's group found by them.
+   * @param {DocumentHub} hub The window's documents.
+   * @param {RmmzMapEvent} copy The copy.
+   * @returns {CopyContext} The context.
+   */
+  const campContext = (hub: DocumentHub, copy: RmmzMapEvent): CopyContext =>
+  {
+    const blueprint = blueprintIn(hub.document(BLUEPRINTS_DOCUMENT), BLUEPRINT);
+    const spots = spotsOnMap(hub.document(BLUEPRINT_USES_DOCUMENT), 1);
+    const references = blueprint === null ? undefined : copyGroupOf(hub.map(mapDocumentKey(1)).events, copy, blueprint.stamp, spots);
+    return {
+      blueprint: blueprintId => blueprintIn(hub.document(BLUEPRINTS_DOCUMENT), blueprintId),
+      tags: [],
+      ...(references === undefined ? {} : { references }),
+    };
+  };
+
   describe('a copy left behind by undo', () =>
   {
-    /**
-     * Reads what a guard of the camp is read against in a propagation window: the blueprints and the record it holds.
-     * @param {DocumentHub} hub The window's documents.
-     * @param {RmmzMapEvent} copy The copy.
-     * @returns {CopyContext} The context.
-     */
-    const campContext = (hub: DocumentHub, copy: RmmzMapEvent): CopyContext =>
-    {
-      const blueprint = blueprintIn(hub.document(BLUEPRINTS_DOCUMENT), BLUEPRINT);
-      const spots = spotsOnMap(hub.document(BLUEPRINT_USES_DOCUMENT), 1);
-      const references = blueprint === null ? undefined : copyGroupOf(hub.map(mapDocumentKey(1)).events, copy, blueprint.stamp, spots);
-      return {
-        blueprint: blueprintId => blueprintIn(hub.document(BLUEPRINTS_DOCUMENT), blueprintId),
-        tags: [],
-        ...(references === undefined ? {} : { references }),
-      };
-    };
-
     it('reads a speed left behind at a change undone as an offset, and follows the blueprint again to its value', async () =>
     {
       // Arrange: the guard sped up to 4 in the blueprint, map 1's guard then sped up to 6 by hand in its own window, the
@@ -301,6 +307,39 @@ describe('copy edits', () =>
       // Assert: the post beside it, never touched, still follows.
       expect([ behind.name, fieldOf(reading, 'name').state, eventOf(window.hub.map('map:1'), 5).name, eventOf(window.hub.map('map:1'), 6).name ])
         .toStrictEqual([ 'Captain', { kind: 'own' }, 'Guard', 'Post' ]);
+    });
+  });
+
+  describe('unlinking a copy placed with tiles', () =>
+  {
+    it('unlinks the copy on its map alone, its placement left in the record, its tiles and its post following on', async () =>
+    {
+      // Arrange: map 1's guard and post were placed together with the camp's tiles at (1, 1).
+      const window = await propagationWindow();
+      const record = JSON.stringify(window.hub.document(BLUEPRINT_USES_DOCUMENT).toJson());
+      const guard = cloneJson(eventOf(window.hub.map('map:1'), 5));
+
+      // Act: the guard unlinked; then the camp's corner repainted, and its guard sped up and its post renamed.
+      const outcome = unlinkCopy(window.hub, { mapId: 1, eventId: 5, history: eventHistoryKey(1, 5) }, campContext(window.hub, guard));
+      const touched = outcome.ok ? [ ...new Set(outcome.step?.entries.map(entry => entry.document)) ] : [];
+      window.hub.edit('Change', [ blueprintHistoryKey(BLUEPRINT) ], tx =>
+      {
+        tx.tiles(window.blueprintKey, [ [ cellIndex(2, 2, 0, 0, 0), a5(9) ] ]);
+        tx.set(window.blueprintKey, [ 'events', 1, 'pages', 0, 'moveSpeed' ], 4);
+        tx.set(window.blueprintKey, [ 'events', 2, 'name' ], 'Watchtower');
+      });
+
+      // Assert: the plain guard stays at 3 while map 2's guard follows to 4; map 1's tiles and post follow.
+      const map1 = window.hub.map('map:1');
+      expect([
+        touched,
+        JSON.stringify(window.hub.document(BLUEPRINT_USES_DOCUMENT).toJson()) === record,
+        groundOf(map1, 1, 1),
+        eventOf(map1, 5).pages[0].moveSpeed,
+        eventOf(map1, 6).name,
+        eventOf(window.hub.map('map:2'), 5).pages[0].moveSpeed,
+      ])
+        .toStrictEqual([ [ 'map:1' ], true, a5(9), 3, 'Watchtower', 4 ]);
     });
   });
 });

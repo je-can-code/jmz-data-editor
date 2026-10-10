@@ -166,14 +166,12 @@ const useCopyView = (mapId: number, copy: RmmzMapEvent): CopyView =>
   const { document: held, failure } = useHeldBlueprints(hub);
   const spots = usePlacements(hub, mapId);
 
-  if (failure !== null)
-  {
-    return { kind: 'failed', message: `The blueprints could not be read: ${failure}` };
-  }
-
+  // blueprints held after all, by another of the window's panels, say, are read whatever an opening of them came to.
   if (held === null)
   {
-    return { kind: 'waiting', message: OPENING_BLUEPRINTS };
+    return failure === null
+      ? { kind: 'waiting', message: OPENING_BLUEPRINTS }
+      : { kind: 'failed', message: `The blueprints could not be read: ${failure}` };
   }
 
   if (revision === 0)
