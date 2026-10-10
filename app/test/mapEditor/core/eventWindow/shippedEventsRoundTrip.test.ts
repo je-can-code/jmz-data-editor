@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { noteBoxOf } from '../../../../src/mapEditor/core/blueprints/copyActions.ts';
 import { parseEventImage, writeEventImage } from '../../../../src/mapEditor/core/eventPage/eventImage.ts';
 import { parseEventMovement, writeEventMovement } from '../../../../src/mapEditor/core/eventPage/eventMovement.ts';
 import {
@@ -102,8 +103,9 @@ const writePageBack = (hub: DocumentHub, target: EventWindowTarget, pageIndex: n
 
 /**
  * Opens one event the way the window does and writes everything back, reporting anything the window could not read or
- * write back unchanged: its name and note, every page's groups, every page's commands where the command list looks,
- * its tab's summary, and a trip through the page clipboard.
+ * write back unchanged: its name and note, the note as its Note box shows it (a copy of a blueprint's own text, its link
+ * kept out of the box), every page's groups, every page's commands where the command list looks, its tab's summary, and
+ * a trip through the page clipboard.
  * @param {DocumentHub} hub The hub holding the map.
  * @param {EventWindowTarget} target The event.
  * @returns {string[]} What went wrong; empty when the event came through untouched.
@@ -111,7 +113,7 @@ const writePageBack = (hub: DocumentHub, target: EventWindowTarget, pageIndex: n
 const openAndWriteBack = (hub: DocumentHub, target: EventWindowTarget): string[] =>
 {
   const event = readTargetEvent(hub, target) as RmmzMapEvent;
-  const named: [ string, EditOutcome ][] = [ [ 'name', renameEvent(hub, target, event.name) ], [ 'note', setEventNote(hub, target, event.note) ] ];
+  const named: [ string, EditOutcome ][] = [ [ 'name', renameEvent(hub, target, event.name) ], [ 'note', setEventNote(hub, target, noteBoxOf(event).text) ] ];
   const problems = named
     .filter(([ , outcome ]) => outcome.ok === false || outcome.step !== null)
     .map(([ what ]) => `${what} did not write back unchanged`);

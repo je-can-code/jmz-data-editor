@@ -597,5 +597,5 @@ const planCopyChange = (change: BlueprintEventChange, copy: RmmzMapEvent, option
   }
 };
 
-export { pagesWords, planCopyChange };
-export type { BlueprintEventChange, CopyChange, CopyChangeOptions };
+export { followedList, pagesWords, planCopyChange };
+export type { BlueprintEventChange, CopyChange, CopyChangeOptions, PageTrio };

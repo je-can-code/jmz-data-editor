@@ -161,6 +161,39 @@ const groupFor = (copy: MapCopy, groups: readonly Map<number, number>[]): Readon
 };
 
 /**
+ * Works out which group one copy of a blueprint's events was placed with, from the blueprint's placements the record holds
+ * on its map, exactly as a change to the blueprint planned on that map finds it (see {@link planEvents}): so whatever reads
+ * a copy against its blueprint, or makes it follow, names its group's events as a change would.
+ * @param {readonly (RmmzMapEvent | null)[]} events The map's events, by id.
+ * @param {RmmzMapEvent} copy The copy, whose note links it to the blueprint.
+ * @param {Stamp} stamp The blueprint's stamp as it stands, which says where each of its events stands inside it.
+ * @param {readonly BlueprintSpot[]} spots The placements the record holds on the map, of any blueprint; the copy's own
+ * blueprint's are read.
+ * @returns {ReadonlyMap<number, number> | undefined} The group's ids on the map, by the blueprint's ids, or undefined when
+ * none is known: for a blueprint of events alone, which has no placements, and for a copy moved since it was placed.
+ * @throws {Error} When the event is no copy of the blueprint.
+ */
+const copyGroupOf = (
+  events: readonly (RmmzMapEvent | null)[],
+  copy: RmmzMapEvent,
+  stamp: Stamp,
+  spots: readonly BlueprintSpot[],
+): ReadonlyMap<number, number> | undefined =>
+{
+  const link = blueprintLinkOf(copy.note);
+  if (link === null)
+  {
+    throw new Error(`event ${copy.id} is no copy of a blueprint`);
+  }
+
+  const copies = copiesOf(events, link.blueprintId);
+  const groups = stamp.tiles === null
+    ? []
+    : spots.filter(spot => spot.blueprintId === link.blueprintId).map(spot => groupOf(spot, stamp.events, copies));
+  return groupFor({ event: copy, link }, groups);
+};
+
+/**
  * Plans the change to each copy of the blueprint's events on the map (see planCopyChange): every copy of an event the
  * change touched, with its group's ids where its placement is known, comes to a new event, nothing, or a reason it has
  * drifted too far for the change to reach it. Only blueprints with tiles have placements to know groups by.
@@ -288,5 +321,5 @@ const changesNothing = (plan: MapCopyPlan): boolean =>
   return plan.tiles.length === 0 && plan.events.length === 0;
 };
 
-export { changesNothing, copiesOf, planCopiesOnMap };
+export { changesNothing, copiesOf, copyGroupOf, planCopiesOnMap };
 export type { CopyGround, CopyPlanInput, DriftedCopy, LostPlacement, MapCopy, MapCopyPlan };

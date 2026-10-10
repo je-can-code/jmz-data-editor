@@ -402,6 +402,20 @@ const writtenLine = (tag: BattlerTag, text: string, field: string, value: JsonVa
 };
 
 /**
+ * Names a line carrying one of a battler's tags the way an author knows it: by what the tag is, and, past the first line
+ * of the tag on its page, by which line it is, as {@link battlerLines} names them.
+ * @param {BattlerTag} tag The tag.
+ * @param {string} line The line's key: the tag's name, or the name and which line it is, such as sight2.
+ * @returns {string} The words, such as "sight" or "sight (line 2)".
+ */
+const lineWords = (tag: BattlerTag, line: string): string =>
+{
+  return line === tag.name
+    ? tag.words
+    : `${tag.words} (line ${line.slice(tag.name.length)})`;
+};
+
+/**
  * Builds one of a battler's tags as fields of a blueprint's copies.
  * @param {BattlerTag} tag The tag.
  * @returns {CommentTagDefinition} The tag, as fields.
@@ -412,6 +426,7 @@ const definitionOf = (tag: BattlerTag): CommentTagDefinition =>
     id: `jabs.${tag.name}`,
     read: page => battlerLines(tag, page),
     write: (text, field, value) => writtenLine(tag, text, field, value),
+    words: line => lineWords(tag, line),
   };
 };
 
