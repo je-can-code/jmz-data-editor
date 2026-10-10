@@ -1,6 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { Alert, Box, Button, ButtonBase, InputBase, Stack, Typography } from '@mui/material';
-import { copyCountWords } from '../../core/blueprints/blueprintCopies.ts';
 import {
   deleteBlueprint,
   renameBlueprint,
@@ -10,8 +9,8 @@ import {
 import { BLUEPRINTS_DOCUMENT, blueprintsOf, type Blueprint } from '../../core/blueprints/blueprints.ts';
 import {
   BLUEPRINT_USES_DOCUMENT,
-  countsWithPlacements,
   forgetPlacement,
+  usageWords,
   usedCopiesOf,
   usesOf,
   type PlacedSpot,
@@ -338,9 +337,10 @@ const StampCard = (props: {
   readonly from: string;
   readonly onClick: () => void;
   readonly onSave: ((name: string) => void) | null;
+  readonly cardRef?: React.Ref<HTMLDivElement>;
 }) =>
 {
-  const { stamp, picked, from, onClick, onSave } = props;
+  const { stamp, picked, from, onClick, onSave, cardRef } = props;
   const [ naming, setNaming ] = useState(false);
 
   /**
@@ -357,7 +357,7 @@ const StampCard = (props: {
   };
 
   return (
-    <Box sx={cardFrame(picked)}>
+    <Box sx={cardFrame(picked)} ref={cardRef}>
       <ButtonBase
         data-testid={'stamp-card'}
         aria-pressed={picked}
@@ -387,12 +387,12 @@ const StampCard = (props: {
 };
 
 /**
- * One blueprint in the panel: its picture, its name, and how many copies of it stand across every map. A click takes
- * it up as the brush, or puts it down again when it is in hand. Beneath it, it can be opened in a tab of its own to be
- * painted and its events edited, renamed in place, or deleted, and where it is used can be shown, the card then
- * stretching across the panel to list it.
- * @param {object} props The blueprint, whether it is in hand, the words for its copies, what a click, an open, a rename
- * and a delete do, and the list of where it is used with how to show or hide it.
+ * One blueprint in the panel: its picture, its name, and where it is used across every map. A click takes it up as the
+ * brush, or puts it down again when it is in hand. Beneath it, it can be opened in a tab of its own to be painted and its
+ * events edited, renamed in place, or deleted, and where it is used can be shown, the card then stretching across the
+ * panel to list it.
+ * @param {object} props The blueprint, whether it is in hand, the words for where it is used, what a click, an open, a
+ * rename and a delete do, and the list of where it is used with how to show or hide it.
  * @returns {React.JSX.Element} The card.
  */
 const BlueprintCard = (props: {
@@ -532,14 +532,15 @@ const settleEdit = (controller: WorkspaceController, outcome: BlueprintOutcome, 
 };
 
 /**
- * The panel's blueprints, by name, each with its picture and how many copies of it stand across every map, a placement
- * of its tiles counting as one copy, as each copy of one of its events does: clicking one takes it up as the brush, so
- * each click on a map places copies linked to it, and clicking it again, or Esc, puts it down. Each opens in a tab of its
- * own, as a small map to paint and whose events to edit (see WorkspaceController's openBlueprint). Each can be renamed in
- * place, and deleted once nothing is a copy of it, after a question; one with copies says how many and on which maps
- * instead. Each can show where it is used, map by map, a click opening the map there, and a placement no longer where
- * it was saying why, to be forgotten. The event copies are counted from every map's notes, held maps as they stand here,
- * and the placements come from the record of where blueprints are placed.
+ * The panel's blueprints, by name, each with its picture and where it is used across every map: how many times it is
+ * placed, for a blueprint with tiles, and how many events are linked to it, never the two under one name (see
+ * blueprintUses' usageWords). Clicking one takes it up as the brush, so each click on a map places it, its events linked
+ * to it, and clicking it again, or Esc, puts it down. Each opens in a tab of its own, as a small map to paint and whose
+ * events to edit (see WorkspaceController's openBlueprint). Each can be renamed in place, and deleted once nothing uses
+ * it, after a question; one still used says how and on which maps instead. Each can show where it is used, map by map, a
+ * click opening the map there, and a placement no longer where it was saying why, to be forgotten. The linked events are
+ * counted from every map's notes, held maps as they stand here, and the placements come from the record of where
+ * blueprints are placed.
  * @param {{ blueprints: readonly Blueprint[], spots: readonly PlacedSpot[], painting: PaintState }} props The
  * blueprints, every placement the record holds, and the paint they are taken up for.
  * @returns {React.JSX.Element} The section.
@@ -550,7 +551,6 @@ const BlueprintsSection = (props: { readonly blueprints: readonly Blueprint[]; r
   const controller = useWorkspace();
   const { hub, blueprintCopies } = controller.services;
   const eventCounts = useSyncExternalStore(blueprintCopies.subscribe, blueprintCopies.getSnapshot);
-  const counts = useMemo(() => countsWithPlacements(eventCounts, spots), [ eventCounts, spots ]);
   const settings = usePaintSettings(painting);
   const [ confirming, setConfirming ] = useState<Blueprint | null>(null);
   const [ showing, setShowing ] = useState<string | null>(null);
@@ -635,7 +635,7 @@ const BlueprintsSection = (props: { readonly blueprints: readonly Blueprint[]; r
     }
 
     controller.focusHistory(blueprintHistoryKey(blueprint.id));
-    controller.notify(`Forgot a copy of "${blueprint.name}" on ${controller.mapName(spot.mapId)}.`);
+    controller.notify(`Forgot a placement of "${blueprint.name}" on ${controller.mapName(spot.mapId)}.`);
   };
 
   return (
@@ -645,8 +645,8 @@ const BlueprintsSection = (props: { readonly blueprints: readonly Blueprint[]; r
       </Typography>
       <Typography variant={'caption'} color={'text.secondary'} sx={{ display: 'block', px: 1.5 }}>
         {blueprints.length === 0
-          ? 'Save a stamp as a blueprint to keep it. Copies placed from it stay linked to it.'
-          : 'Click a blueprint to place a linked copy with each click on a map; Esc puts it down.'}
+          ? 'Save a stamp as a blueprint to keep it. Wherever it is placed, its events stay linked to it.'
+          : 'Click a blueprint to place it with each click on a map, its events linked; Esc puts it down.'}
       </Typography>
       {confirming !== null && (
         <DeleteConfirm name={confirming.name} onDelete={() => remove(confirming)} onKeep={() => setConfirming(null)}/>
@@ -657,7 +657,7 @@ const BlueprintsSection = (props: { readonly blueprints: readonly Blueprint[]; r
             key={blueprint.id}
             blueprint={blueprint}
             picked={blueprint.id === pickedId}
-            copies={copyCountWords(counts, blueprint.id)}
+            copies={usageWords(eventCounts, spots, blueprint)}
             onPick={() => pick(blueprint)}
             onOpen={() => controller.openBlueprint(blueprint.id)}
             onRename={name => rename(blueprint, name)}
@@ -682,12 +682,37 @@ const BlueprintsSection = (props: { readonly blueprints: readonly Blueprint[]; r
 };
 
 /**
+ * Brings the newest stamp into view each time one lands among the stamps, as a copy off a map does, so it never arrives
+ * out of sight below the blueprints; the stamps the panel opens with stay as they are.
+ * @param {string | null} newestId The newest stamp's id, or null while there are none.
+ * @returns {React.RefObject<HTMLDivElement | null>} The ref for the newest stamp's card.
+ */
+const useNewestInView = (newestId: string | null): React.RefObject<HTMLDivElement | null> =>
+{
+  const newest = useRef<HTMLDivElement | null>(null);
+  const shown = useRef(newestId);
+  useEffect(() =>
+  {
+    if (newestId === shown.current)
+    {
+      return;
+    }
+
+    // jsdom, which the tests draw in, has no scrolling to do.
+    shown.current = newestId;
+    newest.current?.scrollIntoView?.({ block: 'nearest' });
+  }, [ newestId ]);
+
+  return newest;
+};
+
+/**
  * Every stamp copied in this window this session, newest first, each with a picture of what it holds, and the window's
- * blueprints above them. Whatever Ctrl+C or Ctrl+X takes off a map lands among the stamps, the oldest dropping off once
- * more than the stamp history's cap are kept; any stamp can be saved as a blueprint, named in place, to keep it for good.
- * Clicking a stamp or a blueprint makes it the brush, so each click on a map places it, and clicking it again, or Esc,
- * puts it down and takes up the tool held before. It picks for its paint's window, as the palette does: the workspace's
- * own maps. A window with no project server keeps no blueprints, and shows its stamps alone.
+ * blueprints above them. Whatever Ctrl+C or Ctrl+X takes off a map lands among the stamps, in view, the oldest dropping
+ * off once more than the stamp history's cap are kept; any stamp can be saved as a blueprint, named in place, to keep it
+ * for good. Clicking a stamp or a blueprint makes it the brush, so each click on a map places it, and clicking it again,
+ * or Esc, puts it down and takes up the tool held before. It picks for its paint's window, as the palette does: the
+ * workspace's own maps. A window with no project server keeps no blueprints, and shows its stamps alone.
  * @returns {React.JSX.Element} The panel.
  */
 const StampsPanel = () =>
@@ -699,6 +724,7 @@ const StampsPanel = () =>
   const { painting } = usePaintScope();
   const settings = usePaintSettings(painting);
   const pickedId = settings.tool === 'stamp' && settings.stamp !== null ? settings.stamp.id : null;
+  const newestCard = useNewestInView(list.length === 0 ? null : list[0].id);
 
   /**
    * Takes up a stamp as the brush, or puts it down when it is the one in hand.
@@ -766,7 +792,7 @@ const StampsPanel = () =>
           : 'Click a stamp to place it with each click on a map; Esc puts it down.'}
       </Typography>
       <Box sx={CARD_GRID}>
-        {list.map(stamp => (
+        {list.map((stamp, index) => (
           <StampCard
             key={stamp.id}
             stamp={stamp}
@@ -774,6 +800,7 @@ const StampsPanel = () =>
             from={`From ${controller.mapName(stamp.mapId)}`}
             onClick={() => pick(stamp)}
             onSave={blueprints.kind === 'open' ? name => saveAs(stamp, name) : null}
+            {...(index === 0 ? { cardRef: newestCard } : {})}
           />
         ))}
       </Box>

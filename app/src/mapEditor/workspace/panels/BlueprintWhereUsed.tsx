@@ -218,7 +218,7 @@ const BlueprintWhereUsed = (props: {
       ))}
       {counting && (
         <Typography variant={'caption'} color={'text.secondary'}>
-          Still counting the copies of its events.
+          Still counting its linked events.
         </Typography>
       )}
     </Stack>

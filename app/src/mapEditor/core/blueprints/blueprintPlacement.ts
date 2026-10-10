@@ -121,7 +121,7 @@ const placeBlueprint = (hub: DocumentHub, mapId: number, blueprintId: string, pl
   // every event placed takes this blueprint's link, whatever its note held, so no link is told dead on the way; and the
   // placement recorded is this one alone, whatever its stamp was copied with.
   const { spots: _spots, ...stamp } = blueprint.stamp;
-  const plan = planStamp(hub.map(mapDocumentKey(mapId)), stamp, placement, null);
+  const plan = planStamp(hub.map(mapDocumentKey(mapId)), stamp, placement, null, 'blueprint');
   if (plan.ok === false)
   {
     return plan;
@@ -151,7 +151,7 @@ const placeBlueprint = (hub: DocumentHub, mapId: number, blueprintId: string, pl
   // check ever judges it by.
   const spot = plan.tilesPlaced ? placedOn({ blueprintId, x: placement.at.x, y: placement.at.y }, stamp, hub.map(mapDocumentKey(mapId))) : null;
   const spots = spot === null ? [] : [ spot ];
-  return commitStampPlan(hub, mapId, { ...plan, events, spots }, `Place blueprint "${blueprint.name}"`);
+  return commitStampPlan(hub, mapId, { ...plan, events, spots }, `Place blueprint "${blueprint.name}"`, 'blueprint');
 };
 
 export { linkGateFor, placeBlueprint };

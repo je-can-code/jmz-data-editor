@@ -1,5 +1,6 @@
 import type { PalettePick } from './paletteGeometry.ts';
 import { isTabAvailable, PALETTE_TABS, type PaletteTab } from './paletteLayout.ts';
+import type { PaletteBrush } from './paintSelection.ts';
 
 /**
  * What a palette remembers for one tileset: the tab on show, and what was picked there.
@@ -38,5 +39,23 @@ const recallPalette = (
   return { tab, pick: remembered?.pick ?? null };
 };
 
-export { recallPalette };
+/**
+ * Chooses the brush a tileset's palette hands its window as it comes into view, as it does whenever the map it shows
+ * opens, a blueprint's tab among them. A brush the window already holds of this tileset's tiles stays: it is the newest
+ * thing chosen for the tileset, picked in this palette or off a map with the eyedropper, which this palette never
+ * remembers. A brush of any other tileset, or none, gives way to the pick the palette remembers for this one, as when
+ * coming back from a map drawn with another tileset.
+ * @param {PaletteBrush} held The brush the window holds.
+ * @param {PaletteBrush} remembered The brush the palette's remembered pick makes.
+ * @param {number} tilesetId The tileset the palette shows.
+ * @returns {PaletteBrush} The brush to hand the window.
+ */
+const brushOnShow = (held: PaletteBrush, remembered: PaletteBrush, tilesetId: number): PaletteBrush =>
+{
+  return held.tilesetId === tilesetId
+    ? held
+    : remembered;
+};
+
+export { brushOnShow, recallPalette };
 export type { PaletteMemories, PaletteMemory };

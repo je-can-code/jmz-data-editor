@@ -2,13 +2,14 @@ import { describe, expect, it } from 'vitest';
 import { MapEditorApiError, type BlueprintWrite } from '../../../../src/mapEditor/core/api/MapEditorApi.ts';
 import { BlueprintCopyCounter } from '../../../../src/mapEditor/core/blueprints/blueprintCopies.ts';
 import { saveBlueprint } from '../../../../src/mapEditor/core/blueprints/blueprintEdits.ts';
+import { blueprintLinkOf } from '../../../../src/mapEditor/core/blueprints/blueprintLink.ts';
 import { holdBlueprintMap } from '../../../../src/mapEditor/core/blueprints/blueprintMaps.ts';
 import { blueprintsKeptGuard } from '../../../../src/mapEditor/core/blueprints/blueprintMoves.ts';
 import { placeBlueprint } from '../../../../src/mapEditor/core/blueprints/blueprintPlacement.ts';
 import { blueprintPropagationCheck } from '../../../../src/mapEditor/core/blueprints/blueprintPropagation.ts';
 import { BLUEPRINTS_DOCUMENT, blueprintIn } from '../../../../src/mapEditor/core/blueprints/blueprints.ts';
 import { blueprintShapeCheck } from '../../../../src/mapEditor/core/blueprints/blueprintShape.ts';
-import { usedCopiesOf } from '../../../../src/mapEditor/core/blueprints/blueprintUses.ts';
+import { BLUEPRINT_USES_DOCUMENT, usedCopiesOf, usesOf } from '../../../../src/mapEditor/core/blueprints/blueprintUses.ts';
 import { BlueprintWriter } from '../../../../src/mapEditor/core/blueprints/blueprintWriter.ts';
 import { copiesLeftWords } from '../../../../src/mapEditor/core/blueprints/copiesLeft.ts';
 import { CopyMaps } from '../../../../src/mapEditor/core/blueprints/copyMaps.ts';
@@ -24,7 +25,10 @@ import type { EditorDocument } from '../../../../src/mapEditor/core/model/Editor
 import type { JsonValue } from '../../../../src/mapEditor/core/model/json.ts';
 import { MapDocument } from '../../../../src/mapEditor/core/model/MapDocument.ts';
 import type { RmmzMap, RmmzMapEvent, RmmzMapInfo } from '../../../../src/mapEditor/core/model/rmmzTypes.ts';
-import { captureEventsStamp, type Stamp } from '../../../../src/mapEditor/core/stamps/stamp.ts';
+import type { MapCell } from '../../../../src/mapEditor/core/renderer/camera.ts';
+import { captureAreaStamp, captureEventsStamp, type Stamp } from '../../../../src/mapEditor/core/stamps/stamp.ts';
+import { INITIAL_PAINT_SETTINGS } from '../../../../src/mapEditor/core/tools/PaintState.ts';
+import { ToolSession } from '../../../../src/mapEditor/core/tools/ToolSession.ts';
 import { HistoryRouter, type HistoryOutcome } from '../../../../src/mapEditor/core/workspace/HistoryRouter.ts';
 import { locateGameProject, readDataFile } from '../../../support/gameProject.ts';
 import { drawsFor, holdBlueprints, holdBlueprintUses } from '../../support/blueprintFixtures.ts';
@@ -41,10 +45,12 @@ import { notesOn, settle } from '../../support/propagationFixtures.ts';
  *
  * So this owes him, in the same steps, on the same map: the undo, from the map or from the blueprint's tab, takes the
  * graphic back on every copy and leaves the speed alone, and the redo puts the graphic back. Where a copy's very graphic
- * was changed by hand since, that copy keeps its own graphic and the rest go back, and he is told which copy, where, and
- * where its change can be undone; a redo does the same for a copy changed since the undo. After every step the disk holds
- * what the window does, but for its unsaved edits, and the blueprints on disk are the blueprints here. A step across two
- * maps that no blueprint made, as a door pair is, still refuses an undo a later edit stands in the way of.
+ * was changed by hand since, that copy keeps its own graphic on the map and the rest go back, and he is told which copy,
+ * and where; a redo does the same for a copy changed since the undo. The disk is judged apart from the map: the hand's
+ * change reaches it only once saved, so until then the copy's file follows the blueprint with the rest, and throwing the
+ * map's edits away shows every copy following it; a change saved by hand stays on disk. After every step the blueprints
+ * on disk are the blueprints here. A step across two maps that no blueprint made, as a door pair is, still refuses an undo
+ * a later edit stands in the way of.
  *
  * It runs against the project JMZ_PROJECT_ROOT names, or the sibling checkout, and skips when neither is there.
  */
@@ -152,6 +158,7 @@ const foothillsWindow = (): FoothillsWindow =>
   maps.start();
   hub.addCommitCheck(blueprintPropagationCheck({ hub, maps, tags: () => [] }));
   hub.setFileFit((key, patch) => maps.fileTakes(key, patch));
+  hub.setFileWay((key, step, direction) => maps.fileWayOf(key, step, direction));
 
   let blueprints: JsonValue | null = null;
   const problems: string[] = [];
@@ -229,12 +236,11 @@ const diskAgrees = (window: FoothillsWindow, unsaved: readonly HistoryStep[]): b
 };
 
 /**
- * Plays his first four steps: the stamp, the blueprint, four placements and a save of the map, then the blueprint opened
- * and the second ghastroom's graphic changed there, in its event's own window, from the seventh character to the fifth.
+ * Plays his first three steps: the stamp, the blueprint, four placements and a save of the map, then the blueprint opened.
  * @param {FoothillsWindow} window The window.
- * @returns {Promise<HistoryStep>} The graphic change, once written.
+ * @returns {Promise<RmmzMap>} Foothills' file as the save left it.
  */
-const changeGraphic = async (window: FoothillsWindow): Promise<HistoryStep> =>
+const placeFour = async (window: FoothillsWindow): Promise<RmmzMap> =>
 {
   const { hub } = window;
   const key = mapDocumentKey(MAP_ID);
@@ -244,11 +250,75 @@ const changeGraphic = async (window: FoothillsWindow): Promise<HistoryStep> =>
   await hub.save(key);
   holdBlueprintMap(hub, BLUEPRINT);
   await settle();
+  return structuredClone(window.disk.get(MAP_ID) as RmmzMap);
+};
 
+/**
+ * Plays his fourth step on the blueprint already placed: the second ghastroom's graphic changed in its event's own window,
+ * from the seventh character to the fifth.
+ * @param {FoothillsWindow} window The window.
+ * @returns {Promise<HistoryStep>} The graphic change, once written.
+ */
+const changePlacedGraphic = async (window: FoothillsWindow): Promise<HistoryStep> =>
+{
+  const { hub } = window;
   const [ { image } ] = eventOf(hub.map(blueprintMapKey(BLUEPRINT)), 21).pages;
   const changed = setPageImage(hub, { mapId: blueprintMapId(BLUEPRINT), eventId: 21 }, 0, { ...image, characterIndex: 5 });
   await settle();
   return (changed.ok ? changed.step : null) as HistoryStep;
+};
+
+/**
+ * Plays his first four steps: the blueprint placed four times and saved, then its second ghastroom's graphic changed.
+ * @param {FoothillsWindow} window The window.
+ * @returns {Promise<HistoryStep>} The graphic change, once written.
+ */
+const changeGraphic = async (window: FoothillsWindow): Promise<HistoryStep> =>
+{
+  await placeFour(window);
+  return changePlacedGraphic(window);
+};
+
+/**
+ * Builds the Select tool on Foothills, every layer carried, as a map view's painting has it.
+ * @param {FoothillsWindow} window The window.
+ * @returns {ToolSession} The tool.
+ */
+const selectToolOn = (window: FoothillsWindow): ToolSession =>
+{
+  const settings = { ...INITIAL_PAINT_SETTINGS, tool: 'select' as const };
+  return new ToolSession({
+    hub: window.hub,
+    map: () => window.hub.map(mapDocumentKey(MAP_ID)),
+    layering: () => ({ mode: 0, marks: { tiles: new Set(), kinds: new Set() } }),
+    settings: () => settings,
+    pickBrush: () => undefined,
+    pickTool: () => undefined,
+    linkRefusal: () => null,
+  });
+};
+
+/**
+ * Drags the left button from one cell to another, as a hand on the map does.
+ * @param {ToolSession} session The tool.
+ * @param {MapCell} from Where the button goes down.
+ * @param {MapCell} to Where it comes up.
+ */
+const dragOn = (session: ToolSession, from: MapCell, to: MapCell): void =>
+{
+  const pointer = (cell: MapCell) => ({ cell, quarter: { x: cell.x, y: cell.y, quarter: 0 as const }, shift: false, copy: false, override: false });
+  session.press(pointer(from));
+  session.move(pointer(to));
+  session.release(pointer(to));
+};
+
+/**
+ * Throws away Foothills' unsaved edits, the map taking its file again, as choosing the version on disk does.
+ * @param {FoothillsWindow} window The window.
+ */
+const discardFoothills = (window: FoothillsWindow): void =>
+{
+  window.hub.reload(mapDocumentKey(MAP_ID), structuredClone(window.disk.get(MAP_ID)) as unknown as JsonValue);
 };
 
 /**
@@ -378,53 +448,133 @@ describe.skipIf(project === null)('undoing a blueprint\'s change on the shipped 
       ]);
   });
 
-  it('leaves a copy whose graphic was changed by hand since as it is when the change is undone, naming it, and redoes the rest', async () =>
+  it('leaves on the map a copy whose graphic was changed by hand since when the change is undone, naming it, its file following the blueprint back', async () =>
   {
-    // Arrange: the copy he sped up given the third character by hand after the blueprint's change.
+    // Arrange: the copy he sped up given the third character by hand after the blueprint's change, and not saved.
     const window = foothillsWindow();
-    await changeGraphic(window);
+    const saved = await placeFour(window);
+    await changePlacedGraphic(window);
     const byHand = changeCopyGraphic(window, SPED_UP);
 
     // Act.
     const undone = await window.router.undo(mapHistoryKey(MAP_ID));
     await settle();
-    const afterUndo = [ ghastroomFaces(window), blueprintFace(window), diskAgrees(window, [ byHand ]) ];
+    const afterUndo = [ ghastroomFaces(window), blueprintFace(window), JSON.stringify(window.disk.get(MAP_ID)) === JSON.stringify(saved) ];
     const redone = await window.router.redo(mapHistoryKey(MAP_ID));
     await settle();
 
-    // Assert: on disk the copy keeps the blueprint's fifth character, since the hand's third is not saved.
-    expect([ undone, afterUndo, redone, ghastroomFaces(window), diskAgrees(window, [ byHand ]), window.problems ])
+    // Assert: on the map the copy keeps the hand's third character; on disk, where the hand's change never went, every
+    // copy goes back with the blueprint, the whole file byte for byte as it was saved, and comes forward again on redo.
+    expect([ undone, afterUndo, redone, ghastroomFaces(window), diskAgrees(window, [ byHand ]), window.hub.isDirty(mapDocumentKey(MAP_ID)), window.problems ])
       .toStrictEqual([
-        { ok: true, message: 'Undone, except on 1 copy changed since: ghastroom (event 67) on Foothills, whose own change can be undone in its event window.' },
-        [ [ [ 7, 7, 3, 7 ], [ 7, 7, 5, 7 ] ], 7, true ],
+        { ok: true, message: 'Undone, except on 1 copy changed since, which keeps your change: ghastroom (event 67) on Foothills.' },
+        [ [ [ 7, 7, 3, 7 ], [ 7, 7, 7, 7 ] ], 7, true ],
         { ok: true },
         [ [ 5, 5, 3, 5 ], [ 5, 5, 5, 5 ] ],
+        true,
         true,
         [],
       ]);
   });
 
-  it('leaves out of a redo a copy whose graphic was changed by hand since the undo, naming it', async () =>
+  it('shows the copy following the blueprint on the map and on disk once the map\'s unsaved edits are thrown away after the undo', async () =>
+  {
+    // Arrange: as above, the change undone with the hand's third character still unsaved on the copy.
+    const window = foothillsWindow();
+    const saved = await placeFour(window);
+    await changePlacedGraphic(window);
+    changeCopyGraphic(window, SPED_UP);
+    await window.router.undo(mapHistoryKey(MAP_ID));
+    await settle();
+
+    // Act.
+    discardFoothills(window);
+
+    // Assert.
+    expect([ ghastroomFaces(window), blueprintFace(window), window.hub.isDirty(mapDocumentKey(MAP_ID)), JSON.stringify(window.disk.get(MAP_ID)) === JSON.stringify(saved) ])
+      .toStrictEqual([ [ [ 7, 7, 7, 7 ], [ 7, 7, 7, 7 ] ], 7, false, true ]);
+  });
+
+  it('keeps on disk a copy\'s graphic changed by hand and saved since, when the change is undone', async () =>
+  {
+    // Arrange: the copy he sped up given the third character by hand, and the map saved.
+    const window = foothillsWindow();
+    await changeGraphic(window);
+    changeCopyGraphic(window, SPED_UP);
+    await window.hub.save(mapDocumentKey(MAP_ID));
+
+    // Act.
+    await window.router.undo(mapHistoryKey(MAP_ID));
+    await settle();
+
+    // Assert: the file holds the hand's third character as the map does, and the map reads saved.
+    expect([ ghastroomFaces(window), diskAgrees(window, []), window.hub.isDirty(mapDocumentKey(MAP_ID)), window.problems ])
+      .toStrictEqual([ [ [ 7, 7, 3, 7 ], [ 7, 7, 3, 7 ] ], true, false, [] ]);
+  });
+
+  it('leaves out of a redo a copy whose graphic was changed by hand since the undo, naming it, its file following the blueprint forward', async () =>
   {
     // Arrange: the change undone whole, then the second placement's ghastroom given the third character by hand.
     const window = foothillsWindow();
     await changeGraphic(window);
     await window.router.undo(blueprintHistoryKey(BLUEPRINT));
     await settle();
-    const byHand = changeCopyGraphic(window, 62);
+    changeCopyGraphic(window, 62);
 
-    // Act.
+    // Act: redone, then the map's unsaved edits thrown away.
     const redone: HistoryOutcome = await window.router.redo(blueprintHistoryKey(BLUEPRINT));
     await settle();
+    const afterRedo = [ ghastroomFaces(window), blueprintFace(window) ];
+    discardFoothills(window);
 
-    // Assert.
-    expect([ redone, ghastroomFaces(window), blueprintFace(window), diskAgrees(window, [ byHand ]), window.problems ])
+    // Assert: the copy keeps the hand's character on the map, and takes the blueprint's fifth on disk, which is what the
+    // map shows once its edits are thrown away.
+    expect([ redone, afterRedo, ghastroomFaces(window), window.problems ])
       .toStrictEqual([
-        { ok: true, message: 'Redone, except on 1 copy changed since: ghastroom (event 62) on Foothills, whose own change can be undone in its event window.' },
-        [ [ 5, 3, 5, 5 ], [ 5, 7, 5, 5 ] ],
-        5,
-        true,
+        { ok: true, message: 'Redone, except on 1 copy changed since, which keeps your change: ghastroom (event 62) on Foothills.' },
+        [ [ [ 5, 3, 5, 5 ], [ 5, 5, 5, 5 ] ], 5 ],
+        [ [ 5, 5, 5, 5 ], [ 5, 5, 5, 5 ] ],
         [],
+      ]);
+  });
+
+  it('moves a placed copy with the Select tool, its battlers, their links and its spot together, and undoes it byte for byte', () =>
+  {
+    // Arrange: the battlers' square, tiles and all, saved as a blueprint and placed at 19, 40, then selected whole.
+    const window = foothillsWindow();
+    const { hub } = window;
+    const key = mapDocumentKey(MAP_ID);
+    const stamp = captureAreaStamp(hub.map(key), { x: 6, y: 24, width: 4, height: 4 }, 'auto', 0, 'stamp-1') as Stamp;
+    saveBlueprint(hub, stamp, 'battlers', drawsFor([ BLUEPRINT ]));
+    const placed = placeBlueprint(hub, MAP_ID, BLUEPRINT, { at: { x: 19, y: 40 }, shaping: 'auto', mode: 0, linkRefusal: null });
+    const copies = placed.ok ? placed.eventIds : [];
+    const before = [ JSON.stringify(hub.map(key).toJson()), JSON.stringify(hub.committedContent(BLUEPRINT_USES_DOCUMENT)) ];
+    const linksBefore = copies.map(id => blueprintLinkOf(eventOf(hub.map(key), id).note));
+    const session = selectToolOn(window);
+    dragOn(session, { x: 19, y: 40 }, { x: 22, y: 43 });
+
+    // Act: dragged twelve tiles right, then undone.
+    dragOn(session, { x: 19, y: 40 }, { x: 31, y: 40 });
+    const moved = copies.map(id => [ eventOf(hub.map(key), id).x, eventOf(hub.map(key), id).y ]);
+    const linksMoved = copies.map(id => blueprintLinkOf(eventOf(hub.map(key), id).note));
+    const spots = usesOf(hub.document(BLUEPRINT_USES_DOCUMENT));
+    hub.undo(mapHistoryKey(MAP_ID));
+
+    // Assert: the battlers went with the tiles, links unchanged, and the spot with them; undo leaves the map and the
+    // record exactly as they were.
+    expect([
+      copies.length,
+      moved,
+      linksMoved,
+      spots,
+      [ JSON.stringify(hub.map(key).toJson()), JSON.stringify(hub.committedContent(BLUEPRINT_USES_DOCUMENT)) ],
+    ])
+      .toStrictEqual([
+        5,
+        [ [ 33, 40 ], [ 34, 41 ], [ 32, 42 ], [ 31, 43 ], [ 31, 40 ] ],
+        linksBefore,
+        [ { blueprintId: BLUEPRINT, x: 31, y: 40, mapId: MAP_ID } ],
+        before,
       ]);
   });
 

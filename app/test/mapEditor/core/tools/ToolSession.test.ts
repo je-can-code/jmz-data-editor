@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { withBlueprintLink } from '../../../../src/mapEditor/core/blueprints/blueprintLink.ts';
 import { BLUEPRINT_USES_DOCUMENT, usesOf, type PlacedSpot } from '../../../../src/mapEditor/core/blueprints/blueprintUses.ts';
 import { createMapEvent } from '../../../../src/mapEditor/core/model/eventModel.ts';
 import type { Stamp } from '../../../../src/mapEditor/core/stamps/stamp.ts';
@@ -466,6 +467,283 @@ describe('ToolSession: placements the select tool drags', () =>
     expect([ bench.hub.history(bench.history).rows.map(row => row.label), placements(bench) ])
       .toEqual([ [ 'Move tiles' ], [ { blueprintId: 'aa22', x: 0, y: 0, mapId: 1 }, { blueprintId: 'bb33', x: 0, y: 2, mapId: 1 } ] ]);
   });
+
+  it('moves a placed copy with its events, their links and its spot together, one undo putting all of it back byte for byte', () =>
+  {
+    // Arrange: the tree's placement with a copy of the tree's event standing on it, linked to it.
+    const link = withBlueprintLink('', { blueprintId: 'aa22', eventId: 1, differences: [] });
+    const bench = sessionOn(benchWith(4, 3, meadow, [ null, { ...createMapEvent(1, 0, 0), name: 'Sentry', note: link } ]), { tool: 'select' });
+    holdBlueprints(bench.hub, { aa22: { name: 'Tree', stamp: carrying(1, [ 3 ]) } });
+    holdBlueprintUses(bench.hub, [ { blueprintId: 'aa22', mapId: 1, x: 0, y: 0 } ]);
+    const before = JSON.stringify(bench.map.toJson());
+    drag(bench.session, [ at(0, 0), at(0, 0) ]);
+
+    // Act: dragged two cells right, then undone.
+    drag(bench.session, [ at(0, 0), at(2, 0) ]);
+    const sentry = bench.map.event(1);
+    const moved = [ sentry?.x, sentry?.y, sentry?.note, stackAt(bench.map, 2, 0)[3], placements(bench) ];
+    bench.hub.undo(bench.history);
+
+    // Assert.
+    expect([ moved, JSON.stringify(bench.map.toJson()) === before, placements(bench) ])
+      .toEqual([
+        [ 2, 0, link, TREE, [ { blueprintId: 'aa22', x: 2, y: 0, mapId: 1 } ] ],
+        true,
+        [ { blueprintId: 'aa22', x: 0, y: 0, mapId: 1 } ],
+      ]);
+  });
+});
+
+/*
+ * An area the select tool lifts with every layer carries the events standing on it along with its tiles, in one step:
+ * moved, they keep their ids; copied, each goes down as a new event. Lifted from the chosen layer alone, it carries none,
+ * as copying it into a stamp does. Events that cannot go there, landing on another event or, moved, off the map, refuse
+ * the whole drop, which changes nothing, and the author hears why; while the area is dragged each shows a ghost where it
+ * would land, and the words beside the area say when a drop there would be refused.
+ *
+ * On the meadow a sentry (event 1) stands on the tree's cell, a lamp (event 2) at 2, 0, and a well (event 3) at 3, 2.
+ *
+ * A copy carrying copies of blueprints, an event linked to one or a placement of one held whole, is refused on a map that
+ * may hold none, as placing a blueprint or duplicating a linked event there is, the words beside the area saying so as it
+ * is dragged; a copy carrying neither, and any move, which adds no copy, go down there as anywhere.
+ */
+describe('ToolSession: events the select tool drags', () =>
+{
+  /**
+   * Why the map in these tests may hold no copy of a blueprint, when it may not.
+   */
+  const REFUSAL = 'this map holds J-ABS\'s action templates, which the game reads, so blueprints stay off it';
+
+  /**
+   * Builds a session with the select tool over the meadow and its three events, hearing what a drop tells the author.
+   * @param {Partial<PaintSettings>} settings The settings to change from the select tool's.
+   * @param {{ refusal?: string | null, sentryNote?: string }} gate Why the map may hold no copy of a blueprint, if it may
+   * not, and the sentry's note.
+   * @returns {{ bench: SessionBench, told: [ string, boolean ][] }} The session, and what it told.
+   */
+  const selecting = (settings: Partial<PaintSettings> = {}, gate: { readonly refusal?: string | null; readonly sentryNote?: string } = {}) =>
+  {
+    const { refusal = null, sentryNote = '' } = gate;
+    const events = [ null, { ...createMapEvent(1, 0, 0), name: 'Sentry', note: sentryNote }, { ...createMapEvent(2, 2, 0), name: 'Lamp' }, { ...createMapEvent(3, 3, 2), name: 'Well' } ];
+    const bench = benchWith(4, 3, meadow, events);
+    const state = new PaintState({ ...INITIAL_PAINT_SETTINGS, tool: 'select', ...settings });
+    const told: [ string, boolean ][] = [];
+    const session = new ToolSession({
+      hub: bench.hub,
+      map: () => bench.map,
+      layering: () => layeringWith(),
+      settings: () => state.settings,
+      pickBrush: brush => state.setBrush(brush),
+      pickTool: tool => state.setTool(tool),
+      told: (message, refused) => told.push([ message, refused ]),
+      linkRefusal: () => refusal,
+    });
+    return { bench: { ...bench, session, state }, told };
+  };
+
+  /**
+   * Reads where an event stands, or null once the map holds no such event.
+   * @param {SessionBench} bench The bench.
+   * @param {number} eventId The event.
+   * @returns {[ number, number ] | null} Its cell.
+   */
+  const standing = (bench: SessionBench, eventId: number): [ number, number ] | null =>
+  {
+    const event = bench.map.event(eventId);
+    return event === null ? null : [ event.x, event.y ];
+  };
+
+  it('moves the events standing on the area with its tiles, keeping their ids, as one step undone and redone', () =>
+  {
+    // Arrange: the tree's cell selected, the sentry on it.
+    const { bench } = selecting();
+    drag(bench.session, [ at(0, 0), at(0, 0) ]);
+
+    // Act: dragged one right and one down.
+    const { before, after, undone, redone, labels } = roundTrip(bench, session => drag(session, [ at(0, 0), at(1, 1) ]));
+    const afterRedo = standing(bench, 1);
+    bench.hub.undo(bench.history);
+    const afterUndo = standing(bench, 1);
+
+    // Assert: the lamp and the well, never on the area, stay where they stand.
+    expect([ labels, undone, redone, after.join() === before.join(), afterRedo, afterUndo, standing(bench, 2), standing(bench, 3) ])
+      .toEqual([ [ 'Move tiles and 1 event' ], before, after, false, [ 1, 1 ], [ 0, 0 ], [ 2, 0 ], [ 3, 2 ] ]);
+  });
+
+  it('copies the events standing on the area as new ones, the originals staying, as one step', () =>
+  {
+    // Arrange.
+    const { bench } = selecting();
+    drag(bench.session, [ at(0, 0), at(0, 0) ]);
+
+    // Act: dragged a row down with Ctrl held.
+    drag(bench.session, [ at(0, 0, { copy: true }), at(0, 1, { copy: true }) ]);
+
+    // Assert: the copy takes the next free id, 4.
+    expect([ bench.hub.history(bench.history).rows.map(row => row.label), standing(bench, 1), standing(bench, 4), bench.map.event(4)?.name, stackAt(bench.map, 0, 1)[3] ])
+      .toEqual([ [ 'Copy tiles and 1 event' ], [ 0, 0 ], [ 0, 1 ], 'Sentry', TREE ]);
+  });
+
+  it('carries no events when lifted from the chosen layer alone', () =>
+  {
+    // Arrange: layer 4 alone, where the tree stands.
+    const { bench } = selecting({ strip: 3 });
+    drag(bench.session, [ at(0, 0), at(0, 0) ]);
+
+    // Act.
+    drag(bench.session, [ at(0, 0), at(1, 1) ]);
+
+    // Assert: the tree moved; the sentry did not.
+    expect([ bench.hub.history(bench.history).rows.map(row => row.label), stackAt(bench.map, 1, 1)[3], standing(bench, 1) ])
+      .toEqual([ [ 'Move tiles' ], TREE, [ 0, 0 ] ]);
+  });
+
+  it('refuses a move landing an event on another, changing nothing, and says why', () =>
+  {
+    // Arrange.
+    const { bench, told } = selecting();
+    drag(bench.session, [ at(0, 0), at(0, 0) ]);
+    const before = cellsOf(bench.map);
+
+    // Act: dragged two right, the sentry onto the lamp.
+    drag(bench.session, [ at(0, 0), at(2, 0) ]);
+
+    // Assert.
+    expect([ told, cellsOf(bench.map), bench.hub.history(bench.history).rows, standing(bench, 1), bench.session.selection ])
+      .toEqual([ [ [ 'Another event is in the way.', true ] ], before, [], [ 0, 0 ], { x: 0, y: 0, width: 1, height: 1 } ]);
+  });
+
+  it('refuses a move taking an event off the map, saying so as it is dragged and at the drop', () =>
+  {
+    // Arrange: the tree's cell and the one beside it selected, grabbed by the right one.
+    const { bench, told } = selecting();
+    drag(bench.session, [ at(0, 0), at(1, 0) ]);
+
+    // Act: dragged one left, the sentry past the edge.
+    bench.session.press(at(1, 0));
+    bench.session.move(at(0, 0));
+    const overlay = bench.session.overlay();
+    bench.session.release(at(0, 0));
+
+    // Assert.
+    expect([ overlay.hoverLabel, overlay.ghostEvents, told, standing(bench, 1), bench.hub.history(bench.history).rows ])
+      .toEqual([ 'An event would leave the map', [], [ [ 'The map ends there.', true ] ], [ 0, 0 ], [] ]);
+  });
+
+  it('leaves out of a copy an event landing past the map\'s edge, and says so', () =>
+  {
+    // Arrange: as above.
+    const { bench, told } = selecting();
+    drag(bench.session, [ at(0, 0), at(1, 0) ]);
+
+    // Act: copied one left.
+    drag(bench.session, [ at(1, 0, { copy: true }), at(0, 0, { copy: true }) ]);
+
+    // Assert: the tiles copied, the sentry's copy left out.
+    expect([ bench.hub.history(bench.history).rows.map(row => row.label), told, bench.map.event(4) ])
+      .toEqual([ [ 'Copy tiles' ], [ [ 'One of the selection\'s events fell past the map\'s edge and was left out.', false ] ], null ]);
+  });
+
+  it('shows the events it carries as ghosts where they would land, and says when one would land on another', () =>
+  {
+    // Arrange.
+    const { bench } = selecting();
+    drag(bench.session, [ at(0, 0), at(0, 0) ]);
+
+    // Act: dragged one right and one down, then on to the lamp.
+    bench.session.press(at(0, 0));
+    bench.session.move(at(1, 1));
+    const clear = bench.session.overlay();
+    bench.session.move(at(2, 0));
+    const blocked = bench.session.overlay();
+
+    // Assert.
+    expect([ clear.hoverLabel, clear.ghostEvents.map(({ x, y, eventId }) => [ x, y, eventId ]), clear.blockedCells, blocked.hoverLabel, blocked.blockedCells ])
+      .toEqual([ 'Move', [ [ 1, 1, 1 ] ], [], 'Another event is in the way', [ { x: 2, y: 0 } ] ]);
+  });
+
+  it('refuses a copy carrying a linked event onto a map that may hold none, saying so as it is dragged and at the drop', () =>
+  {
+    // Arrange: the sentry linked to the tree's blueprint, its cell selected, on a map that refuses links.
+    const link = withBlueprintLink('', { blueprintId: 'aa22', eventId: 1, differences: [] });
+    const { bench, told } = selecting({}, { refusal: REFUSAL, sentryNote: link });
+    drag(bench.session, [ at(0, 0), at(0, 0) ]);
+    const before = cellsOf(bench.map);
+
+    // Act: dragged a row down with Ctrl held.
+    bench.session.press(at(0, 0, { copy: true }));
+    bench.session.move(at(0, 1, { copy: true }));
+    const overlay = bench.session.overlay();
+    bench.session.release(at(0, 1, { copy: true }));
+
+    // Assert: nothing changed, and no copy of the sentry was made.
+    expect([ overlay.hoverLabel, told, cellsOf(bench.map), bench.hub.history(bench.history).rows, bench.map.event(4) ])
+      .toEqual([
+        'Blueprints can\'t go here',
+        [ [ 'The selection holds copies of blueprints, which can\'t go here: this map holds J-ABS\'s action templates, which the game reads, so blueprints stay off it.', true ] ],
+        before,
+        [],
+        null,
+      ]);
+  });
+
+  it('refuses a copy recording again a placement it holds whole on a map that may hold none', () =>
+  {
+    // Arrange: the tree's blueprint placed on its cell, which is selected, on a map that refuses links; the sentry on it
+    // is a plain event.
+    const { bench, told } = selecting({}, { refusal: REFUSAL });
+    holdBlueprints(bench.hub, { aa22: { name: 'Tree', stamp: stampOf({ width: 1, tiles: { layers: [ 3 ], values: [ 0 ], calledFor: [ -1 ] }, events: [] }) } });
+    holdBlueprintUses(bench.hub, [ { blueprintId: 'aa22', mapId: 1, x: 0, y: 0 } ]);
+    drag(bench.session, [ at(0, 0), at(0, 0) ]);
+    const before = cellsOf(bench.map);
+
+    // Act: dragged a row down with Ctrl held.
+    drag(bench.session, [ at(0, 0, { copy: true }), at(0, 1, { copy: true }) ]);
+
+    // Assert: the placement is recorded once, where it was, and nothing else changed.
+    expect([ told, cellsOf(bench.map), bench.hub.history(bench.history).rows, usesOf(bench.hub.document(BLUEPRINT_USES_DOCUMENT)) ])
+      .toEqual([
+        [ [ 'The selection holds copies of blueprints, which can\'t go here: this map holds J-ABS\'s action templates, which the game reads, so blueprints stay off it.', true ] ],
+        before,
+        [],
+        [ { blueprintId: 'aa22', mapId: 1, x: 0, y: 0 } ],
+      ]);
+  });
+
+  it('copies plain events and tiles on a map that may hold no copy of a blueprint', () =>
+  {
+    // Arrange: the sentry plain, its cell selected, on a map that refuses links.
+    const { bench, told } = selecting({}, { refusal: REFUSAL });
+    drag(bench.session, [ at(0, 0), at(0, 0) ]);
+
+    // Act: dragged a row down with Ctrl held.
+    bench.session.press(at(0, 0, { copy: true }));
+    bench.session.move(at(0, 1, { copy: true }));
+    const overlay = bench.session.overlay();
+    bench.session.release(at(0, 1, { copy: true }));
+
+    // Assert: the copy takes the next free id, 4.
+    expect([ overlay.hoverLabel, told, bench.hub.history(bench.history).rows.map(row => row.label), standing(bench, 4), stackAt(bench.map, 0, 1)[3] ])
+      .toEqual([ 'Copy', [], [ 'Copy tiles and 1 event' ], [ 0, 1 ], TREE ]);
+  });
+
+  it('moves a linked event on a map that may hold no copy of a blueprint, since a move makes no new copy', () =>
+  {
+    // Arrange: the sentry linked, its cell selected, on a map that refuses links.
+    const link = withBlueprintLink('', { blueprintId: 'aa22', eventId: 1, differences: [] });
+    const { bench, told } = selecting({}, { refusal: REFUSAL, sentryNote: link });
+    drag(bench.session, [ at(0, 0), at(0, 0) ]);
+
+    // Act: dragged a row down.
+    bench.session.press(at(0, 0));
+    bench.session.move(at(0, 1));
+    const overlay = bench.session.overlay();
+    bench.session.release(at(0, 1));
+
+    // Assert: the sentry went with the tree, keeping its link.
+    expect([ overlay.hoverLabel, told, bench.hub.history(bench.history).rows.map(row => row.label), standing(bench, 1), bench.map.event(1)?.note ])
+      .toEqual([ 'Move', [], [ 'Move tiles and 1 event' ], [ 0, 1 ], link ]);
+  });
 });
 
 describe('ToolSession: strokes that do not end with a release', () =>
@@ -812,6 +1090,24 @@ describe('ToolSession: the stamp', () =>
         'k18',
         [ 'Place blueprint "Dirt patch"' ],
       ]);
+  });
+
+  it('names a blueprint in hand as a blueprint beside its footprint, where a plain stamp is named a stamp', () =>
+  {
+    // Arrange: the same dirt in hand, as a blueprint and as a plain stamp.
+    const blueprint = stamping(dirtWithEvent(), { blueprint: { id: 'k3x9q2mf', name: 'Dirt patch' } }).bench;
+    const plain = stamping(dirtWithEvent()).bench;
+
+    // Act.
+    const labels = [ blueprint, plain ].map(bench =>
+    {
+      bench.session.move(at(0, 1));
+      return bench.session.overlay().hoverLabel;
+    });
+
+    // Assert.
+    expect(labels)
+      .toStrictEqual([ 'Blueprint', 'Stamp' ]);
   });
 
   it('says a map may hold no blueprint before the click, and hands over the refusal at it, changing nothing', () =>

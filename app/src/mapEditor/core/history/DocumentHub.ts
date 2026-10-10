@@ -18,14 +18,18 @@ import {
 } from './HistoryStep.ts';
 import { patchInterference, type Interference } from './patchInterference.ts';
 import {
+  fileKeepsLeft,
   filePart,
+  fileShareOf,
   heldPart,
   leftPartsOf,
+  likeliestWayOf,
   movesWhole,
   movingStep,
   type EditOnDocument,
   type EntryPart,
   type FileFit,
+  type FileWay,
   type LeftPart,
 } from './stepParts.ts';
 import { Transaction, type TransactionHost } from './Transaction.ts';
@@ -95,7 +99,9 @@ type HistoryFailure =
 /**
  * The answer to an undo or redo: the step it acted on, or why it could not. A step whose patches on documents following
  * its change (see HistoryStep's followers) were changed since moves without those parts: {@code step} is then the part
- * that moves, by the step's own id, and {@code left} names every part left as it stands, each with the edit in its way.
+ * that moves, by the step's own id, saying what the file of each document held here that left parts takes, judged apart
+ * from the document (see stepParts' fileShareOf), and {@code left} names every part left as it stands, each with the edit
+ * in its way.
  */
 type HistoryCheck = { readonly ok: true; readonly step: HistoryStep; readonly left?: readonly LeftPart[] } | HistoryFailure;
 
@@ -496,8 +502,11 @@ const carriedStepFinder = (snapshot: DocumentSnapshot): (id: string) => HistoryS
  * rest are left as they stand: a copy changed by hand since the change keeps that change, as a cell painted over by hand
  * keeps its paint when the change is made. The step then moves as the part that moved, by its own id, in every history it
  * belongs to; after an undo the part left stays applied as a forgotten step of its own, in the step's place, so every
- * later check still sees its patches, and after a redo it is gone, never having gone back. Its other documents, the
- * blueprint's own, keep the rule whole: an edit in the way there refuses the step.
+ * later check still sees its patches, and after a redo it is gone, never having gone back. The file of a document that
+ * left parts is judged apart from the document: it holds the edit in a part's way only once that edit is saved, so until
+ * then the part goes back, or comes back, in the file with the rest of the step, and the file goes on following the step
+ * whatever becomes of the document's unsaved edits. Its other documents, the blueprint's own, keep the rule whole: an
+ * edit in the way there refuses the step.
  *
  * Every edit made in this window passes the window's commit checks before it becomes a step (see {@link addCommitCheck}):
  * one they refuse is put back whole, recorded in no history, and announced with why. That is how a document with rules
@@ -574,10 +583,16 @@ class DocumentHub
   #checks: CommitCheck[] = [];
 
   /**
-   * What tells how much of a patch the file of a document no window here holds would take now, or null for no way to
-   * tell (see {@link setFileFit}).
+   * What tells how much of a patch the file of a document would take now, or null for no way to tell (see
+   * {@link setFileFit}).
    */
   #fileFit: FileFit | null = null;
+
+  /**
+   * What tells which patches the file of a document held here took a step by, or null for no way to tell (see
+   * {@link setFileWay}).
+   */
+  #fileWay: FileWay | null = null;
 
   #transaction: Transaction | null = null;
 
@@ -1047,15 +1062,29 @@ class DocumentHub
   }
 
   /**
-   * Gives the hub a way to tell how much of a patch the file of a document no window here holds would take now: the
-   * window's kept copies of the maps a blueprint's change wrote through. An undo or a redo of a step following its change
-   * onto such a document (see HistoryStep's followers) then moves its patches there only as far as the file takes them,
-   * leaving what was changed on disk since. Without one, they all move, and whoever writes them checks the file.
+   * Gives the hub a way to tell how much of a patch the file of a document would take now: the window's kept copies of the
+   * maps a blueprint's change reaches, as their files hold them. An undo or a redo of a step following its change onto a
+   * document no window here holds (see HistoryStep's followers) then moves its patches there only as far as the file takes
+   * them, leaving what was changed on disk since; and one leaving parts of the step in a document held here moves them in
+   * that document's file as far as the file takes them, the file judged apart from the document (see stepParts'
+   * fileShareOf). Without one, they all move, and whoever writes them checks the file.
    * @param {FileFit | null} fit The way to tell, or null for none.
    */
   setFileFit(fit: FileFit | null): void
   {
     this.#fileFit = fit;
+  }
+
+  /**
+   * Gives the hub a way to tell which patches the file of a document held here took a step following its change by: the
+   * file version the step recorded for it (see HistoryStep's fileVersions), or the document's own patches, which its file
+   * holds once the document was saved with the step in it. A move leaving parts of the step in that document judges its
+   * file by those patches. Without one, or when it cannot tell, the file version is taken where the step recorded one.
+   * @param {FileWay | null} way The way to tell, or null for none.
+   */
+  setFileWay(way: FileWay | null): void
+  {
+    this.#fileWay = way;
   }
 
   /**
@@ -1364,7 +1393,8 @@ class DocumentHub
   /**
    * Plans a move of a step this window holds every document of, but for those it writes through: the step whole, when
    * nothing is in its way; or, for a step whose patches follow its change onto some documents (see HistoryStep's
-   * followers), the part of it that moves, by its own id, and every part left, when something is in the way there. An edit
+   * followers), the part of it that moves, by its own id, and every part left, when something is in the way there. The
+   * file of a document held here that left parts is judged apart from the document (see {@link #fileSharesOf}). An edit
    * in its way on any of its other documents refuses it, as it would any step, and so does a document not recording it.
    * @param {HistoryStep} step The step.
    * @param {'forward' | 'backward'} direction Redo or undo.
@@ -1384,7 +1414,37 @@ class DocumentHub
     const left = leftPartsOf(parts);
     return left.length === 0
       ? checked
-      : { ok: true, step: movingStep(step, parts), left };
+      : { ok: true, step: movingStep(step, parts, this.#fileSharesOf(step, parts, direction)), left };
+  }
+
+  /**
+   * Works out what the file of each document held here takes for a move that leaves parts of the step in that document:
+   * the patches the file took the step by (see {@link setFileWay}), judged against the file alone, so a part the document
+   * keeps under an edit not yet on disk still goes back, or comes back, in the file with the rest of the step, and one under
+   * an edit the file holds stays there too (see stepParts' fileShareOf).
+   * @param {HistoryStep} step The step whole.
+   * @param {readonly EntryPart[]} parts What the move comes to on each of its patches.
+   * @param {'forward' | 'backward'} direction Redo or undo.
+   * @returns {Map<DocumentKey, Patch[]>} What each such document's file takes, as the step made it, by document, in the
+   * order the documents come in the step.
+   */
+  #fileSharesOf(step: HistoryStep, parts: readonly EntryPart[], direction: 'forward' | 'backward'): Map<DocumentKey, Patch[]>
+  {
+    const shares = new Map<DocumentKey, Patch[]>();
+    parts.filter(part => part.left !== null && this.has(part.document)).forEach(({ document }) =>
+    {
+      if (shares.has(document))
+      {
+        return;
+      }
+
+      // what a file took the step by only the window keeping that file can tell; the likeliest otherwise.
+      const left = parts.flatMap(part => (part.document === document && part.left !== null ? [ part.left ] : []));
+      const way = this.#fileWay?.(document, step, direction) ?? likeliestWayOf(step, document);
+      shares.set(document, fileShareOf(document, way, left, direction, this.#fileFit));
+    });
+
+    return shares;
   }
 
   /**
@@ -1460,8 +1520,10 @@ class DocumentHub
    * Puts the part of a step that moves in the whole step's place, once its patches have moved, and keeps what became of
    * the part left (see {@link HistoryCheck}): every history and the registry hold the moving part by the step's own id;
    * after an undo the part left stays applied, as a forgotten step, where the whole step was, and a file known to hold the
-   * whole step on a document it no longer moves on holds the part left instead; and every earlier move of the whole step
-   * reads as the moving part and the part left moving together, so a later redo of any step is checked against both.
+   * whole step on a document it no longer moves on holds the part left instead, when it keeps that part as the document
+   * does (see stepParts' fileKeepsLeft): a file giving the part back, its edit in the way not on disk, holds neither, which
+   * whoever writes the move settles once it lands; and every earlier move of the whole step reads as the moving part and
+   * the part left moving together, so a later redo of any step is checked against both.
    * @param {HistoryStep} whole The step whole.
    * @param {HistoryStep} moving The part that moves.
    * @param {HistoryStep | null} left The part left on documents held here, or null for none.
@@ -1488,7 +1550,7 @@ class DocumentHub
         }
 
         const saved = this.#saved.get(key) as string[];
-        if (movesHere === false && leftHere)
+        if (movesHere === false && leftHere && fileKeepsLeft(moving, left as HistoryStep, key))
         {
           this.#saved.set(key, saved.map(id => (id === whole.id ? (left as HistoryStep).id : id)));
         }

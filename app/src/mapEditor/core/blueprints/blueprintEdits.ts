@@ -1,6 +1,7 @@
 import type { DocumentHub } from '../history/DocumentHub.ts';
 import { blueprintHistoryKey } from '../history/historyKeys.ts';
 import type { HistoryStep } from '../history/HistoryStep.ts';
+import { isJsonObject, type JsonValue } from '../model/json.ts';
 import type { Stamp } from '../stamps/stamp.ts';
 import type { BlueprintCopyCount } from './blueprintCopies.ts';
 import { withoutBlueprintLink } from './blueprintLink.ts';
@@ -142,15 +143,15 @@ const renameBlueprint = (hub: DocumentHub, blueprintId: string, name: string): B
 };
 
 /**
- * Words where a blueprint's copies stand, for a refused delete: each map by name with how many stand there, by map id,
- * the first few named and the rest summed up.
- * @param {BlueprintCopyCount} copies The blueprint's copies.
+ * Words where a blueprint is used, for a refused delete: each map by name, by map id, the first few named and the rest
+ * summed up.
+ * @param {BlueprintCopyCount} copies Where the blueprint is used.
  * @param {(mapId: number) => string} mapName Names a map as the author knows it.
- * @returns {string} The words, such as "Forest Path (3) and Goblin Den (2)".
+ * @returns {string} The words, such as "Forest Path and Goblin Den".
  */
 const mapsPhrase = (copies: BlueprintCopyCount, mapName: (mapId: number) => string): string =>
 {
-  const named = copies.maps.slice(0, MAPS_NAMED).map(({ mapId, copies: count }) => `${mapName(mapId)} (${count})`);
+  const named = copies.maps.slice(0, MAPS_NAMED).map(({ mapId }) => mapName(mapId));
   const others = copies.maps.length - named.length;
   if (others > 0)
   {
@@ -163,20 +164,42 @@ const mapsPhrase = (copies: BlueprintCopyCount, mapName: (mapId: number) => stri
 };
 
 /**
- * Says why a blueprint must not go while copies may name it, in the words a refused delete uses: how many copies there
- * are and on which maps, or that they are still being counted, or cannot be, since it could have copies nobody has
- * counted yet. Whatever would take it away is refused in these words: a delete, the undo of its save, the redo of its
- * delete.
+ * Words how a blueprint is still used, never calling its placements and its linked events by one name: how many times its
+ * tiles are placed, and how many events are linked to it, whichever there are.
+ * @param {BlueprintCopyCount} copies Where the blueprint is used, with how many of those uses are placements.
+ * @returns {string} The words, such as "is still placed 3 times and has 15 linked events", or "still has 1 linked event".
+ */
+const usesPhrase = (copies: BlueprintCopyCount): string =>
+{
+  const placements = copies.placements ?? 0;
+  const events = copies.total - placements;
+  const eventWords = events === 1 ? '1 linked event' : `${events} linked events`;
+  if (placements === 0)
+  {
+    return `still has ${eventWords}`;
+  }
+
+  const placed = `is still placed ${placements === 1 ? 'once' : `${placements} times`}`;
+  return events === 0
+    ? placed
+    : `${placed} and has ${eventWords}`;
+};
+
+/**
+ * Says why a blueprint must not go while it is still used, in the words a refused delete uses: how many times it is
+ * placed and how many events are linked to it, and on which maps, or that its linked events are still being counted, or
+ * cannot be, since it could have some nobody has counted yet. Whatever would take it away is refused in these words: a
+ * delete, the undo of its save, the redo of its delete.
  * @param {string} name The blueprint's name.
- * @param {BlueprintCopyCount | null} copies Its copies across the project, or null while they cannot be told.
+ * @param {BlueprintCopyCount | null} copies Where it is used across the project, or null while that cannot be told.
  * @param {(mapId: number) => string} mapName Names a map as the author knows it.
- * @returns {string | null} Why, with no full stop of its own, or null when nothing is a copy of it.
+ * @returns {string | null} Why, with no full stop of its own, or null when nothing uses it.
  */
 const copiesKeepIt = (name: string, copies: BlueprintCopyCount | null, mapName: (mapId: number) => string): string | null =>
 {
   if (copies === null)
   {
-    return `"${name}" can't be deleted until its copies have been counted`;
+    return `"${name}" can't be deleted until its linked events have been counted`;
   }
 
   if (copies.total === 0)
@@ -184,8 +207,7 @@ const copiesKeepIt = (name: string, copies: BlueprintCopyCount | null, mapName: 
     return null;
   }
 
-  const count = copies.total === 1 ? '1 copy' : `${copies.total} copies`;
-  return `"${name}" still has ${count}, on ${mapsPhrase(copies, mapName)}, so it can't be deleted`;
+  return `"${name}" ${usesPhrase(copies)}, on ${mapsPhrase(copies, mapName)}, so it can't be deleted`;
 };
 
 /**
@@ -225,5 +247,51 @@ const deleteBlueprint = (
   return { ok: true, step, blueprint: null };
 };
 
-export { BLUEPRINT_GONE, copiesKeepIt, deleteBlueprint, renameBlueprint, saveBlueprint };
+/**
+ * Reads the name a value written to a blueprint's entry carries: the entry's name, or the name itself.
+ * @param {JsonValue | undefined} value The value: a whole entry, a name, or nothing.
+ * @returns {string | null} The name, or null when it carries none.
+ */
+const nameCarried = (value: JsonValue | undefined): string | null =>
+{
+  if (typeof value === 'string')
+  {
+    return value;
+  }
+
+  const name = isJsonObject(value) ? value['name'] : undefined;
+  return typeof name === 'string' ? name : null;
+};
+
+/**
+ * Finds the name a blueprint last had, from the steps of its own history, for a blueprint the blueprints no longer hold:
+ * one deleted, or its save undone, whose history still lists its steps by the name it had. A step saving it, renaming it
+ * or deleting it writes its name, which reads as the name after the step, or, for a delete, the name it went with.
+ * @param {readonly HistoryStep[]} steps The history's steps, the one holding its latest name first: those done, newest
+ * first, then those undone, the next to redo first.
+ * @param {string} blueprintId The blueprint.
+ * @returns {string | null} The name, or null when no step names it.
+ */
+const nameInSteps = (steps: readonly HistoryStep[], blueprintId: string): string | null =>
+{
+  for (const step of steps)
+  {
+    const patches = step.entries.filter(entry => entry.document === BLUEPRINTS_DOCUMENT).map(entry => entry.patch).reverse();
+    for (const patch of patches)
+    {
+      // a save or a delete writes the whole entry, and a rename its name alone.
+      const [ data, blueprints, id, field ] = patch.kind === 'set' ? patch.path : [];
+      const reaches = data === 'data' && blueprints === 'blueprints' && id === blueprintId && (field === undefined || field === 'name');
+      const name = reaches && patch.kind === 'set' ? nameCarried(patch.after) ?? nameCarried(patch.before) : null;
+      if (name !== null)
+      {
+        return name;
+      }
+    }
+  }
+
+  return null;
+};
+
+export { BLUEPRINT_GONE, copiesKeepIt, deleteBlueprint, nameInSteps, renameBlueprint, saveBlueprint };
 export type { BlueprintOutcome };

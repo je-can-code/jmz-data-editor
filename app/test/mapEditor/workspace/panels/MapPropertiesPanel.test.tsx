@@ -273,7 +273,7 @@ describe('MapPropertiesPanel', () =>
         screen.queryByLabelText('Display name'),
       ])
         .toStrictEqual([
-          'Lantern rowA blueprint drawn with Cave.TilesLayer 4 alone, 2 by 1.Size2 by 1A blueprint can\'t be resized: growing it would paint over cells its copies never owned.Events1 eventIts events can be moved and changed, but none added or removed: removing one would delete events on every map.',
+          'Lantern rowA blueprint drawn with Cave.TilesLayer 4 alone, 2 by 1.Size2 by 1A blueprint can\'t be resized: growing it would paint over cells its placements never covered.Events1 eventIts events can be moved and changed, but none added or removed: removing one would delete events on every map.',
           null,
           null,
         ]);

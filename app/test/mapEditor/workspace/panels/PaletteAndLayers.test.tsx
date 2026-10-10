@@ -11,6 +11,7 @@ import { MAP_INFOS_KEY, TILESETS_KEY, type DocumentKey } from '../../../../src/m
 import type { JsonValue } from '../../../../src/mapEditor/core/model/json.ts';
 import { cellInspector } from '../../../../src/mapEditor/core/palette/cellInspector.ts';
 import { TILESET_MARKS_DOCUMENT } from '../../../../src/mapEditor/core/palette/tilesetMarkEdits.ts';
+import type { Brush } from '../../../../src/mapEditor/core/tools/brush.ts';
 import { WindowPaints } from '../../../../src/mapEditor/core/tools/WindowPaint.ts';
 import type { MapEditorServices } from '../../../../src/mapEditor/services/MapEditorServices.ts';
 import { LayersPanel } from '../../../../src/mapEditor/workspace/panels/layers/LayersPanel.tsx';
@@ -34,9 +35,11 @@ describe('the palette and the layers panel', () =>
 {
   /**
    * A workspace holding the cave (map 5, the 3 by 2 fixture on tileset 4), with tileset 4 naming A1, A2 and B, and
-   * no marks saved, the page's own window painting with a linked paint of its own.
-   * @returns {{ hub: DocumentHub, controller: WorkspaceController, paint: WindowPaint }} The hub, the workspace, and the
-   * page's paint.
+   * no marks saved, the page's own window painting with a linked paint of its own. Map 6, on tileset 4 too, opens from
+   * its file once the workspace's openMap6 lets it, so whatever waits for it can be seen waiting, and map6Opened settles
+   * once it is held.
+   * @returns {{ hub: DocumentHub, controller: WorkspaceController, paint: WindowPaint, openMap6: () => void, map6Opened:
+   * Promise<void> }} The hub, the workspace, the page's paint, what lets map 6 open, and what settles once it has.
    */
   const buildWorkspace = () =>
   {
@@ -47,8 +50,31 @@ describe('the palette and the layers panel', () =>
       [MAP_INFOS_KEY]: buildTreeRows(),
       [TILESETS_KEY]: [ null, null, null, null, tileset ],
       [TILESET_MARKS_DOCUMENT]: { schemaVersion: 1, data: { tilesets: {} } },
+      'map:6': buildMapJson(),
     };
-    const openDocument = async (key: DocumentKey) => hub.adopt(key, contents[key] as JsonValue);
+    let openMap6 = (): void => undefined;
+    let opened = (): void => undefined;
+    const map6Opens = new Promise<void>(resolve =>
+    {
+      openMap6 = resolve;
+    });
+    const map6Opened = new Promise<void>(resolve =>
+    {
+      opened = resolve;
+    });
+    const openDocument = async (key: DocumentKey) =>
+    {
+      // map 6 waits for the test to let it open, and says when it has.
+      if (key !== 'map:6')
+      {
+        return hub.adopt(key, contents[key] as JsonValue);
+      }
+
+      await map6Opens;
+      const document = hub.adopt(key, contents[key] as JsonValue);
+      opened();
+      return document;
+    };
 
     // a server with no pictures and marks already saved, so nothing is seeded.
     const api = {
@@ -59,7 +85,7 @@ describe('the palette and the layers panel', () =>
     const paints = new WindowPaints(window);
     unlinks.push(paints.main.link());
     const controller = new WorkspaceController({ hub, api, openDocument, paints } as unknown as MapEditorServices);
-    return { hub, controller, paint: paints.main };
+    return { hub, controller, paint: paints.main, openMap6: () => openMap6(), map6Opened };
   };
 
   /**
@@ -181,5 +207,107 @@ describe('the palette and the layers panel', () =>
     // Assert: the shadow brush is the window's, and the pen is in hand to draw with it.
     expect([ before, paint.painting.settings.tool, paint.selection.brush.kind, paint.painting.settings.brush?.kind ])
       .toStrictEqual([ 'events', 'pen', 'shadows', 'shadows' ]);
+  });
+
+  /**
+   * A brush of tile 2 on a tileset, as the eyedropper hands the window one picked off a map drawn with it.
+   * @param {number} tilesetId The tileset.
+   * @returns {Brush} The brush.
+   */
+  const eyedropped = (tilesetId: number): Brush => ({ kind: 'tiles', tilesetId, width: 1, height: 1, cells: [ 2 ] });
+
+  /**
+   * Shows the cave's palette, then puts a brush in the window's hand as the eyedropper does.
+   * @param {Brush} brush The brush.
+   * @returns {Promise<ReturnType<typeof buildWorkspace>>} The workspace.
+   */
+  const caveWithBrush = async (brush: Brush) =>
+  {
+    const workspace = buildWorkspace();
+    render(
+      <WorkspaceProvider controller={workspace.controller}>
+        <PalettePanel/>
+      </WorkspaceProvider>
+    );
+    act(() => workspace.controller.selectTreeMaps([ 5 ]));
+    await screen.findByTestId('palette');
+    act(() => workspace.paint.painting.setBrush(brush));
+    return workspace;
+  };
+
+  /**
+   * Picks map 6 alone in the tree before it is open, so the palette goes out of view while it waits for the map, as it
+   * does while a blueprint's tab opens, then lets the map open, the palette coming back with every effect of its showing
+   * run before this settles.
+   * @param {ReturnType<typeof buildWorkspace>} workspace The workspace.
+   * @returns {Promise<boolean>} Whether the palette went out of view meanwhile and is back.
+   */
+  const comeBackOnMap6 = async (workspace: ReturnType<typeof buildWorkspace>): Promise<boolean> =>
+  {
+    act(() => workspace.controller.selectTreeMaps([ 6 ]));
+    const waited = screen.queryByText('Open a map to see its tiles here.') !== null;
+    await act(async () =>
+    {
+      workspace.openMap6();
+      await workspace.map6Opened;
+    });
+    return waited && screen.queryByTestId('palette') !== null;
+  };
+
+  it('keeps a brush the eyedropper picked when the palette comes back into view on its tileset, as a map opening brings it', async () =>
+  {
+    // Arrange: a brush picked off the cave, which draws with tileset 4.
+    const workspace = await caveWithBrush(eyedropped(4));
+
+    // Act: map 6, on tileset 4 too, picked before it is open.
+    const waited = await comeBackOnMap6(workspace);
+
+    // Assert.
+    expect([ waited, workspace.paint.painting.settings.brush, workspace.paint.selection.brush ])
+      .toStrictEqual([ true, eyedropped(4), eyedropped(4) ]);
+  });
+
+  it('hands the window the pick its palette remembers when it comes into view on a tileset the brush in hand is not from', async () =>
+  {
+    // Arrange: the cave's shadow pen picked, then a brush from tileset 7 put in hand.
+    const workspace = await caveWithBrush(eyedropped(7));
+    fireEvent.click(screen.getByRole('tab', { name: 'R' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Shadow pen' }));
+    act(() => workspace.paint.painting.setBrush(eyedropped(7)));
+
+    // Act.
+    const waited = await comeBackOnMap6(workspace);
+
+    // Assert: the shadow pen tileset 4's palette remembers is back in hand.
+    expect([ waited, workspace.paint.painting.settings.brush ])
+      .toStrictEqual([ true, { kind: 'shadows', tilesetId: 4, width: 1, height: 1, cells: [] } ]);
+  });
+
+  it('replaces a brush the eyedropper picked with a pick in the palette once it is back in view', async () =>
+  {
+    // Arrange: a brush picked off the cave, kept as the palette came back on map 6.
+    const workspace = await caveWithBrush(eyedropped(4));
+    await comeBackOnMap6(workspace);
+
+    // Act.
+    fireEvent.click(screen.getByRole('tab', { name: 'R' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Shadow pen' }));
+
+    // Assert.
+    expect(workspace.paint.painting.settings.brush)
+      .toStrictEqual({ kind: 'shadows', tilesetId: 4, width: 1, height: 1, cells: [] });
+  });
+
+  it('leaves a brush the eyedropper picked in hand when only the palette\'s tab changes', async () =>
+  {
+    // Arrange.
+    const workspace = await caveWithBrush(eyedropped(4));
+
+    // Act.
+    fireEvent.click(screen.getByRole('tab', { name: 'B' }));
+
+    // Assert: the tab changed, and the brush did not.
+    expect([ screen.getByRole('tab', { name: 'B' }).getAttribute('aria-selected'), workspace.paint.painting.settings.brush ])
+      .toStrictEqual([ 'true', eyedropped(4) ]);
   });
 });

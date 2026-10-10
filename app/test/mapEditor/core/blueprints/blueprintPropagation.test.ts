@@ -411,7 +411,7 @@ describe('blueprintPropagationCheck', () =>
 
       // Assert.
       expect([ first, refusals, second?.label ])
-        .toStrictEqual([ null, [ 'This blueprint can\'t change until its copies have been found; try again in a moment.' ], 'Paint' ]);
+        .toStrictEqual([ null, [ 'This blueprint can\'t change until its linked events have been found; try again in a moment.' ], 'Paint' ]);
     });
 
     it('refuses a change while the file of a map nobody has open is still being read', async () =>
@@ -429,7 +429,7 @@ describe('blueprintPropagationCheck', () =>
 
       // Assert.
       expect([ first, refusals, second?.label, window.reads ])
-        .toStrictEqual([ null, [ 'This blueprint can\'t change until Map 3, which holds a copy, has been read; try again in a moment.' ], 'Paint', [ 3 ] ]);
+        .toStrictEqual([ null, [ 'This blueprint can\'t change until Map 3, where it is used, has been read; try again in a moment.' ], 'Paint', [ 3 ] ]);
     });
 
     it('brings in a map only another window holds, refusing the change until it is held here', async () =>
@@ -444,7 +444,7 @@ describe('blueprintPropagationCheck', () =>
 
       // Assert: its file was never read, being another window's to hold.
       expect([ step, refusals, window.opened.includes('map:3'), window.reads ])
-        .toStrictEqual([ null, [ 'This blueprint can\'t change until Map 3, which holds a copy, has been read; try again in a moment.' ], true, [] ]);
+        .toStrictEqual([ null, [ 'This blueprint can\'t change until Map 3, where it is used, has been read; try again in a moment.' ], true, [] ]);
     });
 
     it('refuses a change while a map holding a copy waits for a choice about its file changing on disk', async () =>
@@ -461,7 +461,7 @@ describe('blueprintPropagationCheck', () =>
 
       // Assert.
       expect([ step, refusals ])
-        .toStrictEqual([ null, [ 'This blueprint can\'t change while Map 2, which holds a copy, waits for a choice about changes made elsewhere.' ] ]);
+        .toStrictEqual([ null, [ 'This blueprint can\'t change while Map 2, where it is used, waits for a choice about changes made elsewhere.' ] ]);
     });
 
     it('refuses a change until the plugins are read, since which maps hold their patterns is not known yet', async () =>

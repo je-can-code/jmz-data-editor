@@ -1,6 +1,7 @@
 import { MapEditorApiError, type BlueprintWrite } from '../api/MapEditorApi.ts';
 import type { DocumentHub, HubEvent } from '../history/DocumentHub.ts';
 import type { HistoryStep } from '../history/HistoryStep.ts';
+import { fileKeepsLeft } from '../history/stepParts.ts';
 import { mapDocumentKey, parseDocumentKey, type DocumentKey } from '../model/documentKeys.ts';
 import type { Patch } from '../model/patches.ts';
 import { BLUEPRINTS_DOCUMENT } from './blueprints.ts';
@@ -47,8 +48,8 @@ type Blocked = {
 
 /**
  * One move of a step the writer writes: the step, or the part of it that moved, which way it moved, and what each map's
- * file takes for it; and for an undo that left parts of the step, the part left on the maps held here, which those maps'
- * files go on holding in the step's place.
+ * file takes for it; and for an undo or a redo that left parts of the step, the part left on the maps held here, which a
+ * map's file goes on holding in the step's place after an undo where it kept that part as the map did.
  */
 type QueuedMove = {
   readonly step: HistoryStep;
@@ -415,16 +416,16 @@ class BlueprintWriter
     }
 
     // a move made elsewhere is that window's to write, and one taken back was never written; the files follow either. An
-    // undo or a redo that left parts of its step moves its part that moved alone, which is all the files take.
+    // undo or a redo that left parts of its step moves its part that moved, with what each map's file was judged to take.
     const direction = event.type === 'undone' ? 'backward' : 'forward';
     const writes = event.source === 'local' && this.#takingBack === false;
-    const maps = this.#maps.follow(step, direction, writes);
+    const left = event.type !== 'committed' && event.split !== undefined ? event.split.left : null;
+    const maps = this.#maps.follow(step, direction, writes, left);
     if (writes === false)
     {
       return;
     }
 
-    const left = event.type !== 'committed' && event.split !== undefined ? event.split.left : null;
     this.#queue.push({ step, direction, maps, left });
     if (event.type === 'committed')
     {
@@ -610,10 +611,11 @@ class BlueprintWriter
       }
 
       // the file's steps moved the way the act moves them, each in or out where the map has it; an undo that left part of
-      // its step on the map leaves that part in the file too, in the step's place.
+      // its step on the map leaves that part in the file too, in the step's place, when the file kept it as the map did,
+      // and otherwise the file, having given it back with the rest, holds neither.
       const onFile = moves.filter(move => move.maps.has(mapId)).reduce((steps, move) =>
       {
-        const left = move.direction === 'backward' && move.left !== null && move.left.entries.some(entry => entry.document === key)
+        const left = move.direction === 'backward' && move.left !== null && fileKeepsLeft(move.step, move.left, key)
           ? [ move.left.id ]
           : [];
         const without = steps.flatMap(id => (id === move.step.id ? left : [ id ]));

@@ -68,6 +68,12 @@ type PaintControllerOptions = {
   readonly onStamped?: (outcome: StampOutcome) => void;
 
   /**
+   * Hears what a drop of the select tool's area could not do, in words for the author: why it was refused, or what it
+   * left out. Left out, nobody hears.
+   */
+  readonly onTold?: (message: string, refused: boolean) => void;
+
+  /**
    * Says why a map may hold no copy of a blueprint, or null when it may: the window's link gate, from its plugin modules.
    */
   readonly linkRefusal: (mapId: number) => string | null;
@@ -132,6 +138,7 @@ class PaintController
       pickBrush: brush => painting.setBrush(brush),
       pickTool: tool => painting.setTool(tool),
       stamped: outcome => options.onStamped?.(outcome),
+      told: (message, refused) => options.onTold?.(message, refused),
       linkRefusal,
     });
   }

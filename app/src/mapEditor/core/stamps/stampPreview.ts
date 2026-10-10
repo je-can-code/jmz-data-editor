@@ -5,7 +5,7 @@ import type { CellRect, GhostEvent, GhostTile } from '../renderer/MapRenderer.ts
 import type { Shaping } from '../tiles/layering.ts';
 import { clipGhosts } from '../tools/tileClip.ts';
 import type { Stamp, StampTiles } from './stamp.ts';
-import type { StampTarget } from './stampPlacement.ts';
+import type { PlacedKind, StampTarget } from './stampPlacement.ts';
 
 /**
  * What the map shows under the pointer while the stamp tool is in hand: the stamp's footprint, its tiles and events
@@ -35,14 +35,15 @@ const tileGhosts = (map: StampTarget, stamp: Stamp, at: MapCell): GhostTile[] =>
 };
 
 /**
- * Words what a click would do, beside the stamp's footprint.
+ * Words what a click would do, beside the stamp's footprint, naming a blueprint as a blueprint.
  * @param {number} blocked How many tiles another event holds where the stamp's events would land.
  * @param {boolean} tilesLeftOut Whether the stamp's tiles belong to another tileset.
  * @param {number} events How many of the stamp's events land on the map.
  * @param {Shaping} shaping Whether the tiles go down exactly as copied.
+ * @param {PlacedKind} kind What a click places, a stamp or a blueprint.
  * @returns {string} The words.
  */
-const previewLabel = (blocked: number, tilesLeftOut: boolean, events: number, shaping: Shaping): string =>
+const previewLabel = (blocked: number, tilesLeftOut: boolean, events: number, shaping: Shaping, kind: PlacedKind): string =>
 {
   if (blocked > 0)
   {
@@ -54,7 +55,8 @@ const previewLabel = (blocked: number, tilesLeftOut: boolean, events: number, sh
     return events === 0 ? 'Another tileset: nothing to place' : 'Another tileset: events only';
   }
 
-  return shaping === 'exact' ? 'Stamp (exact)' : 'Stamp';
+  const name = kind === 'blueprint' ? 'Blueprint' : 'Stamp';
+  return shaping === 'exact' ? `${name} (exact)` : name;
 };
 
 /**
@@ -66,9 +68,10 @@ const previewLabel = (blocked: number, tilesLeftOut: boolean, events: number, sh
  * @param {Stamp} stamp The stamp.
  * @param {MapCell} at Where its corner would land.
  * @param {Shaping} shaping Whether the tiles would go down exactly as copied (Shift held).
+ * @param {PlacedKind} kind What a click places, a stamp or a blueprint, which the words beside it name.
  * @returns {StampPreview} The preview.
  */
-const previewStamp = (map: StampTarget, stamp: Stamp, at: MapCell, shaping: Shaping): StampPreview =>
+const previewStamp = (map: StampTarget, stamp: Stamp, at: MapCell, shaping: Shaping, kind: PlacedKind = 'stamp'): StampPreview =>
 {
   const tilesFit = stamp.tiles !== null && stamp.tilesetId === map.tilesetId;
   const ghostEvents: GhostEvent[] = [];
@@ -92,7 +95,7 @@ const previewStamp = (map: StampTarget, stamp: Stamp, at: MapCell, shaping: Shap
     ghostTiles: tilesFit ? tileGhosts(map, stamp, at) : [],
     ghostEvents,
     blockedCells: blocked,
-    label: previewLabel(blocked.length, stamp.tiles !== null && tilesFit === false, ghostEvents.length, shaping),
+    label: previewLabel(blocked.length, stamp.tiles !== null && tilesFit === false, ghostEvents.length, shaping, kind),
   };
 };
 

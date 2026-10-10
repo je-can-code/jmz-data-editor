@@ -480,8 +480,11 @@ const createMapEditorServices = (environment: MapEditorEnvironment): MapEditorSe
   });
   hub.addCommitCheck(blueprintPropagationCheck({ hub, maps: copyMaps, tags: () => modules.commentTags() }));
 
-  // undoing or redoing a blueprint's change leaves a copy on a map nobody has open as it stands once its file changed.
+  // undoing or redoing a blueprint's change leaves a copy on a map nobody has open as it stands once its file changed,
+  // and judges the file of a map held here apart from the map, by the way that file took the change, so a copy the map
+  // keeps under an unsaved edit still follows its blueprint on disk.
   hub.setFileFit((key, patch) => copyMaps.fileTakes(key, patch));
+  hub.setFileWay((key, step, direction) => copyMaps.fileWayOf(key, step, direction));
   const writeChanges = api === null || api.writeBlueprintChanges === undefined
     ? null
     : api.writeBlueprintChanges.bind(api);

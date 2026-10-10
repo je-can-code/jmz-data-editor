@@ -7,15 +7,15 @@ import { BLUEPRINT_GONE } from './blueprintEdits.ts';
 import { BLUEPRINTS_DOCUMENT, blueprintIn, type Blueprint } from './blueprints.ts';
 
 /**
- * Why a blueprint opened as a map is not resized: its copies were placed at its old size, and growing it would paint
- * over cells they never owned.
+ * Why a blueprint opened as a map is not resized: it was placed at its old size, and growing it would paint over cells
+ * its placements never covered.
  */
-const BLUEPRINT_RESIZED = 'A blueprint can\'t be resized: growing it would paint over cells its copies never owned.';
+const BLUEPRINT_RESIZED = 'A blueprint can\'t be resized: growing it would paint over cells its placements never covered.';
 
 /**
- * Why an event is not added to a blueprint: every map holding a copy would have to take a new event too.
+ * Why an event is not added to a blueprint: every map it is used on would have to take a new event too.
  */
-const BLUEPRINT_EVENTS_ADDED = 'Events can\'t be added to a blueprint: a new one would have to appear on every map that holds a copy.';
+const BLUEPRINT_EVENTS_ADDED = 'Events can\'t be added to a blueprint: a new one would have to appear on every map it is used on.';
 
 /**
  * Why an event is not taken out of a blueprint: every copy of it, on every map, would go with it.
@@ -160,7 +160,7 @@ const tilesRefusal = (before: readonly number[], after: readonly number[], plane
 /**
  * Says why a change to a blueprint opened as a map cannot stand, in words for the author, by comparing the map as it was
  * with the map as the change leaves it. For now a blueprint's size and its events are fixed: growing it would paint over
- * cells its copies never owned, and removing an event would delete events on every map. So the change may move events
+ * cells its placements never covered, and removing an event would delete events on every map. So the change may move events
  * about inside it and change anything about them but their ids, and change the tiles of the layers it carries; nothing
  * else. Its size, its set of events, their ids, the map's own settings (which are no part of a blueprint) and every layer
  * it does not carry stay as they are. The first broken rule is the one named, the size first.

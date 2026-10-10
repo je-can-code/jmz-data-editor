@@ -3,7 +3,9 @@ import { placeBlueprint } from '../blueprints/blueprintPlacement.ts';
 import { liveBlueprintsIn } from '../blueprints/blueprints.ts';
 import { carrySpans, spansOnMap, spansWithin } from '../blueprints/placementSpans.ts';
 import type { DocumentHub } from '../history/DocumentHub.ts';
+import { mapHistoryKey } from '../history/historyKeys.ts';
 import type { MapDocument } from '../model/MapDocument.ts';
+import type { RmmzMapEvent } from '../model/rmmzTypes.ts';
 import type { MapCell } from '../renderer/camera.ts';
 import type { CellRect, GhostEvent, GhostTile } from '../renderer/MapRenderer.ts';
 import { placeStamp, type StampOutcome } from '../stamps/stampPlacement.ts';
@@ -11,6 +13,7 @@ import { previewStamp } from '../stamps/stampPreview.ts';
 import type { Shaping, TilesetLayering } from '../tiles/layering.ts';
 import type { TileLayerIndex } from '../tiles/tileGrid.ts';
 import { fitsTileset, type Brush, type BrushKind } from './brush.ts';
+import { ClipEventsPreview, commitClipEvents, eventsOnArea, leftOutWords, planClipEvents, type ClipEventsFrame } from './clipEvents.ts';
 import { cellsInEllipse, cellsInRect, clipRect, rectangleBetween, rectContains } from './geometry.ts';
 import {
   hasShadow,
@@ -96,8 +99,14 @@ type ToolSessionHost = {
   stamped?(outcome: StampOutcome): void;
 
   /**
+   * Hears what a drop of the select tool's area could not do, in words for the author: why it was refused, changing
+   * nothing, or what it left out. Left out, nobody hears.
+   */
+  told?(message: string, refused: boolean): void;
+
+  /**
    * Says why a map may hold no copy of a blueprint, or null when it may (see blueprintPlacement's link gate): the stamp
-   * tool places neither a blueprint there nor a stamp carrying copies of one.
+   * tool places neither a blueprint there nor a stamp carrying copies of one, and the select tool copies none there.
    */
   linkRefusal(mapId: number): string | null;
 };
@@ -136,6 +145,8 @@ type Gesture =
     readonly grab: MapCell;
     readonly copy: boolean;
     readonly mode: number;
+    readonly events: ClipEventsPreview | null;
+    readonly linksRefused: boolean;
   };
 
 /**
@@ -157,7 +168,7 @@ const IDLE: Gesture = { kind: 'idle' };
 
 /**
  * What the stamp tool's cursor says over a map that may hold no copy of a blueprint, with a blueprint, or a stamp
- * carrying copies of one, in hand.
+ * carrying copies of one, in hand; and the select tool's, copying an area that carries copies of one on such a map.
  */
 const LINKS_REFUSED_LABEL = 'Blueprints can\'t go here';
 
@@ -166,6 +177,46 @@ const LINKS_REFUSED_LABEL = 'Blueprints can\'t go here';
  */
 const NO_GHOST_EVENTS: readonly GhostEvent[] = Object.freeze([]);
 const NO_CELLS: readonly MapCell[] = Object.freeze([]);
+
+/**
+ * Names a drop of the select tool's area for the history panel: what it did, and how many events it carried along with
+ * the tiles, when it carried any.
+ * @param {boolean} copy True for a copy, false for a move.
+ * @param {number} events How many events it moved or copied.
+ * @returns {string} The words, such as "Move tiles" or "Copy tiles and 3 events".
+ */
+const clipStepLabel = (copy: boolean, events: number): string =>
+{
+  const verb = copy ? 'Copy tiles' : 'Move tiles';
+  if (events === 0)
+  {
+    return verb;
+  }
+
+  return `${verb} and ${events === 1 ? '1 event' : `${events} events`}`;
+};
+
+/**
+ * Words what a drop of the select tool's area would do, beside the area as it is dragged: move or copy, or why a drop
+ * there would be refused, the events it carries landing on others or, moved, falling off the map.
+ * @param {boolean} copy True for a copy, false for a move.
+ * @param {ClipEventsFrame | null} frame What the events it carries show, or null for none.
+ * @returns {string} The words.
+ */
+const clipLabel = (copy: boolean, frame: ClipEventsFrame | null): string =>
+{
+  if (frame !== null && frame.blocked.length > 0)
+  {
+    return 'Another event is in the way';
+  }
+
+  if (frame !== null && frame.offMap)
+  {
+    return 'An event would leave the map';
+  }
+
+  return copy ? 'Copy' : 'Move';
+};
 
 /**
  * An overlay showing nothing of the tools: no cursor, no words, no ghosts and no selected area.
@@ -522,7 +573,8 @@ class ToolSession
 
   /**
    * Starts the select tool: a press inside the selection picks the selected area up to move it (or copy it, with
-   * Ctrl held); anywhere else starts a new selection.
+   * Ctrl held); anywhere else starts a new selection. An area lifted with every layer carries the events standing on it
+   * too, as copying it into a stamp does; one lifted from the chosen layer alone carries none.
    * @param {MapDocument} map The map.
    * @param {MapCell} cell The cell pressed.
    * @param {ToolPointer} pointer The keys held.
@@ -533,11 +585,17 @@ class ToolSession
     const selection = this.#selection;
     if (selection !== null && rectContains(selection, cell))
     {
-      const clip = captureClip(map, selection, choiceFor(mode));
+      const choice = choiceFor(mode);
+      const clip = captureClip(map, selection, choice);
       if (clip !== null)
       {
         const tilesetMode = this.#host.layering(map).mode;
-        this.#gesture = { kind: 'drag-clip', map, clip, grab: cell, copy: pointer.copy, mode: tilesetMode };
+        const carried = choice === 'auto' ? eventsOnArea(map, clip.source) : [];
+        const events = carried.length === 0 ? null : new ClipEventsPreview(map, carried);
+
+        // a copy is a copy from the press, so whether the map refuses what it carries is known as the drag starts.
+        const linksRefused = pointer.copy && this.#refusesCopyOf(map, clip, carried);
+        this.#gesture = { kind: 'drag-clip', map, clip, grab: cell, copy: pointer.copy, mode: tilesetMode, events, linksRefused };
       }
 
       return;
@@ -653,31 +711,92 @@ class ToolSession
   }
 
   /**
-   * Puts a lifted area down where it was dragged to, moving it or copying it, and keeps it selected there. The placements
-   * of blueprints the area holds whole travel with it in the same step: moved with a move, recorded again with a copy.
+   * Puts a lifted area down where it was dragged to, moving it or copying it, and keeps it selected there. Everything the
+   * area holds travels with its tiles in the same step, so one undo takes it all back: the events standing on it, moved
+   * with their ids, links and all, or copied as new events (see planClipEvents); and the placements of blueprints it
+   * holds whole, moved with a move, recorded again with a copy. A moved copy of a blueprint so keeps its events, their
+   * links and its spot together. Events that cannot go there refuse the whole drop, which changes nothing, and the author
+   * hears why, as does a copy carrying copies of blueprints onto a map that may hold none (see {@link #copyRefusal});
+   * events a copy leaves out past the map's edge are said too.
    * @param {Extract<Gesture, { kind: 'drag-clip' }>} gesture The drag.
    * @param {MapCell} end Where it ended.
    * @param {Shaping} shaping Whether autotiles are reshaped around it.
    */
   #finishClip(gesture: Extract<Gesture, { kind: 'drag-clip' }>, end: MapCell, shaping: Shaping): void
   {
-    const { map, clip, grab, copy, mode } = gesture;
-    const dx = end.x - grab.x;
-    const dy = end.y - grab.y;
-    if (dx === 0 && dy === 0)
+    const { map, clip, grab, copy, mode, events } = gesture;
+    const by = { x: end.x - grab.x, y: end.y - grab.y };
+    if (by.x === 0 && by.y === 0)
     {
       return;
     }
 
-    const { hub } = this.#host;
-    const at = { x: clip.source.x + dx, y: clip.source.y + dy };
-    const changes = planPlaceClip(map, clip, { at, move: copy === false, shaping, mode });
-    const carried = spansWithin(spansOnMap(hub, map.mapId), clip.source, clip.layers, map);
-    applyTileEdit(hub, map, copy ? 'Copy tiles' : 'Move tiles', changes, tx =>
+    // the events are planned against the map as it stands at the drop, which anything since the press may have changed.
+    const plan = planClipEvents(map, events === null ? [] : events.eventIds, by, copy);
+    if (plan.ok === false)
     {
-      carrySpans(tx, hub, map.mapId, carried, { x: dx, y: dy }, map, copy);
+      this.#host.told?.(plan.message, true);
+      return;
+    }
+
+    // copies of a blueprint stay off a map that may hold no link, whichever way they would get there; a move adds none.
+    const { hub } = this.#host;
+    const carried = spansWithin(spansOnMap(hub, map.mapId), clip.source, clip.layers, map);
+    const refusal = copy ? this.#copyRefusal(map, plan.copies, carried.length) : null;
+    if (refusal !== null)
+    {
+      this.#host.told?.(refusal, true);
+      return;
+    }
+
+    const at = { x: clip.source.x + by.x, y: clip.source.y + by.y };
+    const changes = planPlaceClip(map, clip, { at, move: copy === false, shaping, mode });
+    hub.edit(clipStepLabel(copy, plan.moves.length + plan.copies.length), [ mapHistoryKey(map.mapId) ], tx =>
+    {
+      tx.tiles(map.key, changes);
+      commitClipEvents(tx, map, plan);
+      carrySpans(tx, hub, map.mapId, carried, by, map, copy);
     });
     this.#selection = clipRect({ x: at.x, y: at.y, width: clip.source.width, height: clip.source.height }, map.width, map.height);
+
+    const leftOut = leftOutWords(plan.leftOut);
+    if (leftOut !== null)
+    {
+      this.#host.told?.(leftOut, false);
+    }
+  }
+
+  /**
+   * Says why a copy of a lifted area may not go down on its map, or null when it may: on a map that may hold no copy of a
+   * blueprint (see the host's linkRefusal), a copy putting down an event linked to one, or recording again a placement of
+   * one the area holds whole, is refused, as placing a blueprint or duplicating its linked events there is.
+   * @param {MapDocument} map The map.
+   * @param {readonly RmmzMapEvent[]} events The events the copy puts down, their notes as copied.
+   * @param {number} placements How many placements of blueprints the copy records again.
+   * @returns {string | null} Why, in words for the author, or null when nothing stands in its way.
+   */
+  #copyRefusal(map: MapDocument, events: readonly RmmzMapEvent[], placements: number): string | null
+  {
+    const refusal = this.#host.linkRefusal(map.mapId);
+    const linked = placements > 0 || events.some(event => blueprintLinkOf(event.note) !== null);
+    return refusal === null || linked === false
+      ? null
+      : `The selection holds copies of blueprints, which can't go here: ${refusal}.`;
+  }
+
+  /**
+   * Reports whether a copy of a lifted area would be refused for the copies of blueprints it carries (see
+   * {@link #copyRefusal}), judged against the map as the drag starts, for the words beside the area while it is dragged.
+   * @param {MapDocument} map The map.
+   * @param {TileClip} clip The area lifted.
+   * @param {readonly number[]} eventIds The events it carries, every one of them on the map.
+   * @returns {boolean} True when a drop would be refused.
+   */
+  #refusesCopyOf(map: MapDocument, clip: TileClip, eventIds: readonly number[]): boolean
+  {
+    const placements = spansWithin(spansOnMap(this.#host.hub, map.mapId), clip.source, clip.layers, map).length;
+    const events = eventIds.map(id => map.event(id) as RmmzMapEvent);
+    return this.#copyRefusal(map, events, placements) !== null;
   }
 
   /**
@@ -735,7 +854,8 @@ class ToolSession
   }
 
   /**
-   * Works out the overlay while a lifted area is dragged: where it would land, drawn as ghosts over the map.
+   * Works out the overlay while a lifted area is dragged: where it would land, drawn as ghosts over the map, and words
+   * saying so beside it when a copy carries copies of blueprints onto a map that may hold none.
    * @param {MapDocument} map The map.
    * @param {Extract<Gesture, { kind: 'drag-clip' }>} gesture The drag.
    * @param {MapCell} at Where the pointer is.
@@ -743,14 +863,18 @@ class ToolSession
    */
   #clipOverlay(map: MapDocument, gesture: Extract<Gesture, { kind: 'drag-clip' }>, at: MapCell): ToolOverlay
   {
-    const { clip, grab, copy } = gesture;
-    const topLeft = { x: clip.source.x + at.x - grab.x, y: clip.source.y + at.y - grab.y };
+    const { clip, grab, copy, events, linksRefused } = gesture;
+    const by = { x: at.x - grab.x, y: at.y - grab.y };
+    const topLeft = { x: clip.source.x + by.x, y: clip.source.y + by.y };
     const landed = { x: topLeft.x, y: topLeft.y, width: clip.source.width, height: clip.source.height };
+    const frame = events === null ? null : events.at(by, copy);
     return {
       ...NO_TOOL_OVERLAY,
-      hoverLabel: copy ? 'Copy' : 'Move',
+      hoverLabel: linksRefused ? LINKS_REFUSED_LABEL : clipLabel(copy, frame),
       ghostTiles: clipGhosts(clip, topLeft, map),
       selectedCells: landed,
+      ghostEvents: frame === null || frame.ghosts.length === 0 ? NO_GHOST_EVENTS : frame.ghosts,
+      blockedCells: frame === null || frame.blocked.length === 0 ? NO_CELLS : frame.blocked,
     };
   }
 
@@ -784,7 +908,7 @@ class ToolSession
     const placedTiles = stamp.tilesetId === map.tilesetId && (stamp.spots ?? []).some(spot => isLive(spot.blueprintId));
     const linked = blueprint !== null || linkedEvents || placedTiles;
     const refused = linked && this.#host.linkRefusal(map.mapId) !== null;
-    const preview = previewStamp(map, stamp, cell, pointer.shift ? 'exact' : 'auto');
+    const preview = previewStamp(map, stamp, cell, pointer.shift ? 'exact' : 'auto', blueprint === null ? 'stamp' : 'blueprint');
     return {
       hover: preview.hover,
       hoverLabel: refused ? LINKS_REFUSED_LABEL : preview.label,

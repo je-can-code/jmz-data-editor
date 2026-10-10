@@ -11,6 +11,7 @@ import type { CellRect } from '../renderer/MapRenderer.ts';
 import { clipRect } from '../tools/geometry.ts';
 import type { BlueprintCopyCount, BlueprintCopyCounter, BlueprintCopyCounts } from './blueprintCopies.ts';
 import { isBlueprintId } from './blueprintLink.ts';
+import type { Blueprint } from './blueprints.ts';
 
 /**
  * The record of where blueprints are placed: {@code <project>/jmz-editor/blueprint-uses.json}, held in its stored form, the
@@ -484,9 +485,10 @@ const forgetSpots = (tx: Transaction, hub: Pick<DocumentHub, 'has' | 'document'>
 };
 
 /**
- * Adds each placement of a blueprint's tiles to a count of its copies: one placement is one more copy, on its map, as one
- * of its events placed is.
- * @param {BlueprintCopyCount | undefined} count The blueprint's event copies, or undefined for none.
+ * Adds each placement of a blueprint's tiles to a count of its linked events: one placement is one more use of it, on its
+ * map, as one of its events placed is, and the count says how many of its uses are placements, so the two are worded
+ * apart.
+ * @param {BlueprintCopyCount | undefined} count The blueprint's linked events, or undefined for none.
  * @param {readonly PlacedSpot[]} spots The blueprint's placements.
  * @returns {BlueprintCopyCount | undefined} The count with them, or undefined when there is still nothing to count.
  */
@@ -500,33 +502,94 @@ const withPlacedCopies = (count: BlueprintCopyCount | undefined, spots: readonly
   const perMap = new Map<number, number>((count?.maps ?? []).map(({ mapId, copies }) => [ mapId, copies ]));
   spots.forEach(({ mapId }) => perMap.set(mapId, (perMap.get(mapId) ?? 0) + 1));
   const maps = [ ...perMap ].sort(([ left ], [ right ]) => left - right).map(([ mapId, copies ]) => ({ mapId, copies }));
-  return { total: maps.reduce((sum, each) => sum + each.copies, 0), maps };
+  return { total: maps.reduce((sum, each) => sum + each.copies, 0), maps, placements: spots.length };
 };
 
 /**
- * Counts every blueprint's copies across the project with its placements in: the copies of its events, as the counter
- * counts them from the maps' notes, and each placement of its tiles the record holds. Without a record to read, nothing
- * can say how many placements there are, so the count is still being made.
- * @param {BlueprintCopyCounts} counts The event copies, as the counter has them.
- * @param {readonly PlacedSpot[] | null} spots Every placement the record holds, or null while no record can be read.
- * @returns {BlueprintCopyCounts} The counts with every placement in.
+ * Counts something in words, as one or many of it.
+ * @param {number} count How many.
+ * @param {string} one The word for one.
+ * @param {string} many The word for more.
+ * @returns {string} Such as "1 map" or "3 maps".
  */
-const countsWithPlacements = (counts: BlueprintCopyCounts, spots: readonly PlacedSpot[] | null): BlueprintCopyCounts =>
+const counted = (count: number, one: string, many: string): string =>
 {
-  if (spots === null)
+  return `${count} ${count === 1 ? one : many}`;
+};
+
+/**
+ * Words how many events are linked to a blueprint, after something else on its card: how many, or that they are still
+ * being counted, or cannot be.
+ * @param {BlueprintCopyCounts} counts The count of every blueprint's linked events.
+ * @param {string} blueprintId The blueprint.
+ * @returns {string} The words, such as "15 linked events" or "counting linked events".
+ */
+const linkedEventsWords = (counts: BlueprintCopyCounts, blueprintId: string): string =>
+{
+  if (counts.state === 'counting')
   {
-    return { state: counts.state === 'counted' ? 'counting' : counts.state, byBlueprint: counts.byBlueprint };
+    return 'counting linked events';
   }
 
-  const blueprintIds = new Set([ ...counts.byBlueprint.keys(), ...spots.map(spot => spot.blueprintId) ]);
-  const byBlueprint = new Map<string, BlueprintCopyCount>();
-  blueprintIds.forEach(blueprintId =>
+  if (counts.state === 'unavailable')
   {
-    const own = spots.filter(spot => spot.blueprintId === blueprintId);
-    byBlueprint.set(blueprintId, withPlacedCopies(counts.byBlueprint.get(blueprintId), own) as BlueprintCopyCount);
-  });
+    return 'linked events can\'t be counted';
+  }
 
-  return { state: counts.state, byBlueprint };
+  const count = counts.byBlueprint.get(blueprintId);
+  return count === undefined
+    ? 'no linked events'
+    : counted(count.total, 'linked event', 'linked events');
+};
+
+/**
+ * Words where a blueprint of events alone is used, for its card: how many events are linked to it and on how many maps,
+ * since no record holds a placement of it, or that they are still being counted, or cannot be.
+ * @param {BlueprintCopyCounts} counts The count of every blueprint's linked events.
+ * @param {string} blueprintId The blueprint.
+ * @returns {string} The words, such as "14 linked events on 2 maps", or "No linked events yet".
+ */
+const eventsOnlyWords = (counts: BlueprintCopyCounts, blueprintId: string): string =>
+{
+  const count = counts.state === 'counted' ? counts.byBlueprint.get(blueprintId) : undefined;
+  if (counts.state === 'counted' && count === undefined)
+  {
+    return 'No linked events yet';
+  }
+
+  const words = linkedEventsWords(counts, blueprintId);
+  const said = `${words.charAt(0).toUpperCase()}${words.slice(1)}`;
+  return count === undefined
+    ? said
+    : `${said} on ${counted(count.maps.length, 'map', 'maps')}`;
+};
+
+/**
+ * Words where a blueprint is used, for its card, never calling its placements and its linked events by one name. One
+ * with tiles says how many times it is placed, which the record of placements holds, and on how many maps, then how many
+ * events are linked to it, when it has any events at all; one of events alone, which no record holds a placement of, says
+ * how many events are linked to it and on how many maps. Linked events still being counted, or not to be counted, say so.
+ * @param {BlueprintCopyCounts} counts The count of every blueprint's linked events, from the maps' notes.
+ * @param {readonly PlacedSpot[]} spots Every placement the record holds.
+ * @param {Blueprint} blueprint The blueprint.
+ * @returns {string} The words, such as "Placed 3 times on 2 maps, 15 linked events" or "14 linked events on 2 maps".
+ */
+const usageWords = (counts: BlueprintCopyCounts, spots: readonly PlacedSpot[], blueprint: Blueprint): string =>
+{
+  const { stamp } = blueprint;
+  if (stamp.tiles === null)
+  {
+    return eventsOnlyWords(counts, blueprint.id);
+  }
+
+  const own = spots.filter(spot => spot.blueprintId === blueprint.id);
+  const maps = new Set(own.map(spot => spot.mapId)).size;
+  const placed = own.length === 0
+    ? 'Not placed yet'
+    : `Placed ${own.length === 1 ? 'once' : `${own.length} times`} on ${counted(maps, 'map', 'maps')}`;
+  return stamp.events.length === 0
+    ? placed
+    : `${placed}, ${linkedEventsWords(counts, blueprint.id)}`;
 };
 
 /**
@@ -566,7 +629,7 @@ const usedCopiesOf = (
  */
 const forgetPlacement = (hub: DocumentHub, blueprint: { readonly id: string; readonly name: string }, spot: PlacedSpot): HistoryStep | null =>
 {
-  return hub.edit(`Forget a copy of "${blueprint.name}"`, [ blueprintHistoryKey(blueprint.id) ], tx =>
+  return hub.edit(`Forget a placement of "${blueprint.name}"`, [ blueprintHistoryKey(blueprint.id) ], tx =>
   {
     forgetSpots(tx, hub, spot.mapId, [ spot ]);
   });
@@ -576,7 +639,6 @@ export {
   BLUEPRINT_USES_DOCUMENT,
   cellsPlaced,
   changeMapSpots,
-  countsWithPlacements,
   forgetPlacement,
   forgetSpots,
   mapEntryOf,
@@ -593,6 +655,7 @@ export {
   spotsOfBlueprint,
   spotsOfEntry,
   spotsOnMap,
+  usageWords,
   usedCopiesOf,
   usesOf,
 };
