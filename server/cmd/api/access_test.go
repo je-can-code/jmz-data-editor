@@ -83,6 +83,7 @@ func TestOtherSitesPagesAreRefused(t *testing.T) {
 		{name: "a read", method: http.MethodGet, target: "/api/mapinfos"},
 		{name: "a plugin's source", method: http.MethodGet, target: "/api/plugin-source/Hello"},
 		{name: "an image folder's listing", method: http.MethodGet, target: "/api/img/faces"},
+		{name: "a sound folder's listing", method: http.MethodGet, target: "/api/audio/se"},
 		{name: "the change stream", method: http.MethodGet, target: "/api/file-changes"},
 		{name: "an enemy's placements", method: http.MethodGet, target: "/api/enemies/1/placements"},
 		{name: "every event's note", method: http.MethodGet, target: "/api/event-notes"},
@@ -92,6 +93,7 @@ func TestOtherSitesPagesAreRefused(t *testing.T) {
 		{name: "a common events save", method: http.MethodPut, target: "/api/common-events", body: commonEventsFixture},
 		{name: "a merge of blueprint placements", method: http.MethodPut, target: "/api/editor-data/blueprint-uses/maps", body: `{"schemaVersion":2,"maps":{"1":{"aa22":[{"x":0,"y":0}]}}}`},
 		{name: "a change to a blueprint and its copies", method: http.MethodPut, target: "/api/blueprint-changes", body: cellarChange},
+		{name: "a transfer pair across two maps", method: http.MethodPut, target: "/api/map-changes", body: placePair},
 		{name: "a form posting to a database route", method: http.MethodPost, target: "/api/system", body: `{}`, header: []string{"Content-Type", "text/plain"}},
 		{name: "a preflight", method: http.MethodOptions, target: "/api/maps/1", header: []string{"Access-Control-Request-Method", "PUT"}},
 	}

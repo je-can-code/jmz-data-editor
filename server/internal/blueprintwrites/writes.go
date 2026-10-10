@@ -1,17 +1,21 @@
-// Package blueprintwrites reads and applies one change to a blueprint as the map editor writes it to disk, in one act:
-// the blueprints' own file, jmz-editor/blueprints.json, given whole, and the patches every map file the change reached
-// takes, the copies of the blueprint on that map following it.
+// Package blueprintwrites reads and applies one change the map editor writes to several files at once, in one act, which
+// no save of one file could keep together: a change to a blueprint, the blueprints' own file, jmz-editor/blueprints.json,
+// given whole, and the patches every map file the change reached takes, the copies of the blueprint on that map
+// following it; or a transfer pair, whose two ends stand on two maps, each map's file taking its end.
 //
 // A map's patches are applied to its file as it stands at that moment, never to a copy the editor read earlier, and each
-// is checked first against what the file holds where it lands: a tile's old value, or the whole value a path held. So a
-// map's unsaved edits never reach its file this way, since the editor plans the file's patches against the file, and a
-// file changed since the editor last read it, by MZ or by hand, is refused rather than written over: nothing of the act
-// is written, and the editor hears which map no longer held what the change replaced.
+// is checked first against what the file holds where it lands: a tile's old value, the whole value a path held, or the
+// items a list held. So a map's unsaved edits never reach its file this way, since the editor plans the file's patches
+// against the file, and a file changed since the editor last read it, by MZ or by hand, is refused rather than written
+// over: nothing of the act is written, and the editor hears which map no longer held what the change replaced.
 //
 // The patches are the editor's own (see the map editor's patches.ts): "tiles", naming flat cells of the map's tile data
-// with their values before and after, and "set", naming a path into the map and the whole value there before and after.
-// A value set is written with the key order of the value it replaces, so writing a change and taking it back leaves the
-// file byte for byte as it was.
+// with their values before and after; "set", naming a path into the map and the whole value there before and after; and
+// "splice", naming a list in the map, where in it, the items it takes out there and the items it puts in. A value set is
+// written with the key order of the value it replaces, so writing a change and taking it back leaves the file byte for
+// byte as it was. A splice only ever reaches the end of its list, which is how the editor places an event and takes one
+// away: an event's id is its place in the list, so anything put in or taken out short of the end would renumber every
+// event after it.
 package blueprintwrites
 
 import (
@@ -31,16 +35,16 @@ import (
 // typeOfMap is the model every map file must still decode into once a change is written into it.
 var typeOfMap = reflect.TypeFor[*db.RpgMap]()
 
-// PathSegment is one step of a set patch's path: an object's key, or an array's index.
+// PathSegment is one step of a set or splice patch's path: an object's key, or an array's index.
 type PathSegment struct {
 	Key     string
 	Index   int
 	IsIndex bool
 }
 
-// Patch is one change to a map file: tiles, or a value set at a path.
+// Patch is one change to a map file: tiles, a value set at a path, or a list spliced at its end.
 type Patch struct {
-	// Kind is "tiles" or "set".
+	// Kind is "tiles", "set" or "splice".
 	Kind string
 
 	// Indices, Before and After are a tiles patch's cells and their values on either side.
@@ -48,10 +52,16 @@ type Patch struct {
 	Before  []int
 	After   []int
 
-	// Path, Was and Becomes are a set patch's path and the values there on either side.
+	// Path, Was and Becomes are a set patch's path and the values there on either side; a splice's Path is its list.
 	Path    []PathSegment
 	Was     *mzjson.Value
 	Becomes *mzjson.Value
+
+	// At, Removed and Inserted are a splice patch's place in its list, the items it takes out there, and the items it
+	// puts in their place.
+	At       int
+	Removed  []*mzjson.Value
+	Inserted []*mzjson.Value
 }
 
 // MapWrite is every patch one map's file takes, in the order they go.
@@ -68,7 +78,7 @@ type Changes struct {
 	Maps       []MapWrite
 }
 
-// ChangesError is a body that is not a change to a blueprint, refused before anything touches the disk.
+// ChangesError is a body that is not a change an act writes, refused before anything touches the disk.
 type ChangesError struct {
 	reason string
 }
@@ -168,7 +178,7 @@ func parseMaps(maps *mzjson.Value) ([]MapWrite, error) {
 	return writes, nil
 }
 
-// parsePatch reads one patch: tiles, or a value set at a path.
+// parsePatch reads one patch: tiles, a value set at a path, or a list spliced.
 func parsePatch(value *mzjson.Value, where string) (Patch, error) {
 	if value.Kind != mzjson.Object || value.Member("kind") == nil || value.Member("kind").Kind != mzjson.String {
 		return Patch{}, ChangesError{reason: where + " must be a patch naming its kind"}
@@ -179,8 +189,10 @@ func parsePatch(value *mzjson.Value, where string) (Patch, error) {
 		return parseTiles(value, where)
 	case "set":
 		return parseSet(value, where)
+	case "splice":
+		return parseSplice(value, where)
 	default:
-		return Patch{}, ChangesError{reason: fmt.Sprintf("%s is a %q patch, which a blueprint's change never writes", where, value.Member("kind").Text)}
+		return Patch{}, ChangesError{reason: fmt.Sprintf("%s is a %q patch, which an act never writes", where, value.Member("kind").Text)}
 	}
 }
 
@@ -206,10 +218,41 @@ func parseSet(value *mzjson.Value, where string) (Patch, error) {
 		return Patch{}, err
 	}
 
-	pathValue := value.Member("path")
-	if pathValue.Kind != mzjson.Array || len(pathValue.Items) == 0 {
-		return Patch{}, ChangesError{reason: where + ".path must be a list of keys and indexes, at least one long"}
+	path, err := parsePath(value.Member("path"), where)
+	if err != nil {
+		return Patch{}, err
 	}
+
+	return Patch{Kind: "set", Path: path, Was: value.Member("before"), Becomes: value.Member("after")}, nil
+}
+
+// parseSplice reads a splice patch: the list's path, at least one step long, where in the list it starts, a whole number
+// from 0, and the items it takes out and puts in, each a list.
+func parseSplice(value *mzjson.Value, where string) (Patch, error) {
+	if err := requireMembers(value, where, []string{"kind", "path", "index", "removed", "inserted"}, nil); err != nil {
+		return Patch{}, err
+	}
+
+	path, err := parsePath(value.Member("path"), where)
+	if err != nil {
+		return Patch{}, err
+	}
+	at, ok := wholeNumber(value.Member("index"))
+	removed := value.Member("removed")
+	inserted := value.Member("inserted")
+	if ok == false || at < 0 || removed.Kind != mzjson.Array || inserted.Kind != mzjson.Array {
+		return Patch{}, ChangesError{reason: where + " must name where in its list it starts, from 0, and the items it takes out and puts in"}
+	}
+
+	return Patch{Kind: "splice", Path: path, At: at, Removed: removed.Items, Inserted: inserted.Items}, nil
+}
+
+// parsePath reads a set or splice patch's path: keys and indexes, at least one step long.
+func parsePath(pathValue *mzjson.Value, where string) ([]PathSegment, error) {
+	if pathValue.Kind != mzjson.Array || len(pathValue.Items) == 0 {
+		return nil, ChangesError{reason: where + ".path must be a list of keys and indexes, at least one long"}
+	}
+
 	path := []PathSegment{}
 	for _, step := range pathValue.Items {
 		if step.Kind == mzjson.String {
@@ -218,12 +261,12 @@ func parseSet(value *mzjson.Value, where string) (Patch, error) {
 		}
 		index, ok := wholeNumber(step)
 		if ok == false || index < 0 {
-			return Patch{}, ChangesError{reason: where + ".path must hold keys and indexes from 0 only"}
+			return nil, ChangesError{reason: where + ".path must hold keys and indexes from 0 only"}
 		}
 		path = append(path, PathSegment{Index: index, IsIndex: true})
 	}
 
-	return Patch{Kind: "set", Path: path, Was: value.Member("before"), Becomes: value.Member("after")}, nil
+	return path, nil
 }
 
 //endregion reading the body
@@ -241,9 +284,12 @@ func ApplyToMap(mapID int, file []byte, patches []Patch) ([]byte, error) {
 	}
 
 	for _, patch := range patches {
-		if patch.Kind == "tiles" {
+		switch patch.Kind {
+		case "tiles":
 			err = applyTiles(mapID, root, patch)
-		} else {
+		case "splice":
+			err = applySplice(mapID, root, patch)
+		default:
 			err = applySet(mapID, root, patch)
 		}
 		if err != nil {
@@ -318,6 +364,40 @@ func applySet(mapID int, root *mzjson.Value, patch Patch) error {
 			parent.Members[index].Value = becomes
 		}
 	}
+
+	return nil
+}
+
+// applySplice takes a splice's items out of the list at its path and puts its new ones in their place, once the list is
+// found to end exactly where the items taken out end, and to hold those very items there. An event's id is its place in
+// the list, so a splice short of the end would renumber every event after it, and a list grown or shrunk since the editor
+// read it means its events changed: either is refused. The items put in keep the key order they came in.
+func applySplice(mapID int, root *mzjson.Value, patch Patch) error {
+	list := root
+	for _, step := range patch.Path {
+		list = childAt(list, step)
+		if list == nil {
+			return MismatchError{MapID: mapID, reason: spotWords(patch.Path, true)}
+		}
+	}
+	if list.Kind != mzjson.Array || patch.At+len(patch.Removed) != len(list.Items) {
+		return MismatchError{MapID: mapID, reason: spotWords(patch.Path, false)}
+	}
+
+	// each item taken out must be the one the editor saw there; an event deleted in MZ since leaves null, and is gone.
+	for offset, removed := range patch.Removed {
+		held := list.Items[patch.At+offset]
+		if sameValue(held, removed) == false {
+			spot := append(append([]PathSegment{}, patch.Path...), PathSegment{Index: patch.At + offset, IsIndex: true})
+			return MismatchError{MapID: mapID, reason: spotWords(spot, held.Kind == mzjson.Null)}
+		}
+	}
+
+	inserted := []*mzjson.Value{}
+	for _, item := range patch.Inserted {
+		inserted = append(inserted, cloneValue(item))
+	}
+	list.Items = append(list.Items[:patch.At:patch.At], inserted...)
 
 	return nil
 }
@@ -429,9 +509,9 @@ func describeCell(root *mzjson.Value, index int) string {
 	return fmt.Sprintf("the tile at %d, %d on %s", inLayer%width, inLayer/width, layer)
 }
 
-// spotWords words what a set patch found where it lands, the way an author knows a map, for a refusal the author reads:
-// the event a path into the event list reaches, by its id, gone or changed; the events as a whole; or else the map's own
-// settings, changed.
+// spotWords words what a set or splice patch found where it lands, the way an author knows a map, for a refusal the author
+// reads: the event a path into the event list reaches, by its id, gone or changed; the events as a whole; or else the
+// map's own settings, changed.
 func spotWords(path []PathSegment, gone bool) string {
 	inEvents := path[0].IsIndex == false && path[0].Key == "events"
 	if inEvents && len(path) >= 2 && path[1].IsIndex {
@@ -484,7 +564,7 @@ func requireMembers(value *mzjson.Value, where string, required []string, option
 		}
 		seen[member.Key] = true
 		if known[member.Key] == false {
-			return ChangesError{reason: fmt.Sprintf("%s holds %q, which a change to a blueprint has no use for", where, member.Key)}
+			return ChangesError{reason: fmt.Sprintf("%s holds %q, which an act has no use for", where, member.Key)}
 		}
 	}
 	for _, key := range required {

@@ -220,6 +220,7 @@ func routes(changes *watch.Hub, policy middleware.Policy) http.Handler {
 
 	mux.HandleFunc("GET /api/img/{folder}", api.ListImages)
 	mux.HandleFunc("GET /api/img/{folder}/{name}", api.LoadImage)
+	mux.HandleFunc("GET /api/audio/{folder}", api.ListAudio)
 	mux.HandleFunc("GET /api/audio/{folder}/{name}", api.LoadAudio)
 	mux.HandleFunc("GET /api/plugin-source/{path...}", api.LoadPluginSource)
 
@@ -233,6 +234,9 @@ func routes(changes *watch.Hub, policy middleware.Policy) http.Handler {
 	// a change to a blueprint reaches the blueprints and every map holding a copy of it in one act, each map's file
 	// taking its patches as it stands, so the blueprint and its copies on disk never part.
 	mux.HandleFunc("PUT /api/blueprint-changes", api.WriteBlueprintChanges(changes))
+
+	// a transfer pair reaches both maps it joins in one act the same way, so its two ends on disk never part either.
+	mux.HandleFunc("PUT /api/map-changes", api.WriteMapChanges(changes))
 
 	// the party a new game seats, for showing each event's page as a fresh save would.
 	mux.HandleFunc("GET /api/new-game", api.LoadNewGame)

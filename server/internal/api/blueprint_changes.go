@@ -40,6 +40,22 @@ func (err missingMapError) Error() string {
 // that the files still hold what it would take back. Every write reaches the change stream carrying the saving window's
 // id.
 func WriteBlueprintChanges(announcer WriteAnnouncer) http.HandlerFunc {
+	return writeChanges(announcer, false)
+}
+
+// WriteMapChanges serves PUT /api/map-changes: one change written to several maps' files in one act, made, undone or
+// redone, which no save of one map could keep together: a transfer pair, whose two ends stand on two maps. It is the act
+// WriteBlueprintChanges writes, naming no blueprints, and a body naming them is refused with a 400: every map's patches go
+// into its file as it stands, each checked first, and nothing is written unless every one fits, so the two ends on disk
+// never part. A map changed on disk since refuses the whole act with a 409 naming it, and a map whose file is gone is a
+// 404. It answers 204.
+func WriteMapChanges(announcer WriteAnnouncer) http.HandlerFunc {
+	return writeChanges(announcer, true)
+}
+
+// writeChanges serves one act (see WriteBlueprintChanges), refusing a body naming the blueprints when it writes maps
+// alone.
+func writeChanges(announcer WriteAnnouncer, mapsAlone bool) http.HandlerFunc {
 	return func(responseWriter http.ResponseWriter, httpRequest *http.Request) {
 		projectPath, pathErr := GetProjectPath()
 		if pathErr != nil {
@@ -56,6 +72,10 @@ func WriteBlueprintChanges(announcer WriteAnnouncer) http.HandlerFunc {
 		changes, err := blueprintwrites.Parse(body)
 		if err != nil {
 			refuseBody(responseWriter, err)
+			return
+		}
+		if mapsAlone && changes.Blueprints != nil {
+			http.Error(responseWriter, "a change to maps alone names no blueprints", http.StatusBadRequest)
 			return
 		}
 
