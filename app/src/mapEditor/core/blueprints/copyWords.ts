@@ -92,16 +92,19 @@ const stateWords = (state: CopyFieldState): string =>
 };
 
 /**
- * Names what a copy copies, the way its panel heads it: the blueprint by name, and the blueprint's event it was made from,
- * by the id the blueprint knows it by. A copy whose blueprint is gone can only say so.
+ * Names a copy and what it copies, the way its panel heads it: the copy first, by its own number on its map, then the
+ * blueprint's event it was made from, by the number the blueprint knows it by, and the blueprint by name. Both numbers
+ * are said for what they are, since a copy's own number and its blueprint event's are rarely the same, and a bare
+ * number beside a copy reads as the copy's own. A copy whose blueprint is gone can only say so.
  * @param {LinkedReading} reading The copy, read against its blueprint.
- * @returns {string} Such as "Copy of "Needler nest" (event 2)".
+ * @param {number} copyId The copy's own event number on its map.
+ * @returns {string} Such as "Event 57 · Copy of event 14 of "Needler nest"".
  */
-const copyTitle = (reading: LinkedReading): string =>
+const copyTitle = (reading: LinkedReading, copyId: number): string =>
 {
   return reading.blueprint === null
-    ? 'Copy of a blueprint that is gone'
-    : `Copy of "${reading.blueprint.name}" (event ${reading.link.eventId})`;
+    ? `Event ${copyId} · Copy of a blueprint that is gone`
+    : `Event ${copyId} · Copy of event ${reading.link.eventId} of "${reading.blueprint.name}"`;
 };
 
 /**

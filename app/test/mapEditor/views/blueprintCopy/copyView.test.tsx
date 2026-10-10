@@ -154,7 +154,7 @@ describe('useCopyView', () =>
 
     // Assert.
     expect([ waiting, openDocument.mock.calls.map(([ key ]) => key), screen.getByTestId('copy-panel').querySelector('p')?.textContent ])
-      .toStrictEqual([ 'Opening the blueprints', [ BLUEPRINTS_DOCUMENT ], 'Copy of "Needler nest" (event 2)' ]);
+      .toStrictEqual([ 'Opening the blueprints', [ BLUEPRINTS_DOCUMENT ], 'Event 12 · Copy of event 2 of "Needler nest"' ]);
   });
 
   it('says why the blueprints could not be opened', async () =>
@@ -225,7 +225,7 @@ describe('useCopyView', () =>
 
     // Assert.
     expect([ screen.getByTestId('copy-panel').querySelector('p')?.textContent, screen.getByTestId('copy-summary').textContent ])
-      .toStrictEqual([ 'Copy of a blueprint that is gone', 'Its blueprint is gone.' ]);
+      .toStrictEqual([ 'Event 12 · Copy of a blueprint that is gone', 'Its blueprint is gone.' ]);
   });
 
   it('tells nothing while the project\'s plugin list cannot be read, saying why', () =>
