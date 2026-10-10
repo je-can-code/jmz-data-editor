@@ -5,7 +5,7 @@ import { TILESETS_KEY } from '../../../core/model/documentKeys.ts';
 import type { RmmzTileset } from '../../../core/model/rmmzTypes.ts';
 import { brushForPick } from '../../../core/palette/paletteGeometry.ts';
 import { isTabAvailable, layoutPaletteTab, PALETTE_TABS, type PaletteRect, type PaletteTab } from '../../../core/palette/paletteLayout.ts';
-import { recallPalette, type PaletteMemory } from '../../../core/palette/paletteMemory.ts';
+import { brushOnShow, recallPalette, type PaletteMemory } from '../../../core/palette/paletteMemory.ts';
 import type { PaletteEditing } from '../../../core/palette/paletteMode.ts';
 import { describeHover, describePick, FLAG_MODE_WORDS, paletteHint } from '../../../core/palette/paletteWords.ts';
 import {
@@ -129,17 +129,27 @@ const TilesetPalette = (props: { readonly tileset: RmmzTileset }) =>
   const mode = usePaletteMode();
   const marksState = useTilesetMarks(tileset.id);
   const [ memory, setMemory ] = useState<PaletteMemory>(() => recallPalette(paint.memories, tileset));
+  const [ shownPick ] = useState(() => memory.pick);
   const [ hover, setHover ] = useState<PaletteHover | null>(null);
   const [ preview, setPreview ] = useState<PaletteHover | null>(null);
   const layout = useMemo(() => layoutPaletteTab(memory.tab, names), [ memory.tab, names ]);
   const editing = mode.editing === 'passability';
+  const { pick } = memory;
 
-  // what is picked becomes the window's brush, and is remembered for this tileset.
+  // the tab on show and what is picked are remembered for this tileset.
   useEffect(() =>
   {
     paint.memories.set(tileset.id, memory);
-    paint.selection.setBrush(brushForPick(names, memory.pick, tileset.id));
-  }, [ paint, memory, names, tileset.id ]);
+  }, [ paint, memory, tileset.id ]);
+
+  // what is picked becomes the window's brush; a tab changing picks nothing. Coming into view, before anything is picked
+  // anew, the palette leaves the window a brush it already holds of this tileset's tiles, such as one the eyedropper took
+  // off a map, and hands it the pick it remembers otherwise.
+  useEffect(() =>
+  {
+    const picked = brushForPick(names, pick, tileset.id);
+    paint.selection.setBrush(pick === shownPick ? brushOnShow(paint.selection.brush, picked, tileset.id) : picked);
+  }, [ paint, pick, shownPick, names, tileset.id ]);
 
   // the regions have no passability, so the editor shows a sheet's tiles instead.
   useEffect(() =>
