@@ -207,6 +207,37 @@ const traitsRow = (readings: readonly BattlerReading[]): RowModel<readonly strin
 };
 
 /**
+ * What a click on one word of the battler's AI traits or roles comes to: the set the picked battlers then have, or why
+ * the click changes nothing, said where it happened.
+ */
+type SetToggle =
+  | { readonly kind: 'set'; readonly value: readonly string[] }
+  | { readonly kind: 'refused'; readonly why: string };
+
+/**
+ * Works out what a click on one word of the battler's AI traits or roles does: that word turned on, or off. A battler
+ * whose page names no traits fights with its enemy's, and a page has no way to name no traits at all, so turning off the
+ * enemy's only trait there would leave the battler exactly as it was; the click says so instead, and how to get the
+ * trait off. Roles have no such floor: a battler with none simply has none.
+ * @param {'aiTraits' | 'aiRoles'} row Which set.
+ * @param {RowModel<readonly string[]>} model The set's row, as the picked battlers hold it.
+ * @param {string} word The word clicked.
+ * @returns {SetToggle} The set to give the picked battlers, or why nothing changes.
+ */
+const toggleSetWord = (row: 'aiTraits' | 'aiRoles', model: RowModel<readonly string[]>, word: string): SetToggle =>
+{
+  const value = model.value ?? [];
+  const next = value.includes(word) ? value.filter(each => each !== word) : [ ...value, word ];
+  if (row === 'aiTraits' && next.length === 0 && model.set === false)
+  {
+    const name = setWords([ word ]);
+    return { kind: 'refused', why: `${name} is the enemy's only trait, and a battler always keeps at least one. Pick the trait it should use instead, then turn ${name} off.` };
+  }
+
+  return { kind: 'set', value: next };
+};
+
+/**
  * Builds the AI roles' row: the page's set, or none at all. An enemy whose note names roles is told about, since those
  * never reach a battler on the map, so the author sets them here.
  * @param {readonly BattlerReading[]} readings Each battler.
@@ -263,6 +294,7 @@ export {
   TEAM_WORDS,
   teamRow,
   teamWords,
+  toggleSetWord,
   traitsRow,
 };
-export type { RowModel, RowSource };
+export type { RowModel, RowSource, SetToggle };

@@ -58,6 +58,12 @@ type MapSurfaceProps = {
    * What the map paints with: its window's paint. Left out, the page's own.
    */
   readonly paint?: WindowPaint;
+
+  /**
+   * The number of the ask to hand the map the keyboard, as bringing its tab forward asks; a new number hands it over
+   * again. Left out, the map takes the keys only when clicked.
+   */
+  readonly keysRequest?: number;
 };
 
 /**
@@ -107,7 +113,7 @@ const identityKey = (value: object): number =>
  */
 const MapSurface = (props: MapSurfaceProps) =>
 {
-  const { document, focusEventId, focusRequest = 0, focusCell = null, focusCellRequest = 0, visible, selection, onNotice, paint } = props;
+  const { document, focusEventId, focusRequest = 0, focusCell = null, focusCellRequest = 0, visible, selection, onNotice, paint, keysRequest = 0 } = props;
   const panelWindow = usePanelWindow();
 
   // a new window or a new document is a new key, which mounts a new view in place of the old one.
@@ -126,6 +132,7 @@ const MapSurface = (props: MapSurfaceProps) =>
         selection={selection}
         onNotice={onNotice}
         paint={paint}
+        keysRequest={keysRequest}
       />
     </Box>
   );

@@ -90,7 +90,7 @@ describe('CopyQuickSection', () =>
       screen.getByTestId('copy-summary').textContent,
       section.compareDocumentPosition(screen.getByTestId('quick-kind-jabs.battler')) === Node.DOCUMENT_POSITION_FOLLOWING,
     ])
-      .toStrictEqual([ 'Copy of "Needler nest" (event 2)', '1 field set by hand, 1 pinned.', true ]);
+      .toStrictEqual([ 'Event 12 · Copy of event 2 of "Needler nest"', '1 field set by hand, 1 pinned.', true ]);
   });
 
   it('follows the blueprint again as one step in the map\'s history, which one undo takes back byte for byte', () =>

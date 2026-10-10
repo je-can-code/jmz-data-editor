@@ -41,7 +41,7 @@ type CodeBoxProps = {
 const CodeBox = (props: CodeBoxProps) =>
 {
   const { value, onChange, minRows = 4, label } = props;
-  const [ draft, change ] = useDraftText(value, onChange);
+  const [ draft, change, finish ] = useDraftText(value, onChange);
   const input = useRef<HTMLTextAreaElement | null>(null);
   const caret = useRef<number | null>(null);
   const lineCount = Math.max(minRows, draft.split('\n').length);
@@ -86,6 +86,7 @@ const CodeBox = (props: CodeBoxProps) =>
         inputProps={{ 'aria-label': label, spellCheck: false, wrap: 'off' }}
         sx={{ px: 1, py: '6px', font: 'inherit', alignItems: 'flex-start', '& textarea': { whiteSpace: 'pre', lineHeight: '20px', p: 0 } }}
         onChange={event => change(event.target.value)}
+        onBlur={finish}
         onKeyDown={event =>
         {
           if (event.key !== 'Tab' || event.shiftKey)

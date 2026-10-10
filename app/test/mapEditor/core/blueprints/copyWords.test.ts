@@ -169,18 +169,30 @@ describe('copy words', () =>
 
   describe('copyTitle', () =>
   {
-    it('names the blueprint and the event of it a copy was made from, and says when the blueprint is gone', () =>
+    it('names the copy by its own number, then the blueprint\'s event it was made from and the blueprint, each for what it is', () =>
+    {
+      // Arrange: copy 57 of the nest's event 2, whose numbers differ, as a copy's and its blueprint event's mostly do.
+      const known = reading();
+
+      // Act.
+      const title = copyTitle(known, 57);
+
+      // Assert.
+      expect(title)
+        .toBe('Event 57 · Copy of event 2 of "Needler nest"');
+    });
+
+    it('names the copy by its own number when its blueprint is gone', () =>
     {
       // Arrange.
-      const known = reading();
       const gone = readCopy(copyOf(needler()), contextOf(null)) as LinkedReading;
 
       // Act.
-      const titles = [ known, gone ].map(copyTitle);
+      const title = copyTitle(gone, 57);
 
       // Assert.
-      expect(titles)
-        .toStrictEqual([ 'Copy of "Needler nest" (event 2)', 'Copy of a blueprint that is gone' ]);
+      expect(title)
+        .toBe('Event 57 · Copy of a blueprint that is gone');
     });
   });
 

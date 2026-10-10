@@ -90,10 +90,10 @@ type ChoiceRowProps = {
 const ChoiceRow = (props: ChoiceRowProps) =>
 {
   const { index, count, text, onText, onMove, onRemove } = props;
-  const [ draft, change ] = useDraftText(text, onText);
+  const [ draft, change, finish ] = useDraftText(text, onText);
   return (
     <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-      <TextField size={'small'} fullWidth label={`Choice ${index + 1}`} value={draft} onChange={event => change(event.target.value)}/>
+      <TextField size={'small'} fullWidth label={`Choice ${index + 1}`} value={draft} onChange={event => change(event.target.value)} onBlur={finish}/>
       <Tooltip title={'Move up'}>
         <span>
           <IconButton size={'small'} aria-label={`Move choice ${index + 1} up`} disabled={index === 0} onClick={() => onMove(index - 1)}>

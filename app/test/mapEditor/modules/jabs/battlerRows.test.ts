@@ -9,7 +9,9 @@ import {
   setWords,
   teamRow,
   teamWords,
+  toggleSetWord,
   traitsRow,
+  type RowModel,
 } from '../../../../src/mapEditor/modules/jabs/battlerRows.ts';
 import { command, page } from '../../support/eventKindFixtures.ts';
 
@@ -294,5 +296,95 @@ describe('battlerRows', () =>
     // Assert.
     expect(row)
       .toStrictEqual({ value: null, mixed: false, from: 'mixed', set: false, note: null });
+  });
+
+  /*
+   * A click on a trait or role turns it on or off for the picked battlers. A battler whose page names no traits fights
+   * with its enemy's, and no page can name none, so turning off the enemy's only trait there would change nothing: the
+   * click says why, in words for the place it happened, instead of doing nothing in silence.
+   */
+  describe('toggleSetWord', () =>
+  {
+    /**
+     * A set's row, as the panel builds it.
+     * @param {readonly string[]} value The set the picked battlers have.
+     * @param {boolean} set Whether their pages name it.
+     * @returns {RowModel<readonly string[]>} The row.
+     */
+    const setRow = (value: readonly string[], set: boolean): RowModel<readonly string[]> => ({
+      value,
+      mixed: false,
+      from: set ? 'event' : 'enemy',
+      set,
+      note: null,
+    });
+
+    it('says why, rather than doing nothing, when the click would turn off the enemy\'s only trait', () =>
+    {
+      // Arrange: the enemy's Melee, and a page naming no traits.
+      const row = setRow([ 'melee' ], false);
+
+      // Act.
+      const outcome = toggleSetWord('aiTraits', row, 'melee');
+
+      // Assert.
+      expect(outcome)
+        .toStrictEqual({
+          kind: 'refused',
+          why: 'Melee is the enemy\'s only trait, and a battler always keeps at least one. Pick the trait it should use instead, then turn Melee off.',
+        });
+    });
+
+    it('turns off one of the enemy\'s traits when it has others, leaving the rest', () =>
+    {
+      // Arrange: the enemy's Melee and Careful, and a page naming no traits.
+      const row = setRow([ 'melee', 'careful' ], false);
+
+      // Act.
+      const outcome = toggleSetWord('aiTraits', row, 'melee');
+
+      // Assert.
+      expect(outcome)
+        .toStrictEqual({ kind: 'set', value: [ 'careful' ] });
+    });
+
+    it('turns off the last trait a page names itself, which hands the battler back to its enemy\'s', () =>
+    {
+      // Arrange: a page naming Melee alone.
+      const row = setRow([ 'melee' ], true);
+
+      // Act.
+      const outcome = toggleSetWord('aiTraits', row, 'melee');
+
+      // Assert.
+      expect(outcome)
+        .toStrictEqual({ kind: 'set', value: [] });
+    });
+
+    it('turns a trait on beside the enemy\'s only one, which is how that one can then go', () =>
+    {
+      // Arrange: the enemy's Melee, and a page naming no traits.
+      const row = setRow([ 'melee' ], false);
+
+      // Act.
+      const outcome = toggleSetWord('aiTraits', row, 'careful');
+
+      // Assert.
+      expect(outcome)
+        .toStrictEqual({ kind: 'set', value: [ 'melee', 'careful' ] });
+    });
+
+    it('turns off a battler\'s only role, since a battler may have none', () =>
+    {
+      // Arrange: a role the page does not name, as no page names one until the author picks it.
+      const row = setRow([ 'healer' ], false);
+
+      // Act.
+      const outcome = toggleSetWord('aiRoles', row, 'healer');
+
+      // Assert.
+      expect(outcome)
+        .toStrictEqual({ kind: 'set', value: [] });
+    });
   });
 });

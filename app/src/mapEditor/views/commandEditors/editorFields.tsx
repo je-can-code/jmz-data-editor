@@ -1,21 +1,23 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Alert, Autocomplete, Box, Checkbox, FormControlLabel, MenuItem, TextField, Typography, type TextFieldProps } from '@mui/material';
 import type { CommandFieldKind } from '../../core/commands/catalogTypes.ts';
 import type { RmmzEventCommand } from '../../core/model/rmmzTypes.ts';
 import { useDatabaseOptions, type NamedOption } from './editorEnvironment.tsx';
+import { TypingBurst } from './TypingBurst.ts';
 import { useDraftText } from './useDraftText.ts';
 
 /**
- * A text input that keeps its own copy of what is typed while handing every change on, so the caret never jumps
- * however long the change takes to come back through history. A change made elsewhere replaces the copy.
- * @param {Omit<TextFieldProps, 'value' | 'onChange'> & { value: string, onText: (text: string) => void }} props The text, what to do with a change, and the input's other props.
+ * A text input that keeps its own copy of what is typed and hands it on once per burst of typing, as the typing pauses
+ * or the input is left, so the caret never jumps and a word typed is one step in history. A change made elsewhere
+ * replaces the copy.
+ * @param {Omit<TextFieldProps, 'value' | 'onChange' | 'onBlur'> & { value: string, onText: (text: string) => void }} props The text, what to do with a change, and the input's other props.
  * @returns {React.JSX.Element} The input.
  */
-const DraftTextField = (props: Omit<TextFieldProps, 'value' | 'onChange'> & { value: string; onText: (text: string) => void }) =>
+const DraftTextField = (props: Omit<TextFieldProps, 'value' | 'onChange' | 'onBlur'> & { value: string; onText: (text: string) => void }) =>
 {
   const { value, onText, ...rest } = props;
-  const [ draft, change ] = useDraftText(value, onText);
-  return <TextField {...rest} value={draft} onChange={event => change(event.target.value)}/>;
+  const [ draft, change, finish ] = useDraftText(value, onText);
+  return <TextField {...rest} value={draft} onChange={event => change(event.target.value)} onBlur={finish}/>;
 };
 
 /**
@@ -74,9 +76,9 @@ type NumberFieldProps = {
 
 /**
  * A number input that lets the author type freely: a half-typed number ("-", "1.") stays on screen, a complete
- * one inside the bounds is kept as it is typed, and leaving the input brings a typed number outside the bounds
- * back inside them. A stored number is never changed just by passing through the input: only what was typed is
- * brought inside the bounds.
+ * one inside the bounds is kept once the typing pauses, so typing 120 is one step rather than three, and leaving the
+ * input keeps what was typed at once, bringing a number outside the bounds back inside them. A stored number is never
+ * changed just by passing through the input: only what was typed is brought inside the bounds.
  * @param {NumberFieldProps} props The value, its bounds and what to do with a new one.
  * @returns {React.JSX.Element} The input.
  */
@@ -85,11 +87,24 @@ const NumberField = (props: NumberFieldProps) =>
   const { label, value, onChange, min, max, decimals = false, width = 110, helperText } = props;
   const [ draft, setDraft ] = useState(String(value));
 
-  // follow a value changed from outside, unless the draft already says it.
+  // a burst ending after a pause hands its number to the newest onChange, which knows the command as it now stands.
+  const handOn = useRef(onChange);
   useEffect(() =>
   {
+    handOn.current = onChange;
+  }, [ onChange ]);
+  const [ burst ] = useState(() => new TypingBurst<number>(number => handOn.current(number)));
+
+  // an editor closing mid-burst keeps the number typed in it.
+  useEffect(() => () => burst.finish(), [ burst ]);
+
+  // follow a value changed from outside, unless the draft already says it. Nothing is handed on mid-burst, so a value
+  // that changes then came from elsewhere, an undo or another window, and wins over a number still held.
+  useEffect(() =>
+  {
+    burst.drop();
     setDraft(current => (current.trim() !== '' && Number(current) === value ? current : String(value)));
-  }, [ value ]);
+  }, [ value, burst ]);
 
   const parse = (text: string): number | null =>
   {
@@ -110,14 +125,24 @@ const NumberField = (props: NumberFieldProps) =>
       onChange={event =>
       {
         setDraft(event.target.value);
+
+        // a complete number inside the bounds waits for the typing to pause; anything else, half-typed or back to the
+        // stored number, leaves nothing to hand on.
         const number = parse(event.target.value);
         if (number !== null && number === clamp(number, min, max) && number !== value)
         {
-          onChange(number);
+          burst.type(number);
+        }
+        else
+        {
+          burst.drop();
         }
       }}
       onBlur={() =>
       {
+        // leaving decides from what the input shows, which a number held mid-burst only ever repeats.
+        burst.drop();
+
         // nothing typed since the value arrived: leave the stored number exactly as it is.
         if (draft === String(value))
         {

@@ -80,8 +80,9 @@ describe('SetMovementRouteEditor', () =>
     renderEditor(0, whereabouts);
     const first = stand.setting;
 
-    // Act.
+    // Act: type, then leave the box, which ends the burst.
     fireEvent.change(screen.getByLabelText('Show it on'), { target: { value: '5' } });
+    fireEvent.blur(screen.getByLabelText('Show it on'));
 
     // Assert.
     expect([ first, stand.setting ])

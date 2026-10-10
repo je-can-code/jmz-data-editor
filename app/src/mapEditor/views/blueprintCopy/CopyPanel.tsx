@@ -238,8 +238,8 @@ const CopyPanel = (props: CopyPanelProps) =>
   return (
     <Box data-testid={'copy-panel'}>
       <Stack direction={'row'} alignItems={'center'} spacing={1}>
-        <Typography variant={'body2'} sx={{ flex: 1, minWidth: 0, fontWeight: 600 }} noWrap title={copyTitle(reading)}>
-          {copyTitle(reading)}
+        <Typography variant={'body2'} sx={{ flex: 1, minWidth: 0, fontWeight: 600 }} noWrap title={copyTitle(reading, event.id)}>
+          {copyTitle(reading, event.id)}
         </Typography>
         {reading.blueprint !== null && isMappableBlueprintId(blueprintId) && (
           <Tooltip describeChild title={'Open the blueprint\'s event in its own window'}>

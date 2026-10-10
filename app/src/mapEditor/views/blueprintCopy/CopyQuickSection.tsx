@@ -61,8 +61,8 @@ const CopyQuickSection = (props: { readonly mapId: number; readonly copy: RmmzMa
 
   return (
     <Box data-testid={'copy-quick-section'}>
-      <Typography variant={'subtitle2'} noWrap title={copyTitle(reading)}>
-        {copyTitle(reading)}
+      <Typography variant={'subtitle2'} noWrap title={copyTitle(reading, copy.id)}>
+        {copyTitle(reading, copy.id)}
       </Typography>
       <Typography variant={'caption'} color={reading.kind === 'read' ? 'text.secondary' : 'warning.main'} sx={{ display: 'block' }} data-testid={'copy-summary'}>
         {summaryWords(reading)}

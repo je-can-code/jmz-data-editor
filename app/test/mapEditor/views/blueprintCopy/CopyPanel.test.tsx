@@ -170,7 +170,7 @@ describe('CopyPanel', () =>
       screen.getByRole('button', { name: 'Show 16 more that follow the blueprint' }) !== null,
     ])
       .toStrictEqual([
-        'Copy of "Needler nest" (event 2)',
+        'Event 12 · Copy of event 2 of "Needler nest"',
         '1 field set by hand, 1 pinned, 1 at an offset.',
         [
           'Movement speed | Pinned at 5',
@@ -402,7 +402,7 @@ describe('CopyPanel', () =>
     ])
       .toStrictEqual([
         [ 'No change to the blueprint reaches it: it has 2 pages and its blueprint has 1 page.', false, [] ],
-        'Copy of a blueprint that is gone',
+        'Event 12 · Copy of a blueprint that is gone',
         'Its blueprint is gone.',
         null,
         null,

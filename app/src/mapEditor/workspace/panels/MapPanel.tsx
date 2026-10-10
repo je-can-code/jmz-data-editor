@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Box, Button, Chip, CircularProgress, Divider, IconButton, Stack, Tooltip, Typography } from '@mui/material';
 import Palette from '@mui/icons-material/Palette';
 import PaletteOutlined from '@mui/icons-material/PaletteOutlined';
@@ -8,6 +8,7 @@ import type { DocumentHub } from '../../core/history/DocumentHub.ts';
 import { isBlueprintMapId, mapDocumentKey, TILESETS_KEY } from '../../core/model/documentKeys.ts';
 import type { RmmzTileset } from '../../core/model/rmmzTypes.ts';
 import type { WindowPaint } from '../../core/tools/WindowPaint.ts';
+import { takesKeysOnArrival } from '../../core/workspace/mapKeys.ts';
 import type { MapPanelParams } from '../../core/workspace/panels.ts';
 import { documentLabel } from '../../views/documentLabels.ts';
 import { usePanelVisible, usePanelWindow } from '../windowScope.tsx';
@@ -207,6 +208,32 @@ const MapPanel = (props: IDockviewPanelProps<MapPanelParams>) =>
   const cellFocus = useWorkspaceState(state => state.cellFocus[mapId] ?? null);
   const visible = usePanelVisible(api);
 
+  // a map brought forward, by its tab or by another tab closing, takes the keys from wherever they sat only by accident
+  // of that, so a paste goes to the map in view without a click on it first. The check waits for the click that brought
+  // the tab forward to finish putting the keys on the tab.
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  const [ keysRequest, setKeysRequest ] = useState(0);
+  useEffect(() =>
+  {
+    const subscription = api.onDidActiveChange(event =>
+    {
+      if (event.isActive === false)
+      {
+        return;
+      }
+
+      api.getWindow().setTimeout(() =>
+      {
+        const panel = panelRef.current;
+        if (panel !== null && takesKeysOnArrival(panel.ownerDocument.activeElement, panel))
+        {
+          setKeysRequest(current => current + 1);
+        }
+      }, 0);
+    });
+    return () => subscription.dispose();
+  }, [ api ]);
+
   // the panel's window decides what it paints with: the page's own paint in the main window, its own anywhere else.
   const paint = paints.forWindow(usePanelWindow());
   const ownWindow = paint !== paints.main;
@@ -229,7 +256,7 @@ const MapPanel = (props: IDockviewPanelProps<MapPanelParams>) =>
   }, [ api, title ]);
 
   return (
-    <Box sx={{ height: '100%', display: 'flex', bgcolor: 'background.default' }}>
+    <Box ref={panelRef} sx={{ height: '100%', display: 'flex', bgcolor: 'background.default' }}>
       {ownWindow && paletteShown && <MapPaletteDock mapId={mapId} paint={paint}/>}
       <Box sx={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
         <MapStatus mapId={mapId} held={held} focusEventId={focusEventId} palette={palette}/>
@@ -246,6 +273,7 @@ const MapPanel = (props: IDockviewPanelProps<MapPanelParams>) =>
                 visible={visible}
                 selection={controller.selection}
                 paint={paint}
+                keysRequest={keysRequest}
                 onNotice={(text, severity) => controller.notify(text, severity)}
               />
             )}

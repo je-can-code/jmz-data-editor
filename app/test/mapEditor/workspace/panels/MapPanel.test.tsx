@@ -27,35 +27,48 @@ import { stampOf } from '../../support/stampFixtures.ts';
 import { buildTreeRows } from '../../support/treeFixtures.ts';
 
 /**
- * The paint every map view the panel mounted was handed, in order.
+ * The paint every map view the panel mounted was handed, in order, and each ask to give a view the keys.
  */
-const views = vi.hoisted(() => ({ paints: [] as unknown[] }));
+const views = vi.hoisted(() => ({ paints: [] as unknown[], keys: [] as number[] }));
 
-// the map view draws on the GPU, which a test page has none of; what the panel owes it is the paint of its window.
+// the map view draws on the GPU, which a test page has none of; what the panel owes it is the paint of its window, and
+// the asks to take the keys.
 vi.mock('../../../../src/mapEditor/render/MapView.tsx', async () =>
 {
   const { useEffect } = await import('react');
 
   /**
-   * Stands in for the map view, recording the paint it was handed.
-   * @param {{ mapId: number, paint?: unknown }} props The map and its paint.
+   * Stands in for the map view, recording the paint it was handed and every ask to take the keys.
+   * @param {{ mapId: number, paint?: unknown, keysRequest?: number }} props The map, its paint and the keys' ask.
    * @returns {React.JSX.Element} A line naming the map.
    */
-  const MapView = (props: { mapId: number; paint?: unknown }) =>
+  const MapView = (props: { mapId: number; paint?: unknown; keysRequest?: number }) =>
   {
-    const { mapId, paint } = props;
+    const { mapId, paint, keysRequest = 0 } = props;
     useEffect(() =>
     {
       views.paints.push(paint);
     }, [ paint ]);
 
-    return <div data-testid={'map-view'}>{`Map ${mapId}`}</div>;
+    useEffect(() =>
+    {
+      if (keysRequest > 0)
+      {
+        views.keys.push(keysRequest);
+      }
+    }, [ keysRequest ]);
+
+    return <div data-testid={'map-view'} tabIndex={0}>{`Map ${mapId}`}</div>;
   };
 
   return { MapView };
 });
 
 /*
+ * A map panel brought forward hands its map the keys when they sit only where bringing it forward left them (its tab,
+ * nowhere, or another map's view), so Ctrl+V pastes into the map in view without a click on it first; keys the author
+ * put somewhere to work, a box or a list or the panel itself, stay where they are.
+ *
  * A map panel paints with its window's paint. Docked in the main window, that is the page's own, which the workspace's
  * palette and layers panel pick for, and the panel carries no palette of its own. Torn out into a window of its own,
  * it carries its own palette and layers panel beside the map, picking for that window alone, so painting there needs
@@ -70,6 +83,7 @@ describe('MapPanel', () =>
   afterEach(() =>
   {
     views.paints.splice(0);
+    views.keys.splice(0);
     frames.splice(0).forEach(frame => frame.remove());
   });
 
@@ -98,13 +112,15 @@ describe('MapPanel', () =>
 
   /**
    * A stand-in for the dock's api for the panel: it can be moved from one window to another, as tearing it out does,
-   * and records every change to its parameters.
-   * @returns {object} The api, a way to move the panel, and the parameters it was handed.
+   * brought forward or sent back, as its tab does, and records every change to its parameters.
+   * @returns {object} The api, a way to move the panel, a way to bring it forward or send it back, and the parameters
+   * it was handed.
    */
   const buildPanel = () =>
   {
     let current: Window = window;
     const listeners = new Set<() => void>();
+    const activeListeners = new Set<(event: { isActive: boolean }) => void>();
     const updates: object[] = [];
     const api = {
       title: '',
@@ -119,6 +135,11 @@ describe('MapPanel', () =>
         listeners.add(listener);
         return { dispose: () => listeners.delete(listener) };
       },
+      onDidActiveChange: (listener: (event: { isActive: boolean }) => void) =>
+      {
+        activeListeners.add(listener);
+        return { dispose: () => activeListeners.delete(listener) };
+      },
     } as unknown as IDockviewPanelProps['api'];
 
     /**
@@ -131,8 +152,67 @@ describe('MapPanel', () =>
       listeners.forEach(listener => listener());
     };
 
-    return { api, moveTo, updates };
+    /**
+     * Brings the panel forward, or sends it back, and says so, as dockview does when a tab is clicked.
+     * @param {boolean} isActive Whether it is now the panel in front.
+     */
+    const activate = (isActive: boolean) =>
+    {
+      activeListeners.forEach(listener => listener({ isActive }));
+    };
+
+    return { api, moveTo, activate, updates };
   };
+
+  /**
+   * Brings the panel forward with the keys sitting on a given element, then lets the check that waits for the click run.
+   * @param {(isActive: boolean) => void} activate Brings the panel forward or sends it back.
+   * @param {HTMLElement | null} keysOn Where the keys sit as the panel comes forward; null for nowhere.
+   * @param {boolean} isActive Whether the panel comes forward, or goes back.
+   * @returns {Promise<void>} Settles once the check has run.
+   */
+  const arriveWithKeysOn = async (activate: (isActive: boolean) => void, keysOn: HTMLElement | null, isActive = true) =>
+  {
+    if (keysOn === null)
+    {
+      (document.activeElement as HTMLElement | null)?.blur();
+    }
+    else
+    {
+      keysOn.focus();
+    }
+
+    act(() => activate(isActive));
+    await act(async () =>
+    {
+      await new Promise(resolve =>
+      {
+        setTimeout(resolve, 0);
+      });
+    });
+  };
+
+  /**
+   * Adds an element outside the panel that can hold the keys, as a dock tab or a box elsewhere does.
+   * @param {string} tag The element's tag.
+   * @param {Record<string, string>} attributes Its attributes.
+   * @returns {HTMLElement} The element, on the page.
+   */
+  const keyHolder = (tag: string, attributes: Record<string, string> = {}): HTMLElement =>
+  {
+    const element = document.createElement(tag);
+    element.tabIndex = 0;
+    Object.entries(attributes).forEach(([ name, value ]) => element.setAttribute(name, value));
+    document.body.appendChild(element);
+    holders.push(element);
+    return element;
+  };
+
+  const holders: HTMLElement[] = [];
+  afterEach(() =>
+  {
+    holders.splice(0).forEach(holder => holder.remove());
+  });
 
   /**
    * Opens a second window on the test page, standing in for a torn-out panel's window.
@@ -359,6 +439,118 @@ describe('MapPanel', () =>
       // Assert.
       expect([ deleted, await screen.findByTestId('map-view') !== null, vi.mocked(api.setTitle).mock.calls.at(-1)?.[0] ])
         .toStrictEqual([ [ true, 'Blueprint (deleted)' ], true, 'Goblin camp' ]);
+    });
+  });
+
+  describe('taking the keys as its map comes forward', () =>
+  {
+    /**
+     * Renders the cave's panel, with its stand-in map view mounted.
+     * @returns {Promise<(isActive: boolean) => void>} How to bring the panel forward or send it back.
+     */
+    const renderCave = async () =>
+    {
+      const { controller } = buildWorkspace();
+      const { api, activate } = buildPanel();
+      render(panelFor(controller, api));
+      await screen.findByTestId('map-view');
+      return activate;
+    };
+
+    it('hands the map the keys when its tab, clicked to bring it forward, holds them', async () =>
+    {
+      // Arrange.
+      const activate = await renderCave();
+      const tab = keyHolder('div', { role: 'tab' });
+
+      // Act.
+      await arriveWithKeysOn(activate, tab);
+
+      // Assert.
+      expect(views.keys)
+        .toStrictEqual([ 1 ]);
+    });
+
+    it('hands the map the keys when nothing holds them, as after another tab closes', async () =>
+    {
+      // Arrange.
+      const activate = await renderCave();
+
+      // Act.
+      await arriveWithKeysOn(activate, null);
+
+      // Assert.
+      expect(views.keys)
+        .toStrictEqual([ 1 ]);
+    });
+
+    it('takes the keys from another map\'s view, which the author has moved away from', async () =>
+    {
+      // Arrange.
+      const activate = await renderCave();
+      const otherMap = keyHolder('div', { 'data-map-view': 'true' });
+
+      // Act.
+      await arriveWithKeysOn(activate, otherMap);
+
+      // Assert.
+      expect(views.keys)
+        .toStrictEqual([ 1 ]);
+    });
+
+    it('leaves the keys in a box being typed in elsewhere', async () =>
+    {
+      // Arrange.
+      const activate = await renderCave();
+      const box = keyHolder('input');
+
+      // Act.
+      await arriveWithKeysOn(activate, box);
+
+      // Assert.
+      expect([ views.keys, document.activeElement === box ])
+        .toStrictEqual([ [], true ]);
+    });
+
+    it('leaves the keys in a list that brought the map forward to show an event', async () =>
+    {
+      // Arrange.
+      const activate = await renderCave();
+      const listRow = keyHolder('div', { role: 'listitem' });
+
+      // Act.
+      await arriveWithKeysOn(activate, listRow);
+
+      // Assert.
+      expect(views.keys)
+        .toStrictEqual([]);
+    });
+
+    it('leaves the keys where they are inside the panel, such as on the map just clicked', async () =>
+    {
+      // Arrange.
+      const activate = await renderCave();
+
+      // Act.
+      await arriveWithKeysOn(activate, screen.getByTestId('map-view'));
+
+      // Assert.
+      expect(views.keys)
+        .toStrictEqual([]);
+    });
+
+    it('takes nothing as the panel goes back behind another', async () =>
+    {
+      // Arrange.
+      const activate = await renderCave();
+      const tab = keyHolder('div', { role: 'tab' });
+
+      // Act.
+      await arriveWithKeysOn(activate, tab, false);
+
+      // Assert.
+      expect(views.keys)
+        .toStrictEqual([]);
     });
   });
 });

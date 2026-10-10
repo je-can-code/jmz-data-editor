@@ -29,6 +29,7 @@ import {
   switchWords,
   teamRow,
   teamWords,
+  toggleSetWord,
   traitsRow,
   type RowModel,
 } from './battlerRows.ts';
@@ -325,7 +326,9 @@ const SwitchField = (props: {
 
 /**
  * One of the battler's sets, its AI traits or roles: a chip for each word, filled when the battler has it. With the
- * picked battlers holding different sets, the chips stand still and say so.
+ * picked battlers holding different sets, the chips stand still and say so. A click that cannot change anything, such as
+ * turning off the enemy's only trait, says why beneath the chips rather than doing nothing in silence; the next click
+ * that does change something, or a change to the set from anywhere, takes the words away.
  * @param {{ label: string, words: readonly string[], model: RowModel<readonly string[]>, row: 'aiTraits' | 'aiRoles', onChange: (change: BattlerChange) => void }} props The row.
  * @returns {React.JSX.Element} The row.
  */
@@ -339,15 +342,30 @@ const SetField = (props: {
 {
   const { label, words, model, row, onChange } = props;
   const value = model.value ?? [];
+  const [ refusal, setRefusal ] = useState<string | null>(null);
+
+  // a set changed from anywhere, an undo or another battler picked, leaves nothing for the words to answer.
+  const valueKey = value.join(',');
+  useEffect(() =>
+  {
+    setRefusal(null);
+  }, [ valueKey, model.set ]);
 
   /**
-   * Gives every picked battler the set with one word turned on or off.
+   * Gives every picked battler the set with one word turned on or off, or says why that cannot change anything.
    * @param {string} word The word.
    */
   const toggle = (word: string) =>
   {
-    const next = value.includes(word) ? value.filter(each => each !== word) : [ ...value, word ];
-    onChange({ row, value: next });
+    const outcome = toggleSetWord(row, model, word);
+    if (outcome.kind === 'refused')
+    {
+      setRefusal(outcome.why);
+      return;
+    }
+
+    setRefusal(null);
+    onChange({ row, value: outcome.value });
   };
 
   return (
@@ -356,7 +374,7 @@ const SetField = (props: {
       from={model.from}
       set={model.set}
       clearTip={row === 'aiRoles' ? 'Take the roles out' : 'Use the enemy\'s'}
-      note={model.mixed ? 'Differs between the picked battlers.' : model.note}
+      note={refusal ?? (model.mixed ? 'Differs between the picked battlers.' : model.note)}
       onClear={() => onChange({ row, value: null })}
       testId={row}
     >
