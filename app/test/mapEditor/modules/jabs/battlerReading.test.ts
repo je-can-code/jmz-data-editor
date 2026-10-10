@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { RmmzEventCommand } from '../../../../src/mapEditor/core/model/rmmzTypes.ts';
-import { jabsDefaultsOf, pageEnemyId, readBattlerPage, type BattlerReading, type EnemyRecord, type JabsDefaults } from '../../../../src/mapEditor/modules/jabs/battlerReading.ts';
+import { jabsDefaultsOf, pageEnemyId, pageLevelOf, readBattlerPage, type BattlerReading, type EnemyRecord, type JabsDefaults } from '../../../../src/mapEditor/modules/jabs/battlerReading.ts';
 import type { PluginsJsEntry } from '../../../../src/services/plugins/PluginsJsReader.ts';
 import { command, page } from '../../support/eventKindFixtures.ts';
 
@@ -129,6 +129,30 @@ describe('battlerReading', () =>
       // Assert: two spaces is no tag J-ABS reads.
       expect(enemies)
         .toStrictEqual([ 7, null, null, 12, null ]);
+    });
+  });
+
+  describe('pageLevelOf', () =>
+  {
+    it('reads the last level line J-Base offers, in any of its spellings, and none from a line parseInt cannot read', () =>
+    {
+      // Arrange: an earlier level line under the second, the game reading the second; each other spelling alone, in any
+      // case and with the one space allowed; a level with both signs; one spoken in a Show Text; and a page giving none.
+      const pages = [
+        page([ line('<enemyId:5>'), line('<lv:3>', 408), line('<level:5>', 408) ]),
+        page([ line('<enemyId:5>'), line('<LVL: 7>', 408) ]),
+        page([ line('<enemyId:5>'), line('<level:-2>', 408) ]),
+        page([ line('<enemyId:5>'), line('<level:-+3>', 408) ]),
+        page([ line('<enemyId:5>'), command(401, [ '<level:9>' ]) ]),
+        page([ line('<enemyId:5>') ]),
+      ];
+
+      // Act.
+      const levels = pages.map(pageLevelOf);
+
+      // Assert.
+      expect(levels)
+        .toStrictEqual([ 5, 7, -2, null, null, null ]);
     });
   });
 

@@ -27,7 +27,8 @@ import { buildMapJson } from '../../support/fixtures.ts';
  * made. The section reads its settings again whenever the map's own properties change, even mid-edit, and never for a
  * brush stroke's tiles or an event moved, which change many times a second. A config its settings read only once
  * something needs it is asked for once the section shows, and every read of it shows the settings afresh; a drop-down
- * choosing among names, as J-Weather's looks are, writes the name picked.
+ * choosing among names, as J-Weather's looks are, writes the name picked. A part of the section that draws itself, for a
+ * setting the map's own file never holds, shows below the settings, handed the map.
  *
  * J-Lighting's own section stands in for any module's here, over a cave at 85% darkness with no sky.
  */
@@ -380,5 +381,28 @@ describe('ModulePropertiesSection', () =>
     // Assert.
     expect(screen.getByRole('alert').textContent)
       .toBe('That change could not be made: never');
+  });
+
+  it('draws a section\'s own part below its settings, handed the map, and none for a section without one', () =>
+  {
+    // Arrange: a section whose own part names the map it was handed and the map's display name, beside J-Lighting's.
+    const drawn: MapPropertiesSection = {
+      id: 'test.map',
+      title: 'Test',
+      source: LIGHTING.source,
+      body: props => <p data-testid={'own-part'}>{`Map ${props.mapId}: ${props.map.property('displayName')}`}</p>,
+    };
+
+    // Act.
+    const { unmount } = renderSection('<ambient:[70]>', drawn);
+    const own = screen.getByTestId('own-part');
+    const below = screen.getByRole('textbox', { name: 'Darkness' }).compareDocumentPosition(own) === Node.DOCUMENT_POSITION_FOLLOWING;
+    const text = own.textContent;
+    unmount();
+    renderSection('<ambient:[70]>');
+
+    // Assert.
+    expect([ text, below, screen.queryByTestId('own-part') ])
+      .toStrictEqual([ 'Map 1: Test Town', true, null ]);
   });
 });

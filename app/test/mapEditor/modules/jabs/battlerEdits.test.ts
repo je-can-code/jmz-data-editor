@@ -1,9 +1,42 @@
 import { describe, expect, it } from 'vitest';
 import type { RmmzEventCommand, RmmzEventPage } from '../../../../src/mapEditor/core/model/rmmzTypes.ts';
-import { planBattlerChange, type BattlerChange, type BattlerContext } from '../../../../src/mapEditor/modules/jabs/battlerEdits.ts';
+import { pageAtLevel, planBattlerChange, type BattlerChange, type BattlerContext } from '../../../../src/mapEditor/modules/jabs/battlerEdits.ts';
 import type { JabsDefaults } from '../../../../src/mapEditor/modules/jabs/battlerReading.ts';
 import { motionDefaultsFrom } from '../../../../src/mapEditor/modules/jabs/motionTags.ts';
 import { applyEdits, command, event, page } from '../../support/eventKindFixtures.ts';
+
+/**
+ * J-ABS's defaults as Chef Adventure sets them.
+ */
+const DEFAULTS: JabsDefaults = {
+  sight: 4,
+  pursuit: 6,
+  alertedSightBoost: 2,
+  alertedPursuitBoost: 4,
+  alertDuration: 300,
+  canIdle: true,
+  showHpBar: true,
+  showName: true,
+  inanimate: false,
+};
+
+/**
+ * The enemies and defaults a change is read against: enemy 5 a slime sensing 3 tiles, with J-Motion's own defaults.
+ */
+const CONTEXT: BattlerContext = {
+  enemyOf: enemyId => (enemyId === 5 ? { id: 5, name: 'Slime', note: '<sight:3>\n<aiTrait:healer>' } : null),
+  defaults: DEFAULTS,
+  motionDefaults: motionDefaultsFrom(null),
+};
+
+/**
+ * One comment line.
+ * @param {string} text The line.
+ * @param {number} code 108 for a comment's first line, 408 for a later one.
+ * @param {number} indent The line's indent.
+ * @returns {RmmzEventCommand} The command.
+ */
+const line = (text: string, code = 108, indent = 0): RmmzEventCommand => command(code, [ text ], indent);
 
 /*
  * The battler panel writes what an author sets into the page's own comment tags, in place, under the light panel's rule:
@@ -15,39 +48,6 @@ import { applyEdits, command, event, page } from '../../support/eventKindFixture
  */
 describe('planBattlerChange', () =>
 {
-  /**
-   * J-ABS's defaults as Chef Adventure sets them.
-   */
-  const DEFAULTS: JabsDefaults = {
-    sight: 4,
-    pursuit: 6,
-    alertedSightBoost: 2,
-    alertedPursuitBoost: 4,
-    alertDuration: 300,
-    canIdle: true,
-    showHpBar: true,
-    showName: true,
-    inanimate: false,
-  };
-
-  /**
-   * The enemies and defaults a change is read against: enemy 5 a slime sensing 3 tiles, with J-Motion's own defaults.
-   */
-  const CONTEXT: BattlerContext = {
-    enemyOf: enemyId => (enemyId === 5 ? { id: 5, name: 'Slime', note: '<sight:3>\n<aiTrait:healer>' } : null),
-    defaults: DEFAULTS,
-    motionDefaults: motionDefaultsFrom(null),
-  };
-
-  /**
-   * One comment line.
-   * @param {string} text The line.
-   * @param {number} code 108 for a comment's first line, 408 for a later one.
-   * @param {number} indent The line's indent.
-   * @returns {RmmzEventCommand} The command.
-   */
-  const line = (text: string, code = 108, indent = 0): RmmzEventCommand => command(code, [ text ], indent);
-
   /**
    * Applies a change to a page as the panel would, and reads back its command list as code and text.
    * @param {RmmzEventPage} before The page.
@@ -372,5 +372,58 @@ describe('planBattlerChange', () =>
     // Assert: the light keeps its line, and the level joins after it, in the enemy's comment.
     expect(after)
       .toStrictEqual([ '<enemyId:5>', '<light:[3]>', '<level:12>', undefined ]);
+  });
+});
+
+/*
+ * The battler brush gives each battler it places at a level that level the way the panel's level row writes one, so a
+ * battler brushed at a level and one given it in the panel read the same, line for line: a new <level:N> line at the end
+ * of the comment holding the enemy, or the page's last level line written over, its spelling kept. The page handed in is
+ * never changed, and a page naming no enemy is refused, as no battler page lacks one.
+ */
+describe('pageAtLevel', () =>
+{
+  it('puts a new level line where the panel\'s level row puts one, line for line', () =>
+  {
+    // Arrange: the motion alone, then the enemy with its speed, then a light's comment, as most battlers are laid out.
+    const before = page([ line('<motion:[float]>'), line('<enemyId:5>'), line('<moveSpeed:4.1>', 408), line('<light:[2]>') ]);
+    const [ panel ] = applyEdits(event(1, [ before ]), planBattlerChange(before, 0, { row: 'level', value: 12 }, CONTEXT)).pages;
+
+    // Act.
+    const brushed = pageAtLevel(before, 12);
+
+    // Assert: the level ends the enemy's comment, before the light's, and the page handed in is as it was.
+    expect([ brushed.list.map(each => [ each.code, each.parameters[0] ]), brushed, before.list.length ])
+      .toStrictEqual([
+        [ [ 108, '<motion:[float]>' ], [ 108, '<enemyId:5>' ], [ 408, '<moveSpeed:4.1>' ], [ 408, '<level:12>' ], [ 108, '<light:[2]>' ], [ 0, undefined ] ],
+        panel,
+        5,
+      ]);
+  });
+
+  it('writes over the last level line the page has, keeping its spelling, and leaves an earlier one', () =>
+  {
+    // Arrange: an earlier level the game ignores under the one it reads, spelled short.
+    const before = page([ line('<enemyId:5>'), line('<level:3>', 408), line('<lv:5>', 408) ]);
+
+    // Act.
+    const brushed = pageAtLevel(before, -2);
+
+    // Assert.
+    expect(brushed.list.map(each => each.parameters[0]))
+      .toStrictEqual([ '<enemyId:5>', '<level:3>', '<lv:-2>', undefined ]);
+  });
+
+  it('refuses a page naming no enemy', () =>
+  {
+    // Arrange: a page of comments, none of them an enemy.
+    const before = page([ line('<sight:4>') ]);
+
+    // Act.
+    const write = () => pageAtLevel(before, 12);
+
+    // Assert.
+    expect(write)
+      .toThrow('this page names no enemy');
   });
 });

@@ -2,10 +2,10 @@ import { describe, expect, it } from 'vitest';
 import { CommandCatalog } from '../../../../src/mapEditor/core/commands/CommandCatalog.ts';
 import { PluginModuleRegistry } from '../../../../src/mapEditor/core/modules/PluginModuleRegistry.ts';
 import { battlerTagFields } from '../../../../src/mapEditor/modules/jabs/battlerFields.ts';
-import { actionMapIdOf, isBattler, jabsModule } from '../../../../src/mapEditor/modules/jabs/jabsModule.ts';
+import { actionMapIdOf, isBattler, jabsModule, MAP_BATTLERS_ID } from '../../../../src/mapEditor/modules/jabs/jabsModule.ts';
 import { registerCoreEventKinds } from '../../../../src/mapEditor/services/coreEventKinds.ts';
 import type { PluginsJsEntry } from '../../../../src/services/plugins/PluginsJsReader.ts';
-import { command, event, page, text, transferPage } from '../../support/eventKindFixtures.ts';
+import { command, event, hubWith, page, text, transferPage } from '../../support/eventKindFixtures.ts';
 
 /*
  * J-ABS copies an action's event off its action map each time the action spawns, so the events there are its
@@ -20,7 +20,8 @@ import { command, event, page, text, transferPage } from '../../support/eventKin
  * the battler's symbol.
  *
  * While J-ABS is enabled, every tag it reads off a battler's page is a field a blueprint's copies follow on its own, and
- * the battler's level is one too while J-LevelMaster, which reads it, is enabled beside it.
+ * the battler's level is one too while J-LevelMaster, which reads it, is enabled beside it. Beside J-LevelMaster too, Map
+ * Properties gains J-ABS's section holding the level a map's new battlers start at, which no map's file holds.
  */
 describe('jabsModule', () =>
 {
@@ -127,6 +128,26 @@ describe('jabsModule', () =>
       const own = battlerTagFields(false).map(tag => tag.id);
       expect([ own.length, read ])
         .toStrictEqual([ 15, [ own, [ ...own, 'jabs.level' ], own, [] ] ]);
+    });
+
+    it('offers the level new battlers start at in Map Properties only beside an enabled J-LevelMaster, reading nothing off the map', () =>
+    {
+      // Arrange: J-ABS beside J-LevelMaster on, off, and missing; and J-ABS off itself beside it.
+      const plugins: [ PluginsJsEntry, PluginsJsEntry[] ][] = [
+        [ jabs(true, { actionMapId: '2' }), [ levelMaster(true) ] ],
+        [ jabs(true, { actionMapId: '2' }), [ levelMaster(false) ] ],
+        [ jabs(true, { actionMapId: '2' }), [] ],
+        [ jabs(false, { actionMapId: '2' }), [ levelMaster(true) ] ],
+      ];
+
+      // Act.
+      const sections = plugins.map(([ plugin, others ]) => registryWith(plugin, others).mapPropertiesSections());
+
+      // Assert: the one section draws its setting itself, since the map's own file never holds it.
+      const [ [ offered ] ] = sections;
+      const map = hubWith([]).hub.map('map:1');
+      expect([ sections.map(each => each.map(section => [ section.id, section.title ])), offered.body !== undefined, offered.source(map) ])
+        .toStrictEqual([ [ [ [ MAP_BATTLERS_ID, 'Battlers' ] ], [], [], [] ], true, { note: null, fields: [] } ]);
     });
 
     it('claims a battler over the transfer its page also is, with the battler\'s symbol, and leaves it with J-ABS off', () =>
