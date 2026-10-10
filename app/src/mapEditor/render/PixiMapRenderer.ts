@@ -119,9 +119,8 @@ type RendererStats = {
  * weather the plugin modules draw over all of them, all held in {@link game}), the lighting the plugin modules draw, then
  * the editor's own: the markers of events that draw no picture, over the footprints of events whose pages cover more
  * tiles than their own, which neither the tiles above characters nor the dark of a lit map may hide, the dimming and
- * highlighted layer, and the overlays, the ghosts and the pointer's own marks,
- * then the selection over them all, so an event shows as selected while the pointer still rests on it after the click
- * that picked it.
+ * highlighted layer, and the overlays, the ghosts and the pointer's own marks, then the selection over them all, so an
+ * event shows as selected while the pointer still rests on it after the click that picked it.
  */
 type Slots = {
   /**
