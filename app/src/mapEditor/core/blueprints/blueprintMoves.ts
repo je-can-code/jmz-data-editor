@@ -1,9 +1,10 @@
 import type { DocumentHub } from '../history/DocumentHub.ts';
+import type { HistoryStep } from '../history/HistoryStep.ts';
 import { createDocument } from '../model/createDocument.ts';
 import type { EditorDocument } from '../model/EditorDocument.ts';
 import { isJsonObject } from '../model/json.ts';
 import { invertPatch, PatchConflictError, type Patch } from '../model/patches.ts';
-import type { HistoryDirection, MoveGuard } from '../workspace/HistoryRouter.ts';
+import type { HistoryDirection } from '../workspace/HistoryRouter.ts';
 import type { BlueprintCopyCounter } from './blueprintCopies.ts';
 import { copiesKeepIt } from './blueprintEdits.ts';
 import { BLUEPRINTS_DOCUMENT } from './blueprints.ts';
@@ -12,6 +13,12 @@ import { BLUEPRINTS_DOCUMENT } from './blueprints.ts';
  * What the guard reads copies from: the window's counter, which it starts when nothing has asked for a count yet.
  */
 type CopiesSource = Pick<BlueprintCopyCounter, 'start' | 'countOf'>;
+
+/**
+ * A move guard (see HistoryRouter's MoveGuard) that names maps by the naming it was built with, so needs none handed to
+ * it.
+ */
+type KeptGuard = (step: HistoryStep, direction: HistoryDirection) => string | null;
 
 /**
  * Lists the ids of the blueprints a copy of the blueprints document holds.
@@ -84,9 +91,9 @@ const blueprintsTakenAway = (document: EditorDocument, patches: readonly Patch[]
  * @param {DocumentHub} hub The window's documents.
  * @param {CopiesSource} copies The window's count of every blueprint's copies.
  * @param {(mapId: number) => string} mapName Names a map as the author knows it.
- * @returns {MoveGuard} The guard.
+ * @returns {KeptGuard} The guard.
  */
-const blueprintsKeptGuard = (hub: DocumentHub, copies: CopiesSource, mapName: (mapId: number) => string): MoveGuard =>
+const blueprintsKeptGuard = (hub: DocumentHub, copies: CopiesSource, mapName: (mapId: number) => string): KeptGuard =>
 {
   return (step, direction) =>
   {
@@ -111,4 +118,4 @@ const blueprintsKeptGuard = (hub: DocumentHub, copies: CopiesSource, mapName: (m
 };
 
 export { blueprintsKeptGuard };
-export type { CopiesSource };
+export type { CopiesSource, KeptGuard };

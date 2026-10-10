@@ -220,6 +220,7 @@ func routes(changes *watch.Hub, policy middleware.Policy) http.Handler {
 
 	mux.HandleFunc("GET /api/img/{folder}", api.ListImages)
 	mux.HandleFunc("GET /api/img/{folder}/{name}", api.LoadImage)
+	mux.HandleFunc("GET /api/audio/{folder}", api.ListAudio)
 	mux.HandleFunc("GET /api/audio/{folder}/{name}", api.LoadAudio)
 	mux.HandleFunc("GET /api/plugin-source/{path...}", api.LoadPluginSource)
 
@@ -234,6 +235,9 @@ func routes(changes *watch.Hub, policy middleware.Policy) http.Handler {
 	// taking its patches as it stands, so the blueprint and its copies on disk never part.
 	mux.HandleFunc("PUT /api/blueprint-changes", api.WriteBlueprintChanges(changes))
 
+	// a transfer pair reaches both maps it joins in one act the same way, so its two ends on disk never part either.
+	mux.HandleFunc("PUT /api/map-changes", api.WriteMapChanges(changes))
+
 	// the party a new game seats, for showing each event's page as a fresh save would.
 	mux.HandleFunc("GET /api/new-game", api.LoadNewGame)
 
@@ -242,12 +246,13 @@ func routes(changes *watch.Hub, policy middleware.Policy) http.Handler {
 
 	//region cross references
 	// the index listens to the change stream from its first answer on, to know which maps to read again. One
-	// index answers all three, since all three come from the same reading of every map.
+	// index answers all four, since all four come from the same reading of every map.
 	index := placements.NewIndex(changes)
 	mux.HandleFunc("GET /api/enemies/{enemyId}/placements", api.LoadEnemyPlacements(index))
 	mux.HandleFunc("GET /api/enemies/{enemyId}/battler-pages", api.LoadEnemyBattlerPages(index))
 	mux.HandleFunc("GET /api/maps/{mapId}/arrivals", api.LoadMapArrivals(index))
 	mux.HandleFunc("GET /api/event-notes", api.LoadEventNotes(index))
+	mux.HandleFunc("GET /api/door-sprites", api.LoadDoorSprites(index))
 	//endregion cross references
 
 	//region command list

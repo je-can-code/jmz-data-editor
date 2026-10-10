@@ -8,6 +8,7 @@ import { isJsonObject, type JsonValue } from '../model/json.ts';
 import type { RmmzCommonEvent, RmmzEventPage, RmmzMap, RmmzMapInfo, RmmzSystem, RmmzTileset } from '../model/rmmzTypes.ts';
 import type { FreshSave } from '../pageRule/freshSave.ts';
 import type { MapArrival } from '../properties/arrivals.ts';
+import type { DoorSprite } from '../transferPairs/doorSprites.ts';
 
 /**
  * The image folders the map editor draws from: tilesets, character sheets, faces, parallaxes and system sheets, and the
@@ -34,6 +35,15 @@ const CLIENT_HEADER = 'X-Jmz-Client';
 type BlueprintWrite = {
   readonly check?: boolean;
   readonly blueprints?: JsonValue;
+  readonly maps: readonly { readonly map: number; readonly patches: readonly Patch[] }[];
+};
+
+/**
+ * One change written to several maps' files at once, made, undone or redone (PUT /api/map-changes): the patches each
+ * map's file takes, in the order they go, each map named once. What a transfer pair writes, its two ends standing on two
+ * maps, which no save of one map could keep together.
+ */
+type MapChangesWrite = {
   readonly maps: readonly { readonly map: number; readonly patches: readonly Patch[] }[];
 };
 
@@ -246,6 +256,32 @@ interface MapEditorApi
    * @returns {Promise<void>} Settles once written, or checked.
    */
   writeBlueprintChanges?(write: BlueprintWrite): Promise<void>;
+
+  /**
+   * Writes one change to several maps in one act, each map's patches applied to its file as it stands and checked first
+   * against what the file holds where they land; nothing is written unless every one fits, and a map changed on disk since
+   * is refused with a 409 naming it. Optional, so a client that cannot write them still serves everything else; a transfer
+   * pair's two ends then reach no file.
+   * @param {MapChangesWrite} write What to write.
+   * @returns {Promise<void>} Settles once written.
+   */
+  writeMapChanges?(write: MapChangesWrite): Promise<void>;
+
+  /**
+   * Lists the sounds in a folder, for pickers such as the sounds a transfer plays. Optional, so a client that cannot list
+   * folders still serves everything else; a picker without it offers only the sound it holds.
+   * @param {AudioFolder} folder The folder under {@code audio/}.
+   * @returns {Promise<string[]>} The file names without {@code .ogg}, sorted; empty when the folder is missing.
+   */
+  listAudio?(folder: AudioFolder): Promise<string[]>;
+
+  /**
+   * Reads every picture the project's doors are drawn with, and how many doors use each, the most used first: what
+   * placing a door offers, starting from the first. Optional, so a client that cannot count them still serves everything
+   * else; a door then starts from MZ's own.
+   * @returns {Promise<DoorSprite[]>} The pictures; empty for a project without doors.
+   */
+  loadDoorSprites?(): Promise<DoorSprite[]>;
 
   /**
    * Builds the address of the server's file-change stream.
@@ -663,6 +699,24 @@ class HttpMapEditorApi implements MapEditorApi
     return this.#put('/api/blueprint-changes', write);
   }
 
+  async writeMapChanges(write: MapChangesWrite): Promise<void>
+  {
+    return this.#put('/api/map-changes', write);
+  }
+
+  async listAudio(folder: AudioFolder): Promise<string[]>
+  {
+    // the server leaves an empty list out of its envelope, as it does every empty answer.
+    const names = await this.#getJson<string[] | undefined>(`/api/audio/${encodeURIComponent(folder)}`);
+    return names ?? [];
+  }
+
+  async loadDoorSprites(): Promise<DoorSprite[]>
+  {
+    const answer = await this.#getJson<{ sprites: DoorSprite[] }>('/api/door-sprites');
+    return answer.sprites;
+  }
+
   fileChangesUrl(): string
   {
     return `${this.#base}/api/file-changes`;
@@ -809,4 +863,13 @@ class HttpMapEditorApi implements MapEditorApi
 }
 
 export { CLIENT_HEADER, HttpMapEditorApi, MapEditorApiError };
-export type { AudioFolder, BlueprintWrite, EnemyBattlerPage, EnemyRow, HttpMapEditorApiOptions, ImageFolder, MapEditorApi };
+export type {
+  AudioFolder,
+  BlueprintWrite,
+  EnemyBattlerPage,
+  EnemyRow,
+  HttpMapEditorApiOptions,
+  ImageFolder,
+  MapChangesWrite,
+  MapEditorApi,
+};

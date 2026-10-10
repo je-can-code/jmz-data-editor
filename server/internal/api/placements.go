@@ -46,6 +46,36 @@ type EventNotes struct {
 	Notes []placements.EventNote `json:"notes"`
 }
 
+// DoorSprites is what GET /api/door-sprites answers with.
+type DoorSprites struct {
+	// Sprites are the pictures the project's doors are drawn with, the most used first: an empty list, never null,
+	// when there are no doors.
+	Sprites []placements.DoorSprite `json:"sprites"`
+}
+
+// LoadDoorSprites serves GET /api/door-sprites: every picture a door in the project is drawn with, and how many doors
+// use each, the most used first, inside the usual envelope. The map editor offers them when it places a door, starting
+// from the one the project's doors use most. The same index as the placements keeps what it read until the change
+// stream says a map changed. A map that cannot be read strictly is a 500 whose envelope names the file.
+func LoadDoorSprites(index *placements.Index) http.HandlerFunc {
+	return func(responseWriter http.ResponseWriter, httpRequest *http.Request) {
+		var req RestRequest
+		if req.ToRestRequest(responseWriter, httpRequest) != nil {
+			return
+		}
+
+		found, err := index.DoorSprites(req.ProjectPath)
+
+		var res RestResponse[*DoorSprites]
+		if err != nil {
+			res.ToRestResponse(responseWriter, req.ProjectPath, err.Error(), nil, http.StatusInternalServerError)
+			return
+		}
+
+		res.ToRestResponse(responseWriter, req.ProjectPath, "", &DoorSprites{Sprites: found}, http.StatusOK)
+	}
+}
+
 // LoadEventNotes serves GET /api/event-notes: the note of every map event, on any map, whose note holds
 // anything, with its map and event ids, inside the usual envelope. The map editor counts the copies of
 // each blueprint from them, since a copy carries its link to the blueprint in its note. The same index

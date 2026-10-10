@@ -1,5 +1,5 @@
 import type { DocumentConflict } from '../core/history/DocumentHub.ts';
-import { parseDocumentKey, type DocumentKey } from '../core/model/documentKeys.ts';
+import { mapDocumentKey, parseDocumentKey, type DocumentKey } from '../core/model/documentKeys.ts';
 
 /**
  * What each editor-only document is called.
@@ -37,6 +37,38 @@ const documentLabel = (key: DocumentKey): string =>
     case 'editor-data':
       return EDITOR_DATA_LABELS[parsed.name] ?? parsed.name;
   }
+};
+
+/**
+ * Names a map by its label alone, as a window knowing no map's name in the tree does.
+ * @param {number} mapId The map.
+ * @returns {string} Its label, such as "Map 12".
+ */
+const mapLabel = (mapId: number): string =>
+{
+  return documentLabel(mapDocumentKey(mapId));
+};
+
+/**
+ * Names a document in words for the author, where a window knows more of it than its key says: a map as the map tree
+ * shows it, by the name the window gives it, or by its label where that name is blank; anything else by its label.
+ * @param {DocumentKey} key The document.
+ * @param {(mapId: number) => string} mapName Names a map as the map tree shows it.
+ * @returns {string} Its name, such as "Riverside Stroll", "Map 12" or "The map tree".
+ */
+const documentName = (key: DocumentKey, mapName: (mapId: number) => string): string =>
+{
+  const parsed = parseDocumentKey(key);
+  if (parsed.kind !== 'map')
+  {
+    return documentLabel(key);
+  }
+
+  // a map the tree gives no name shows in it by its id alone, which its label says.
+  const name = mapName(parsed.mapId);
+  return name.trim() === ''
+    ? documentLabel(key)
+    : name;
 };
 
 /**
@@ -84,5 +116,5 @@ const describeConflict = (key: DocumentKey, conflict: DocumentConflict, name = d
   };
 };
 
-export { describeConflict, documentLabel };
+export { describeConflict, documentLabel, documentName, mapLabel };
 export type { ConflictWording };

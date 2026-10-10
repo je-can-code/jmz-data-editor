@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { withBlueprintLink } from '../../../../src/mapEditor/core/blueprints/blueprintLink.ts';
 import type { BlueprintStepChange } from '../../../../src/mapEditor/core/blueprints/blueprintSteps.ts';
 import type { BlueprintSpot } from '../../../../src/mapEditor/core/blueprints/blueprintUses.ts';
-import { changesNothing, copiesOf, planCopiesOnMap, type CopyGround } from '../../../../src/mapEditor/core/blueprints/copyPlans.ts';
+import { changesNothing, copiesOf, copyGroupOf, planCopiesOnMap, type CopyGround } from '../../../../src/mapEditor/core/blueprints/copyPlans.ts';
 import { blueprintCellChanges } from '../../../../src/mapEditor/core/blueprints/copyTiles.ts';
 import { createEventPage, createMapEvent } from '../../../../src/mapEditor/core/model/eventModel.ts';
 import type { RmmzEventCommand, RmmzEventPage, RmmzMapEvent } from '../../../../src/mapEditor/core/model/rmmzTypes.ts';
@@ -358,6 +358,50 @@ describe('copyPlans', () =>
       // Assert.
       expect(found)
         .toStrictEqual([ [ 5, 1 ], [ 6, 2 ], [ 7, 1 ], [ 8, 2 ], [ 10, 1 ], [ 11, 1 ] ]);
+    });
+  });
+
+  describe('copyGroupOf', () =>
+  {
+    it('finds the group a copy was placed with, by its placement, as a change planned on its map finds it', () =>
+    {
+      // Arrange: another blueprint's placement recorded at placement A's very corner, which, read as this one's, would make
+      // two groups hold A's copies and leave neither known.
+      const { ground, spots } = theMap();
+      const all = [ ...spots, { blueprintId: OTHER, x: 1, y: 1 } ];
+
+      // Act: placement A's guard and post, and placement B's guard.
+      const groups = [ 5, 6, 7 ].map(eventId => copyGroupOf(ground.events, ground.events[eventId] as RmmzMapEvent, blueprintStamp(), all));
+
+      // Assert.
+      expect(groups)
+        .toStrictEqual([ new Map([ [ 1, 5 ], [ 2, 6 ] ]), new Map([ [ 1, 5 ], [ 2, 6 ] ]), new Map([ [ 1, 7 ], [ 2, 8 ] ]) ]);
+    });
+
+    it('knows no group for a copy moved off its placement, nor for any copy of a blueprint of events alone', () =>
+    {
+      // Arrange.
+      const { ground, spots } = theMap();
+
+      // Act: the guard moved off placement A, and placement A's guard with the blueprint's tiles left out.
+      const groups = [ copyGroupOf(ground.events, ground.events[10] as RmmzMapEvent, blueprintStamp(), spots), copyGroupOf(ground.events, ground.events[5] as RmmzMapEvent, blueprintStamp(false), spots) ];
+
+      // Assert.
+      expect(groups)
+        .toStrictEqual([ undefined, undefined ]);
+    });
+
+    it('refuses an event that is no copy of a blueprint', () =>
+    {
+      // Arrange.
+      const { ground, spots } = theMap();
+
+      // Act.
+      const asked = () => copyGroupOf(ground.events, createMapEvent(12, 0, 9), blueprintStamp(), spots);
+
+      // Assert.
+      expect(asked)
+        .toThrow('event 12 is no copy of a blueprint');
     });
   });
 });

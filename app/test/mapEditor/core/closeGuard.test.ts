@@ -72,6 +72,21 @@ describe('closeGuard', () =>
         .toStrictEqual([ 'map:1' ]);
     });
 
+    it('lists a clean map whose file was removed from disk, its copy here the only one left, and not the clean map beside it', () =>
+    {
+      // Arrange: map 3 clean, its file removed outside the editor.
+      const hub = buildHub();
+      hub.adopt('map:3', buildMapJson() as unknown as JsonValue);
+      hub.applyOutsideContent('map:3', null);
+
+      // Act.
+      const atRisk = unsavedOnlyHere(hub, { sharesLatest: () => false });
+
+      // Assert.
+      expect(atRisk)
+        .toStrictEqual([ 'map:1', 'map:3' ]);
+    });
+
     it('leaves out an edited document another window holds at exactly this state', () =>
     {
       // Arrange.

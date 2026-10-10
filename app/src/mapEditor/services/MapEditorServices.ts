@@ -29,6 +29,8 @@ import { WindowPreview } from '../core/preview/WindowPreview.ts';
 import { StampHistory } from '../core/stamps/StampHistory.ts';
 import { WindowClock } from '../core/time/WindowClock.ts';
 import { WindowPaints } from '../core/tools/WindowPaint.ts';
+import { PairChoiceMemory } from '../core/transferPairs/PairChoices.ts';
+import { PairWriter } from '../core/transferPairs/PairWriter.ts';
 import { FileChangeFeed, openEventSource, type EventSourceFactory } from '../core/sync/FileChangeFeed.ts';
 import { FileChangeRouter } from '../core/sync/fileChangeRouting.ts';
 import { lookAtDocument } from '../core/sync/lookAtDocument.ts';
@@ -140,6 +142,18 @@ type MapEditorServices = {
   readonly blueprintWriter: BlueprintWriter | null;
 
   /**
+   * Writes every transfer pair placed, undone or redone here to disk, both maps it joins in one act, the moment it moves;
+   * null in a window with no server to write through, whose pairs reach no file.
+   */
+  readonly pairWriter: PairWriter | null;
+
+  /**
+   * What the author last chose for the transfers they place, the door's picture and the two sounds, remembered for as long
+   * as the window is open.
+   */
+  readonly pairChoices: PairChoiceMemory;
+
+  /**
    * Keeps every blueprint opened as a map here in step with the blueprints when they change other than through it: a
    * version found on disk, or the author taking the version on disk over their own. A tab with nothing unwritten follows;
    * one holding changes not yet written waits for the author's choice; one whose blueprint was deleted on disk is handed to
@@ -193,8 +207,9 @@ type MapEditorServices = {
    * "nobody answered yet" for "nobody holds it" and loads a file that is missing another window's edits; a window
    * holding the document that answers ends that wait at once, so its copy is asked for straight away. A blueprint
    * opened as a map has no file: with no other window holding it, it is laid out afresh from the blueprints, which are
-   * held first. A map is opened only once every change to a blueprint this window has on its way to disk has landed,
-   * since one may be on its way to that very map's file, which read before it lands would open without it.
+   * held first. A map is opened only once every change to a blueprint, and every transfer pair, this window has on its way
+   * to disk has landed, since one may be on its way to that very map's file, which read before it lands would open
+   * without it.
    * @param {DocumentKey} key The document.
    * @returns {Promise<EditorDocument>} The document.
    */
@@ -426,11 +441,12 @@ const createMapEditorServices = (environment: MapEditorEnvironment): MapEditorSe
   {
     if (hub.has(key) === false)
     {
-      // a change to a blueprint on its way to a map's file must land before the file is read, or the map opens without
-      // it, reading as saved, and a save of it would put its copies back as they were.
+      // a change to a blueprint, or a transfer pair, on its way to a map's file must land before the file is read, or the
+      // map opens without it, reading as saved, and a save of it would put the file back as it was.
       if (parseDocumentKey(key).kind === 'map')
       {
         await blueprintWriter?.whenWritten();
+        await pairWriter?.whenWritten();
       }
 
       // another window's copy may hold unsaved edits the file lacks, so its answer is waited for first; once a window
@@ -492,6 +508,12 @@ const createMapEditorServices = (environment: MapEditorEnvironment): MapEditorSe
     ? null
     : new BlueprintWriter({ hub, maps: copyMaps, write: writeChanges });
 
+  // a transfer pair's two ends reach their maps' files together, the moment it is placed, undone or redone.
+  const pairWriter = api === null || api.writeMapChanges === undefined
+    ? null
+    : new PairWriter({ hub, write: api.writeMapChanges.bind(api) });
+  const pairChoices = new PairChoiceMemory();
+
   // a blueprint's tab follows the blueprints when they change other than through it, so it never writes an older one back.
   const blueprintMaps = new BlueprintMapFollower(hub);
 
@@ -544,6 +566,8 @@ const createMapEditorServices = (environment: MapEditorEnvironment): MapEditorSe
     blueprintCopies,
     copyMaps,
     blueprintWriter,
+    pairWriter,
+    pairChoices,
     blueprintMaps,
     clock,
     pages,
@@ -686,8 +710,15 @@ const createMapEditorServices = (environment: MapEditorEnvironment): MapEditorSe
         stops.push(() => blueprintWriter.stop());
       }
 
-      // a change to a blueprint still on its way to disk is as unsaved as an edit nobody else holds.
-      stops.push(installCloseGuard(environment.closeTarget, () => unsavedOnlyHere(hub, sync).length > 0 || blueprintWriter?.hasUnwritten() === true));
+      if (pairWriter !== null)
+      {
+        stops.push(() => pairWriter.stop());
+      }
+
+      // a change to a blueprint or a transfer pair still on its way to disk is as unsaved as an edit nobody else holds.
+      stops.push(installCloseGuard(environment.closeTarget, () => unsavedOnlyHere(hub, sync).length > 0
+        || blueprintWriter?.hasUnwritten() === true
+        || pairWriter?.hasUnwritten() === true));
     },
     stop,
   };

@@ -769,6 +769,30 @@ describe('WorkspaceController', () =>
         .toStrictEqual([ 'Test Town', 'Harbor', null ]);
     });
 
+    it('names a map an undo is refused over as the map tree shows it', async () =>
+    {
+      // Arrange: the tree held, naming map 1 World and map 2 Town; a door pair across both, then map 1 let go of and opened
+      // again from its file, which records nothing of the pair; undo following map 2.
+      const { controller, hub } = buildController();
+      await hub.load('mapinfos');
+      hub.edit('Place door pair', [ mapHistoryKey(1), mapHistoryKey(2) ], tx =>
+      {
+        tx.set('map:1', [ 'displayName' ], 'Near side');
+        tx.set('map:2', [ 'displayName' ], 'Far side');
+      });
+      const onDisk = hub.committedContent('map:1');
+      hub.release('map:1');
+      hub.adopt('map:1', onDisk);
+      controller.focusHistory(mapHistoryKey(2));
+
+      // Act.
+      await controller.undo();
+
+      // Assert.
+      expect(controller.getState().notice?.text)
+        .toBe('"Place door pair" cannot be undone: this window cannot tell what changed in World after "Place door pair".');
+    });
+
     it('does nothing on undo before anything has focus', async () =>
     {
       // Arrange.

@@ -18,7 +18,8 @@ import { buildMapJson } from '../../support/fixtures.ts';
  * Echoes of session saves are skipped (the sync suite proves that across two windows, with a near miss), and so is a
  * file no window holds. A removed file is handed over as removed and never read. After the stream reconnects, the
  * reading window re-reads every document held anywhere except its own with unsaved edits, which differ from disk by
- * definition; flagging those would cry wolf on every reconnect.
+ * definition; flagging those would cry wolf on every reconnect. A map whose file was removed is read all the same: it
+ * reads as unsaved for that alone, and its file may have come back while nothing was announced.
  */
 describe('fileChangeRouting', () =>
 {
@@ -288,6 +289,25 @@ describe('fileChangeRouting', () =>
       // Assert: the unsaved map is neither read nor flagged.
       expect([ outcomes, reads, peers.posts.map(([ key, , recheck ]) => [ key, recheck ]), hub.isConflicted('map:1'), noteOf(hub, 'map:2') ])
         .toStrictEqual([ [ 'recorded', 'ignored' ], [ 'map:2', 'map:3' ], [ [ 'map:2', true ], [ 'map:3', true ] ], false, 'changed while the stream was down' ]);
+    });
+
+    it('re-reads a map here whose file was removed, though it reads as unsaved, and takes the file back once it is there', async () =>
+    {
+      // Arrange: map 1's file was removed, then came back as it was while the stream was down; map 2 holds an unsaved
+      // rename, so it is not read.
+      const { hub, reads } = buildHub();
+      const peers = buildPeers();
+      const router = new FileChangeRouter(hub, peers, () => true);
+      hub.applyOutsideContent('map:1', null);
+      hub.edit('Rename', [ mapHistoryKey(2) ], tx => tx.set('map:2', [ 'displayName' ], 'Harbor'));
+      const removed = hub.isDirty('map:1');
+
+      // Act.
+      const outcomes = await router.recheck();
+
+      // Assert.
+      expect([ removed, outcomes, reads, hub.isDirty('map:1'), hub.isConflicted('map:1'), hub.isDirty('map:2') ])
+        .toStrictEqual([ true, [ 'unchanged' ], [ 'map:1' ], false, false, true ]);
     });
 
     it('leaves a document it cannot read, or cannot take, for its next change, and goes on to the rest', async () =>

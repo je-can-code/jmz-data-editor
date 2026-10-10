@@ -353,6 +353,39 @@ describe('HttpMapEditorApi', () =>
         .toStrictEqual([ 'PUT', `${BASE}/api/editor-data/blueprint-uses/maps`, 'window-7', merge ]);
     });
 
+    it('puts a change to several maps to its own route, with this window\'s id, never to the blueprints\' route', async () =>
+    {
+      // Arrange: an event placed past the end of each of two maps' events.
+      const { api, requests } = buildApi(() => new Response(null, { status: 204 }));
+      const write = {
+        maps: [
+          { map: 20, patches: [ { kind: 'splice' as const, path: [ 'events' ], index: 4, removed: [], inserted: [ { id: 4 } ] } ] },
+          { map: 28, patches: [ { kind: 'splice' as const, path: [ 'events' ], index: 9, removed: [], inserted: [ { id: 9 } ] } ] },
+        ],
+      };
+
+      // Act.
+      await api.writeMapChanges(write);
+
+      // Assert.
+      const [ request ] = requests;
+      expect([ request.method, request.url, request.headers['x-jmz-client'], JSON.parse(request.body as string) ])
+        .toStrictEqual([ 'PUT', `${BASE}/api/map-changes`, 'window-7', write ]);
+    });
+
+    it('raises a change to several maps the server refused, in the server\'s words', async () =>
+    {
+      // Arrange.
+      const { api } = buildApi(() => new Response('Map 028 no longer holds what the change replaced: its events changed', { status: 409 }));
+
+      // Act.
+      const write = api.writeMapChanges({ maps: [ { map: 28, patches: [] } ] });
+
+      // Assert.
+      await expect(write)
+        .rejects.toMatchObject({ status: 409, detail: 'Map 028 no longer holds what the change replaced: its events changed' });
+    });
+
     it('puts the common events with this window\'s id, as its other saves, so the change comes back as its own', async () =>
     {
       // Arrange.
@@ -558,6 +591,37 @@ describe('HttpMapEditorApi', () =>
       // Assert.
       expect([ faces, none, requests.map(request => request.url) ])
         .toStrictEqual([ [ 'Actor1', 'face_je' ], [], [ `${BASE}/api/img/faces`, `${BASE}/api/img/parallaxes` ] ]);
+    });
+
+    it('lists a folder\'s sounds, and nothing when the server leaves an empty list out of its envelope', async () =>
+    {
+      // Arrange.
+      const { api, requests } = buildApi(url => envelope(url.endsWith('/se') ? [ 'Move1', 'Open1' ] : undefined));
+
+      // Act.
+      const sounds = await api.listAudio('se');
+      const none = await api.listAudio('me');
+
+      // Assert.
+      expect([ sounds, none, requests.map(request => request.url) ])
+        .toStrictEqual([ [ 'Move1', 'Open1' ], [], [ `${BASE}/api/audio/se`, `${BASE}/api/audio/me` ] ]);
+    });
+
+    it('reads the pictures the project\'s doors are drawn with, the most used first, as the server lists them', async () =>
+    {
+      // Arrange.
+      const sprites = [
+        { characterName: '!EX_Dungeon_Doors', characterIndex: 4, direction: 2, pattern: 2, doors: 6 },
+        { characterName: '!doors', characterIndex: 2, direction: 2, pattern: 1, doors: 5 },
+      ];
+      const { api, requests } = buildApi(() => envelope({ sprites }));
+
+      // Act.
+      const read = await api.loadDoorSprites();
+
+      // Assert.
+      expect([ read, requests.map(request => `${request.method} ${request.url}`) ])
+        .toStrictEqual([ sprites, [ `GET ${BASE}/api/door-sprites` ] ]);
     });
 
     it('raises a server failure on an image rather than calling it missing', async () =>

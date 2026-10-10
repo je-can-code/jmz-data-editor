@@ -21,7 +21,7 @@ import { createEventPage, createMapEvent } from '../../../../src/mapEditor/core/
 import type { DocumentKey } from '../../../../src/mapEditor/core/model/documentKeys.ts';
 import type { JsonValue } from '../../../../src/mapEditor/core/model/json.ts';
 import type { MapDocument } from '../../../../src/mapEditor/core/model/MapDocument.ts';
-import type { MapTiles } from '../../../../src/mapEditor/core/model/patches.ts';
+import type { MapTiles, Patch } from '../../../../src/mapEditor/core/model/patches.ts';
 import type { RmmzMap, RmmzMapEvent } from '../../../../src/mapEditor/core/model/rmmzTypes.ts';
 import { operationFor } from '../../../../src/mapEditor/core/sync/SyncPeer.ts';
 import { buildMapJson } from '../../support/fixtures.ts';
@@ -1477,18 +1477,20 @@ describe('DocumentHub', () =>
       // Act.
       const result = hub.undo(mapHistoryKey(2));
 
-      // Assert.
+      // Assert: the refusal names the map by its label, and says which document it is for a window that names it otherwise.
       expect([
         result.ok === false && result.reason,
         result.ok === false && 'blockedBy' in result && result.blockedBy,
         result.ok === false && 'message' in result && result.message,
+        result.ok === false && 'document' in result && result.document,
         triggersOf(hub),
         stateOf(hub, histories),
       ])
         .toStrictEqual([
           'untracked',
           null,
-          'this window cannot tell what changed in map:1 after "Place door pair"',
+          'this window cannot tell what changed in Map 1 after "Place door pair"',
+          MAP_A,
           [ 3, 3 ],
           before,
         ]);
@@ -1742,11 +1744,12 @@ describe('DocumentHub', () =>
       hub.adoptSnapshot(whole);
       const redone = hub.redo(mapHistoryKey(1));
 
-      // Assert.
+      // Assert: the refusal names the map by its label, and says which document it is for a window that names it otherwise.
       expect([
         refused.ok === false && refused.reason,
         refused.ok === false && 'blockedBy' in refused && refused.blockedBy,
         refused.ok === false && 'message' in refused && refused.message,
+        refused.ok === false && 'document' in refused && refused.document,
         afterRefusal,
         redone.ok,
         slotsOf(hub),
@@ -1754,7 +1757,8 @@ describe('DocumentHub', () =>
         .toStrictEqual([
           'untracked',
           null,
-          'this window cannot tell what changed in map:2 since "Place door pair" was undone',
+          'this window cannot tell what changed in Map 2 since "Place door pair" was undone',
+          MAP_B,
           before,
           true,
           [ null, '1:Door', null, '3:Chest', null, '5:EV005' ],
@@ -2390,6 +2394,112 @@ describe('DocumentHub', () =>
       // Assert.
       expect([ results, hub.conflict(MAP_A), fileOf(hub, MAP_A), hub.isConflicted(MAP_B) ])
         .toStrictEqual([ [ 'conflicted', 'ignored' ], { kind: 'disk', content: null }, before, false ]);
+    });
+
+    /*
+     * A map whose file is removed outside the editor holds the only copy left, so it matches no file: it reads as unsaved,
+     * which is what makes closing its window ask first, until a save writes the file back. A map that read as saved there
+     * would be let go of with nobody warned, and the map lost. The file coming back is a version found on disk like any
+     * other, weighed against what the file held before it went: a map holding just that takes it as a clean map would.
+     */
+    describe('a file removed from disk', () =>
+    {
+      it('reads a clean map as unsaved once its file is removed, the map beside it still saved, and saved once a save writes it back', async () =>
+      {
+        // Arrange: map 1's file removed from disk, and taken as removed.
+        const { store, files } = buildStore();
+        const hub = buildHub(store);
+        files.delete(MAP_A);
+        hub.applyOutsideContent(MAP_A, null);
+        const removed = [ hub.dirtyKeys(), hub.isFileRemoved(MAP_A), hub.fileContent(MAP_A), hub.isFileRemoved(MAP_B) ];
+
+        // Act: the author keeps the map, and saves it.
+        hub.clearConflict(MAP_A);
+        await hub.save(MAP_A);
+
+        // Assert: the save wrote the map back as it stands, and it reads as saved again.
+        expect([ removed, files.get(MAP_A), hub.isDirty(MAP_A), hub.isFileRemoved(MAP_A), hub.fileContent(MAP_A) ])
+          .toStrictEqual([ [ [ MAP_A ], true, null, false ], fileOf(hub, MAP_A), false, false, fileOf(hub, MAP_A) ]);
+      });
+
+      it('takes a removed file come back as the map holds it as nothing new, the map saved and the removal no longer flagged', () =>
+      {
+        // Arrange.
+        const hub = buildHub();
+        hub.applyOutsideContent(MAP_A, null);
+
+        // Act.
+        const result = hub.applyOutsideContent(MAP_A, buildMapJson() as unknown as JsonValue);
+
+        // Assert.
+        expect([ result, hub.isDirty(MAP_A), hub.isConflicted(MAP_A), hub.isFileRemoved(MAP_A), rowsOf(hub, mapHistoryKey(1)) ])
+          .toStrictEqual([ 'unchanged', false, false, false, [] ]);
+      });
+
+      it('records a removed file come back changed as a step on a map holding no edits of its own, saved and no longer flagged', () =>
+      {
+        // Arrange.
+        const hub = buildHub();
+        hub.applyOutsideContent(MAP_A, null);
+        const changed = { ...buildMapJson(), displayName: 'Back again' } as unknown as JsonValue;
+
+        // Act.
+        const result = hub.applyOutsideContent(MAP_A, changed);
+
+        // Assert.
+        expect([ result, fileOf(hub, MAP_A).displayName, rowsOf(hub, mapHistoryKey(1)), hub.isDirty(MAP_A), hub.isConflicted(MAP_A) ])
+          .toStrictEqual([ 'recorded', 'Back again', [ 'Externally modified' ], false, false ]);
+      });
+
+      it('flags a removed file come back changed on a map holding edits of its own, which keeps them and stays unsaved', () =>
+      {
+        // Arrange: map 1 renamed and unsaved before its file was removed.
+        const hub = buildHub();
+        hub.edit('Rename', [ mapHistoryKey(1) ], tx => tx.set(MAP_A, [ 'displayName' ], 'Harbor'));
+        hub.applyOutsideContent(MAP_A, null);
+        const changed = { ...buildMapJson(), displayName: 'Back again' } as unknown as JsonValue;
+
+        // Act.
+        const result = hub.applyOutsideContent(MAP_A, changed);
+
+        // Assert.
+        expect([ result, hub.conflict(MAP_A), fileOf(hub, MAP_A).displayName, hub.isDirty(MAP_A), hub.isFileRemoved(MAP_A) ])
+          .toStrictEqual([ 'conflicted', { kind: 'disk', content: changed }, 'Harbor', true, false ]);
+      });
+
+      it('takes a removed file come back when only re-read after the stream came back, though the map read as unsaved', () =>
+      {
+        // Arrange: map 1's file removed; map 2 holds an unsaved rename, so a re-read leaves it alone.
+        const hub = buildHub();
+        hub.applyOutsideContent(MAP_A, null);
+        hub.edit('Rename', [ mapHistoryKey(2) ], tx => tx.set(MAP_B, [ 'displayName' ], 'Harbor'));
+        const file = buildMapJson() as unknown as JsonValue;
+
+        // Act.
+        const results = [ hub.applyOutsideContent(MAP_A, file, true), hub.applyOutsideContent(MAP_B, file, true) ];
+
+        // Assert.
+        expect([ results, hub.isDirty(MAP_A), hub.isConflicted(MAP_A), hub.isDirty(MAP_B) ])
+          .toStrictEqual([ [ 'unchanged', 'ignored' ], false, false, true ]);
+      });
+
+      it('hands a removed file to another window, which reads the map as unsaved and takes the file back as this one would', () =>
+      {
+        // Arrange: map 1's file removed here; map 2's still there.
+        const source = buildHub();
+        const target = new DocumentHub({ clientId: 'window-b', now: () => 1000 });
+        source.applyOutsideContent(MAP_A, null);
+        const snapshots = [ source.snapshot(MAP_A), source.snapshot(MAP_B) ];
+        snapshots.forEach(snapshot => target.adoptSnapshot(snapshot));
+        const adopted = [ target.isDirty(MAP_A), target.isFileRemoved(MAP_A), target.isDirty(MAP_B) ];
+
+        // Act: the file comes back as it was before it went.
+        const result = target.applyOutsideContent(MAP_A, buildMapJson() as unknown as JsonValue);
+
+        // Assert.
+        expect([ snapshots.map(snapshot => snapshot.removed), adopted, result, target.isDirty(MAP_A) ])
+          .toStrictEqual([ [ true, undefined ], [ true, true, false ], 'unchanged', false ]);
+      });
     });
 
     it('leaves a document with unsaved edits alone when its file is only re-read, and takes a clean one\'s change', () =>
@@ -3626,6 +3736,95 @@ describe('DocumentHub', () =>
       // Assert.
       expect([ hub.fileContent(MAP_A), hub.isDirty(MAP_A) ])
         .toStrictEqual([ null, true ]);
+    });
+
+    /**
+     * A store over the fixture's files whose reads fail for a while, as a file held open elsewhere for a moment, or a
+     * server busy for one, makes them, counting every read of each document.
+     * @param {number} failing How many reads fail before they go through.
+     * @returns {{ store: DocumentStore, files: Map<DocumentKey, JsonValue>, reads: Map<DocumentKey, number> }} The store,
+     * its files and its reads.
+     */
+    const buildFlakyStore = (failing: number) =>
+    {
+      const { store, files } = buildStore();
+      const reads = new Map<DocumentKey, number>();
+      let left = failing;
+      const flaky: DocumentStore = {
+        load: key =>
+        {
+          reads.set(key, (reads.get(key) ?? 0) + 1);
+          left -= 1;
+          return left >= 0
+            ? Promise.reject(new Error('the file is busy'))
+            : store.load(key);
+        },
+        save: store.save,
+      };
+
+      return { store: flaky, files, reads };
+    };
+
+    /**
+     * A patch a file takes that assumed something the window never knew the file held, so the file is read again.
+     * @returns {Patch} The patch.
+     */
+    const unforeseenPatch = (): Patch => ({ kind: 'set', path: [ 'note' ], before: 'renamed', after: 'took it' });
+
+    it('tries a failed read of a file again a while later, each wait twice the last, the map reading as saved once the file can be read', async () =>
+    {
+      // Arrange: map 1 holds just what its file does; its first two reads fail.
+      vi.useFakeTimers();
+      try
+      {
+        const { store, reads } = buildFlakyStore(2);
+        const hub = buildHub(store);
+        hub.notePatched(MAP_A, [ unforeseenPatch() ]);
+        const seen: [ number, boolean ][] = [];
+
+        // Act: just short of each wait, and at it.
+        for (const wait of [ 999, 1, 1999, 1 ])
+        {
+          await vi.advanceTimersByTimeAsync(wait);
+          seen.push([ reads.get(MAP_A) ?? 0, hub.isDirty(MAP_A) ]);
+        }
+
+        // Assert: read again at a second and three seconds, unsaved until the third read landed, saved after.
+        expect([ seen, hub.fileContent(MAP_A) ])
+          .toStrictEqual([ [ [ 1, true ], [ 2, true ], [ 2, true ], [ 3, false ] ], buildMapJson() ]);
+      }
+      finally
+      {
+        vi.useRealTimers();
+      }
+    });
+
+    it('stops trying a failed read of a file once something newer is learnt of it, or its map is let go of', async () =>
+    {
+      // Arrange: three maps whose files are read again, every read failing; map 3 is left alone, so it shows the reads
+      // going on.
+      vi.useFakeTimers();
+      try
+      {
+        const { store, reads } = buildFlakyStore(Number.POSITIVE_INFINITY);
+        const hub = buildHub(store);
+        hub.adopt('map:3', buildMapJson() as unknown as JsonValue);
+        [ MAP_A, MAP_B, 'map:3' as DocumentKey ].forEach(key => hub.notePatched(key, [ unforeseenPatch() ]));
+        await vi.advanceTimersByTimeAsync(0);
+
+        // Act: map 1 saved, its file learnt from what the save wrote; map 2 let go of.
+        await hub.save(MAP_A);
+        hub.release(MAP_B);
+        await vi.advanceTimersByTimeAsync(60_000);
+
+        // Assert.
+        expect([ reads.get(MAP_A), reads.get(MAP_B), (reads.get('map:3') ?? 0) > 1, hub.isDirty(MAP_A) ])
+          .toStrictEqual([ 1, 1, true, false ]);
+      }
+      finally
+      {
+        vi.useRealTimers();
+      }
     });
 
     it('takes no read of a file that lands after something newer was learnt about it', async () =>

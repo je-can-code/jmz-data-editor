@@ -201,4 +201,20 @@ describe('lightFields', () =>
         .toThrow('a light has no field named hue');
     });
   });
+
+  describe('words', () =>
+  {
+    it('names each field of a light by which of its page\'s lights it is and the panel\'s own label', () =>
+    {
+      // Arrange: the first light's reach and colour, and the second light's intensity and effect.
+      const fields: [ string, string ][] = [ [ 'light1', 'radius' ], [ 'light1', 'color' ], [ 'light2', 'intensity' ], [ 'light2', 'effect' ] ];
+
+      // Act.
+      const words = fields.map(([ line, field ]) => LIGHTS.words?.(line, field));
+
+      // Assert.
+      expect(words)
+        .toStrictEqual([ 'light 1 radius', 'light 1 colour', 'light 2 intensity', 'light 2 effect' ]);
+    });
+  });
 });

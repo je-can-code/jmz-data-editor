@@ -104,6 +104,16 @@ type CommentTagDefinition = {
    * @throws {Error} When the line cannot hold the value as the game would read it; the message says why, for the author.
    */
   readonly write: (text: string, field: string, value: JsonValue) => string;
+
+  /**
+   * Names one field of a line carrying the tag the way an author knows it, in lowercase, for a copy's panel and the steps
+   * it records: "sight", "sight (line 2)", "light 1 radius". Left out, the field goes by its name on the page, such as
+   * light1.radius.
+   * @param {string} line The line's key, such as light1 or sight2.
+   * @param {string} field The field's name, or {@link LINE_VALUE} for the one value a line gives alone.
+   * @returns {string} The words.
+   */
+  readonly words?: (line: string, field: string) => string;
 };
 
 /**
@@ -112,11 +122,13 @@ type CommentTagDefinition = {
 type PageTagLine = TagLine & { readonly tag: CommentTagDefinition };
 
 /**
- * One of a page's own fields, as the event window groups them: its name in the field's key, what kind of field it is, and
- * how its value is read from a page and written into one, every other key of the page kept where it was.
+ * One of a page's own fields, as the event window groups them: its name in the field's key, what it is to an author, in
+ * lowercase, as the event window labels it, what kind of field it is, and how its value is read from a page and written
+ * into one, every other key of the page kept where it was.
  */
 type PageField = {
   readonly name: string;
+  readonly words: string;
   readonly kind: FieldKind;
   readonly read: (page: RmmzEventPage) => JsonValue;
   readonly write: (page: RmmzEventPage, value: JsonValue) => RmmzEventPage;
@@ -152,6 +164,23 @@ type Field = {
   readonly kind: FieldKind;
   readonly value: JsonValue;
 };
+
+/**
+ * Where one field sits in its event, which is what writing a value back into it needs: the event's name, its note's own
+ * text, one of a page's own fields, a page's command list less every tag line, or one field of a tag line on a page, with
+ * the tag reading the line, the line's key and the field's name.
+ */
+type FieldPlace =
+  | { readonly kind: 'name' }
+  | { readonly kind: 'note' }
+  | { readonly kind: 'page'; readonly page: number; readonly field: PageField }
+  | { readonly kind: 'commands'; readonly page: number }
+  | { readonly kind: 'tag'; readonly page: number; readonly tag: CommentTagDefinition; readonly line: string; readonly field: string };
+
+/**
+ * One field of an event, with where it sits in the event.
+ */
+type PlacedField = Field & { readonly place: FieldPlace };
 
 /**
  * The key of an event's name.
@@ -228,77 +257,90 @@ const MOVE_FREQUENCY: NumberField = { kind: 'number', min: 1, max: 5 };
 
 /**
  * A page's own fields, in the order the event window shows them: move speed and frequency are numbers; the rest are
- * choices. The command list is a field of its own, read less every tag line (see {@link listLessTags}).
+ * choices. The command list is a field of its own, read less every tag line (see {@link listLessTags}). Each is named as
+ * the window's section and label name it together, the page's movement speed never to be taken for a battler's.
  */
 const PAGE_FIELDS: readonly PageField[] = [
   {
     name: 'speed',
+    words: 'movement speed',
     kind: MOVE_SPEED,
     read: page => page.moveSpeed,
     write: (page, value) => ({ ...page, moveSpeed: value as number }),
   },
   {
     name: 'frequency',
+    words: 'movement frequency',
     kind: MOVE_FREQUENCY,
     read: page => page.moveFrequency,
     write: (page, value) => ({ ...page, moveFrequency: value as number }),
   },
   {
     name: 'conditions',
+    words: 'conditions',
     kind: CHOICE,
     read: page => page.conditions,
     write: (page, value) => ({ ...page, conditions: value as unknown as RmmzEventConditions }),
   },
   {
     name: 'image',
+    words: 'graphic',
     kind: CHOICE,
     read: page => page.image,
     write: (page, value) => ({ ...page, image: value as unknown as RmmzEventImage }),
   },
   {
     name: 'moveType',
+    words: 'movement type',
     kind: CHOICE,
     read: page => page.moveType,
     write: (page, value) => ({ ...page, moveType: value as number }),
   },
   {
     name: 'moveRoute',
+    words: 'movement route',
     kind: CHOICE,
     read: page => page.moveRoute as unknown as JsonValue,
     write: (page, value) => ({ ...page, moveRoute: value as unknown as RmmzMoveRoute }),
   },
   {
     name: 'walking',
+    words: 'walking animation',
     kind: CHOICE,
     read: page => page.walkAnime,
     write: (page, value) => ({ ...page, walkAnime: value as boolean }),
   },
   {
     name: 'stepping',
+    words: 'stepping animation',
     kind: CHOICE,
     read: page => page.stepAnime,
     write: (page, value) => ({ ...page, stepAnime: value as boolean }),
   },
   {
     name: 'directionFix',
+    words: 'direction fix',
     kind: CHOICE,
     read: page => page.directionFix,
     write: (page, value) => ({ ...page, directionFix: value as boolean }),
   },
   {
     name: 'through',
+    words: 'through',
     kind: CHOICE,
     read: page => page.through,
     write: (page, value) => ({ ...page, through: value as boolean }),
   },
   {
     name: 'priority',
+    words: 'priority',
     kind: CHOICE,
     read: page => page.priorityType,
     write: (page, value) => ({ ...page, priorityType: value as number }),
   },
   {
     name: 'trigger',
+    words: 'trigger',
     kind: CHOICE,
     read: page => page.trigger,
     write: (page, value) => ({ ...page, trigger: value as number }),
@@ -457,6 +499,82 @@ const writtenWholeLine = (text: string, field: string, value: JsonValue): string
 };
 
 /**
+ * The key of a tag line no module reads (see {@link undeclaredKey}): its tag between angle brackets, then, past the first
+ * line of that tag, a hash and which line it is.
+ *
+ * <pre>
+ * Structure:
+ *  <TAG>
+ *  <TAG>#ORDINAL
+ *
+ * Example:
+ *  <motion>#2
+ *
+ * Translation:
+ *  The second line of the tag motion on its page.
+ * </pre>
+ */
+const UNDECLARED_KEY = /^<([^>]*)>(?:#([0-9]+))?$/u;
+
+/**
+ * Where a tag's name breaks into words: before a capital that follows a small letter or a digit, as in timeRangePage,
+ * and before the last capital of a run of them that starts a word, as in XPRate.
+ *
+ * <pre>
+ * Structure:
+ *  wordWord
+ *  WORDWord
+ *
+ * Example:
+ *  timeRangePage
+ *
+ * Translation:
+ *  time, Range, Page
+ * </pre>
+ */
+const WORD_BREAK = /(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])/u;
+
+/**
+ * What else parts the words of a tag's name: spaces, underscores and hyphens, as in no-rng-passives.
+ */
+const WORD_SPACE = /[\s_-]+/u;
+
+/**
+ * Says a tag's name as words: broken where its capitals and marks break it, each word in small letters but for one
+ * written all in capitals, which is a name of its own, such as AI. A name with no words in it at all is the comment it
+ * sits in.
+ * @param {string} name The tag's name, as written.
+ * @returns {string} The words, such as "time range page" for timeRangePage.
+ */
+const spokenTagName = (name: string): string =>
+{
+  const words = name
+    .split(WORD_SPACE)
+    .flatMap(part => part.split(WORD_BREAK))
+    .filter(word => word !== '')
+    .map(word => (word === word.toUpperCase() ? word : word.toLowerCase()));
+  return words.length === 0
+    ? 'comment'
+    : words.join(' ');
+};
+
+/**
+ * Names a tag line no module reads the way an author knows it: by its tag, said as words, and by which line of that tag
+ * it is past the first, as a module's lines are named.
+ * @param {string} line The line's key, such as <timeRangePage> or <motion>#2.
+ * @returns {string} The words, such as "time range page" or "motion (line 2)".
+ */
+const undeclaredWords = (line: string): string =>
+{
+  // every key such a line has is one its reader built, so it always reads.
+  const [ , name, ordinal ] = UNDECLARED_KEY.exec(line) as RegExpExecArray;
+  const words = spokenTagName(name);
+  return ordinal === undefined
+    ? words
+    : `${words} (line ${ordinal})`;
+};
+
+/**
  * Every tag line no module reads, read as a choice of its own (see {@link undeclaredTagLines}) and written back by putting
  * the blueprint's line whole in place of the copy's. It is the field model's own, never a module's: it takes every tag
  * line on a page that the modules' tags leave.
@@ -465,6 +583,7 @@ const UNDECLARED_TAG: CommentTagDefinition = {
   id: UNDECLARED_TAG_ID,
   read: page => undeclaredTagLines(page, new Set()),
   write: writtenWholeLine,
+  words: undeclaredWords,
 };
 
 /**
@@ -548,24 +667,53 @@ const ownNoteOf = (event: RmmzMapEvent): string =>
 };
 
 /**
- * Reads one page of an event as fields: its own fields, its command list less every tag line, then every field of every
- * tag line on it, in the order the lines sit.
+ * Reads one page of an event as fields, each with where it sits: its own fields, its command list less every tag line,
+ * then every field of every tag line on it, in the order the lines sit.
  * @param {RmmzEventPage} page The page.
  * @param {number} pageIndex Where it sits among the event's pages, counted from 0.
  * @param {readonly CommentTagDefinition[]} tags The tags the active modules read.
- * @returns {Field[]} The fields.
+ * @returns {PlacedField[]} The fields.
  */
-const pageFieldsOf = (page: RmmzEventPage, pageIndex: number, tags: readonly CommentTagDefinition[]): Field[] =>
+const pageFieldsOf = (page: RmmzEventPage, pageIndex: number, tags: readonly CommentTagDefinition[]): PlacedField[] =>
 {
   const lines = tagLinesOf(page, tags);
-  const own = PAGE_FIELDS.map(field => ({ key: pageFieldKey(pageIndex, field.name), kind: field.kind, value: field.read(page) }));
-  const commands = { key: pageFieldKey(pageIndex, COMMANDS_FIELD), kind: CHOICE, value: listLessTags(page.list, lines) };
-  const tagged = lines.flatMap(line => line.fields.map(field => ({
+  const own = PAGE_FIELDS.map((field): PlacedField => ({
+    key: pageFieldKey(pageIndex, field.name),
+    kind: field.kind,
+    value: field.read(page),
+    place: { kind: 'page', page: pageIndex, field },
+  }));
+  const commands: PlacedField = {
+    key: pageFieldKey(pageIndex, COMMANDS_FIELD),
+    kind: CHOICE,
+    value: listLessTags(page.list, lines),
+    place: { kind: 'commands', page: pageIndex },
+  };
+  const tagged = lines.flatMap(line => line.fields.map((field): PlacedField => ({
     key: tagFieldKey(pageIndex, line.key, field.name),
     kind: field.kind,
     value: field.value,
+    place: { kind: 'tag', page: pageIndex, tag: line.tag, line: line.key, field: field.name },
   })));
   return [ ...own, commands, ...tagged ];
+};
+
+/**
+ * Reads an event as the fields a copy of a blueprint differs from it by, one by one, each with where it sits in the
+ * event, given the note's own text, which is read apart since it may not read at all: the name and the note's own text,
+ * which are choices, then each page's fields. Where it stands is no field, since every copy stands where it was put.
+ * @param {RmmzMapEvent} event The event.
+ * @param {string} note The note's own text, outside the link to its blueprint.
+ * @param {readonly CommentTagDefinition[]} tags The tags the active modules read from comments.
+ * @returns {PlacedField[]} The fields, in order.
+ */
+const placedEventFields = (event: RmmzMapEvent, note: string, tags: readonly CommentTagDefinition[]): PlacedField[] =>
+{
+  return [
+    { key: NAME_FIELD, kind: CHOICE, value: event.name, place: { kind: 'name' } },
+    { key: NOTE_FIELD, kind: CHOICE, value: note, place: { kind: 'note' } },
+    ...event.pages.flatMap((page, pageIndex) => pageFieldsOf(page, pageIndex, tags)),
+  ];
 };
 
 /**
@@ -578,11 +726,7 @@ const pageFieldsOf = (page: RmmzEventPage, pageIndex: number, tags: readonly Com
  */
 const eventFields = (event: RmmzMapEvent, tags: readonly CommentTagDefinition[]): Field[] =>
 {
-  return [
-    { key: NAME_FIELD, kind: CHOICE, value: event.name },
-    { key: NOTE_FIELD, kind: CHOICE, value: ownNoteOf(event) },
-    ...event.pages.flatMap((page, pageIndex) => pageFieldsOf(page, pageIndex, tags)),
-  ];
+  return placedEventFields(event, ownNoteOf(event), tags).map(({ key, kind, value }) => ({ key, kind, value }));
 };
 
 /**
@@ -642,6 +786,7 @@ export {
   pageFieldKey,
   pageKey,
   parsableCommentLines,
+  placedEventFields,
   tagFieldKey,
   tagLinesOf,
   UNDECLARED_TAG,
@@ -653,9 +798,11 @@ export type {
   CommentTagText,
   Field,
   FieldKind,
+  FieldPlace,
   NumberField,
   PageField,
   PageTagLine,
+  PlacedField,
   TagField,
   TagLine,
 };

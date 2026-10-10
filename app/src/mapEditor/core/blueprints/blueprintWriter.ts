@@ -4,6 +4,7 @@ import type { HistoryStep } from '../history/HistoryStep.ts';
 import { mapDocumentKey, parseDocumentKey, type DocumentKey } from '../model/documentKeys.ts';
 import type { JsonValue } from '../model/json.ts';
 import type { Patch } from '../model/patches.ts';
+import { documentName, mapLabel } from '../../views/documentLabels.ts';
 import { BLUEPRINTS_DOCUMENT } from './blueprints.ts';
 import { isBlueprintChange, type CopyMaps } from './copyMaps.ts';
 
@@ -222,6 +223,17 @@ class BlueprintWriter
   #answering = 0;
 
   /**
+   * Settles once every failed act being answered has its changes taken back, which may wait for a stroke to end: what a
+   * wait for everything to land waits on meanwhile, since nothing is sent until then.
+   */
+  #answered: Promise<void> = Promise.resolve();
+
+  /**
+   * Settles {@link #answered}.
+   */
+  #settleAnswered: () => void = () => undefined;
+
+  /**
    * The waits for an edit under way to end before failures are answered, one for each failure waiting.
    */
   #answerTimers = new Set<ReturnType<typeof setTimeout>>();
@@ -297,7 +309,8 @@ class BlueprintWriter
   }
 
   /**
-   * Stops writing; an act on its way still lands.
+   * Stops writing; an act on its way still lands. A failure still waiting to be answered never will be, so nothing waits
+   * on it any more.
    */
   stop(): void
   {
@@ -310,6 +323,8 @@ class BlueprintWriter
       clearTimeout(this.#remakeTimer);
       this.#remakeTimer = null;
     }
+
+    this.#settleAnswered();
   }
 
   /**
@@ -325,19 +340,28 @@ class BlueprintWriter
 
   /**
    * Writes whatever is waiting now, without waiting for the moment a change waits, and settles once nothing is on its way:
-   * what a save does before anything else, so the blueprints and their copies are on disk when it reports. A write that
-   * fails meanwhile ends the wait, whatever it left waiting to be tried again.
-   * @returns {Promise<void>} Settles once every act asked for has landed, or one has failed; never rejects.
+   * what a save, and opening a map, does before anything else, so the blueprints and their copies are on disk when it
+   * reports, and a map's file is never read under a change still on its way to it. A write that fails meanwhile ends the
+   * wait, whatever it left waiting to be tried again, once its changes are taken back out of the window: until then the
+   * window holds a change the disk refused, which a save would write into its copies' maps alone. Taking them back may wait
+   * for a stroke to end, and so may this.
+   * @returns {Promise<void>} Settles once every act asked for has landed, or one has failed and been answered; never
+   * rejects.
    */
   async whenWritten(): Promise<void>
   {
     const failures = this.#failures;
     this.#flush();
-    while ((this.#sending !== null || this.#queue.length > 0) && this.#failures === failures)
+
+    // nothing is sent while a failure is being answered, so the loop stops there rather than wait on an act long settled.
+    while ((this.#sending !== null || this.#queue.length > 0) && this.#answering === 0 && this.#failures === failures)
     {
       await this.#sent;
       this.#flush();
     }
+
+    // a failure being answered, from before the wait or during it, is waited out.
+    await this.#answered;
   }
 
   /**
@@ -345,12 +369,14 @@ class BlueprintWriter
    * blueprints wait for a choice about changes made elsewhere, or while the tab of the blueprint it changes waits for one
    * about a version of it found on disk, since its copies would reach their files without the blueprint, or the tab's
    * blueprint would go over the newer one; or a map file it reaches holding what no way of writing it there fits, changed
-   * on disk since. Asked by every undo, redo and history jump before it moves anything (see HistoryRouter's guard).
+   * on disk since, named as the map tree shows it. Asked by every undo, redo and history jump before it moves anything
+   * (see HistoryRouter's guard).
    * @param {HistoryStep} step The step.
    * @param {'forward' | 'backward'} direction Redo or undo.
+   * @param {(mapId: number) => string} mapName Names a map as the map tree shows it; each is "Map N" unless said.
    * @returns {string | null} Why, with no full stop of its own, or null when nothing stands in its way.
    */
-  guard(step: HistoryStep, direction: 'forward' | 'backward'): string | null
+  guard(step: HistoryStep, direction: 'forward' | 'backward', mapName: (mapId: number) => string = mapLabel): string | null
   {
     const blocked = isBlueprintChange(step) ? this.#blockedBy([ step ]) : null;
     if (blocked !== null)
@@ -361,7 +387,7 @@ class BlueprintWriter
     const mapId = this.#maps.misfit(step, direction);
     return mapId === null
       ? null
-      : `Map ${mapId} changed on disk since this change was written to it`;
+      : `${documentName(mapDocumentKey(mapId), mapName)} changed on disk since this change was written to it`;
   }
 
   /**
@@ -626,6 +652,16 @@ class BlueprintWriter
   {
     this.#failures += 1;
     this.#cancelTimer();
+
+    // the first failure to wait for an answer starts what a wait for everything to land waits on; any other joins it.
+    if (this.#answering === 0)
+    {
+      this.#answered = new Promise(resolve =>
+      {
+        this.#settleAnswered = resolve;
+      });
+    }
+
     this.#answering += 1;
     this.#answer(moves, error, awaits);
   }
@@ -680,6 +716,10 @@ class BlueprintWriter
     {
       this.#takingBack = false;
       this.#answering -= 1;
+      if (this.#answering === 0)
+      {
+        this.#settleAnswered();
+      }
     }
 
     this.#maps.landed(this.#mapsOf(since), true);

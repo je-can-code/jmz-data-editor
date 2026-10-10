@@ -248,18 +248,20 @@ const useMapGlance = (options: MapGlanceOptions): MapGlance =>
 
 /**
  * What a glance's caller does with the pointer: hears it reach another tile or leave the map, a press of the left
- * button on a tile, and a double-click on one.
+ * button on a tile, a double-click on one, and the left button let go, wherever the pointer is then, which ends a drag.
  */
 type GlancePointer = {
   readonly onHover: (cell: MapCell | null) => void;
   readonly onPress: (cell: MapCell) => void;
   readonly onDoublePress?: (cell: MapCell) => void;
+  readonly onRelease?: () => void;
 };
 
 /**
  * Listens to the pointer over a glance's map, on the map asked for: the tile it is over, told only when it reaches
  * another, and null when it leaves; a press of the left button on a tile, since the right one pans; and a double-click
- * on a tile. Nothing is heard off the map, or while the map drawn is still the one before the map asked for.
+ * on a tile. Nothing is heard off the map, or while the map drawn is still the one before the map asked for, but the
+ * left button let go, which is heard anywhere in the window, so a drag that strays off the map still ends.
  * @param {RefObject<HTMLDivElement | null>} host The element the map is drawn into.
  * @param {MapGlance} glance The glance.
  * @param {GlancePointer} pointer What to do with the pointer.
@@ -320,16 +322,28 @@ const useGlancePointer = (host: RefObject<HTMLDivElement | null>, glance: MapGla
       }
     };
 
+    // the left button let go anywhere in the window ends a drag, even one that strayed off the map.
+    const onPointerUp = (event: PointerEvent) =>
+    {
+      if (event.button === 0)
+      {
+        latest.current.onRelease?.();
+      }
+    };
+
+    const view = element.ownerDocument.defaultView;
     element.addEventListener('pointermove', onPointerMove);
     element.addEventListener('pointerleave', onPointerLeave);
     element.addEventListener('pointerdown', onPointerDown);
     element.addEventListener('dblclick', onDoubleClick);
+    view?.addEventListener('pointerup', onPointerUp);
     return () =>
     {
       element.removeEventListener('pointermove', onPointerMove);
       element.removeEventListener('pointerleave', onPointerLeave);
       element.removeEventListener('pointerdown', onPointerDown);
       element.removeEventListener('dblclick', onDoubleClick);
+      view?.removeEventListener('pointerup', onPointerUp);
     };
   }, [ host, cellUnder ]);
 };

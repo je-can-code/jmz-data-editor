@@ -91,6 +91,28 @@ const lightFieldsOf = (line: LightLine, ordinal: number, defaults: LightDefaults
 };
 
 /**
+ * What each field of a light is to an author, by the field's name, as the light's panel labels them.
+ */
+const FIELD_WORDS: Readonly<Record<string, string>> = {
+  radius: 'radius',
+  color: 'colour',
+  intensity: 'intensity',
+  effect: 'effect',
+};
+
+/**
+ * Names one field of a light the way an author knows it: which of its page's lights it is, then the field, as the light's
+ * panel labels it.
+ * @param {string} line The light's key, such as light2.
+ * @param {string} field The field's name, such as color.
+ * @returns {string} The words, such as "light 2 colour".
+ */
+const lightWords = (line: string, field: string): string =>
+{
+  return `light ${line.slice('light'.length)} ${FIELD_WORDS[field]}`;
+};
+
+/**
  * Builds J-Lighting's light tag as fields of a blueprint's copies: every line on a page giving a light, as J-Lighting reads
  * the lights of a page (a page can give several, so each is named by its place among them: light1, light2), each light's
  * reach, colour, intensity and effect a field, written back into the copy's own line in place by the light panel's own
@@ -113,6 +135,7 @@ const lightTagFields = (defaults: LightDefaults): CommentTagDefinition =>
 
       return writer(text, value, defaults);
     },
+    words: lightWords,
   };
 };
 
