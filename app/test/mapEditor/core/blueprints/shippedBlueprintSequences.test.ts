@@ -58,9 +58,10 @@ import { notesOn } from '../../support/propagationFixtures.ts';
  * (see isReplayLimit). It never touches whether a map reads as saved: the map and its file hold the very same name.
  *
  * A run stops at its first broken step, and each run is seeded, so a failure replays exactly; JMZ_SEQUENCES runs more of
- * them, JMZ_SEQUENCES_REPORT prints what the failing ones, and those meeting the replay limit, came to, and
- * JMZ_SEQUENCES_TRACE prints every step of the run it names. It runs against the project JMZ_PROJECT_ROOT names, or the
- * sibling checkout, and skips when neither is there.
+ * them, JMZ_SEQUENCES_REPORT prints what the failing ones, and those meeting the replay limit, came to,
+ * JMZ_SEQUENCES_TRACE prints every step of the run it names, and JMZ_SEQUENCES_RUSH has some steps go straight on
+ * before what they wrote has landed, as an author working faster than the writer's moment of waiting does. It runs
+ * against the project JMZ_PROJECT_ROOT names, or the sibling checkout, and skips when neither is there.
  */
 const project = locateGameProject();
 
@@ -873,6 +874,7 @@ const play = async (setting: Setting, seed: number): Promise<Run> =>
   const world = await openWorld(setting);
   const log: string[] = [];
   const tracing = process.env['JMZ_SEQUENCES_TRACE'] === String(seed);
+  const rushing = process.env['JMZ_SEQUENCES_RUSH'] !== undefined;
   for (let step = 0; step < STEPS_PER_RUN; step++)
   {
     let wrong: string[];
@@ -880,6 +882,14 @@ const play = async (setting: Setting, seed: number): Promise<Run> =>
     {
       world.lastMoved = null;
       log.push(await pick(random, ACTIONS)(world, random));
+
+      // a rushed step goes on before what it wrote has landed, and is looked at with whatever follows it.
+      if (rushing && step < STEPS_PER_RUN - 1 && random() < 0.4)
+      {
+        log[log.length - 1] = `${log[log.length - 1]} (going straight on)`;
+        continue;
+      }
+
       await settle(world);
       if (tracing)
       {
