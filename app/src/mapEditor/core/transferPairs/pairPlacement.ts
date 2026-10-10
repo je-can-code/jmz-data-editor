@@ -7,6 +7,7 @@ import type { HistoryStep } from '../history/HistoryStep.ts';
 import type { LandingGround } from '../locations/landingCheck.ts';
 import { isBlueprintMapId, mapDocumentKey, type DocumentKey, type MapDocumentKey } from '../model/documentKeys.ts';
 import type { EditorDocument } from '../model/EditorDocument.ts';
+import { cloneJson, type JsonValue } from '../model/json.ts';
 import { MapDocument } from '../model/MapDocument.ts';
 import type { Patch } from '../model/patches.ts';
 import type { RmmzMap, RmmzMapEvent } from '../model/rmmzTypes.ts';
@@ -355,6 +356,28 @@ const mapsPlaced = (maps: readonly EndMap[], events: ReadonlyMap<PlannedEnd, Rmm
 };
 
 /**
+ * Builds the patches putting an event into its slot on a map: where the slot lies past the end of the list, the slot is
+ * made first, empty, and the event put in it after. Kept apart, an undo can take the event back out and leave its slot
+ * empty, as it must once another event placed since stands further along the list: taking the slot away would give that
+ * event another id.
+ * @param {MapDocument} map The map, as the patches find it, which is left as it is.
+ * @param {RmmzMapEvent} event The event; its id names the slot.
+ * @returns {Patch[]} The patches, in order.
+ */
+const slotPatches = (map: MapDocument, event: RmmzMapEvent): Patch[] =>
+{
+  const { length } = map.valueAt([ 'events' ]) as JsonValue[];
+  if (event.id < length)
+  {
+    return [ map.placeEventPatch(event) ];
+  }
+
+  const slots: Patch = { kind: 'splice', path: [ 'events' ], index: length, removed: [], inserted: new Array(event.id - length + 1).fill(null) };
+  const placed: Patch = { kind: 'set', path: [ 'events', event.id ], before: null, after: cloneJson(event as unknown as JsonValue) };
+  return [ slots, placed ];
+};
+
+/**
  * Builds the patches placing events on a file, each against the file as the one before left it.
  * @param {MapDocument} file The file, which is left as it is.
  * @param {readonly RmmzMapEvent[]} events The events.
@@ -363,11 +386,11 @@ const mapsPlaced = (maps: readonly EndMap[], events: ReadonlyMap<PlannedEnd, Rmm
 const filePatches = (file: MapDocument, events: readonly RmmzMapEvent[]): Patch[] =>
 {
   const copy = copyOf(file);
-  return events.map(event =>
+  return events.flatMap(event =>
   {
-    const patch = copy.placeEventPatch(event);
-    copy.apply(patch);
-    return patch;
+    const patches = slotPatches(copy, event);
+    patches.forEach(patch => copy.apply(patch));
+    return patches;
   });
 };
 
@@ -408,7 +431,7 @@ const commit = (hub: DocumentHub, plan: PairPlan, maps: readonly EndMap[], event
           return;
         }
 
-        placed.forEach(event => tx.apply(side.key, hub.map(side.key).placeEventPatch(event)));
+        placed.forEach(event => slotPatches(hub.map(side.key), event).forEach(patch => tx.apply(side.key, patch)));
         if (side.file !== null)
         {
           tx.fileVersion(side.key, filePatches(side.file, placed));

@@ -2,7 +2,8 @@ import { MapEditorApiError, type MapChangesWrite } from '../api/MapEditorApi.ts'
 import { isWrittenAtOnce } from '../blueprints/blueprintWriter.ts';
 import type { DocumentHub, HubEvent } from '../history/DocumentHub.ts';
 import { writesThrough, type HistoryStep } from '../history/HistoryStep.ts';
-import { mapDocumentKey, parseDocumentKey, type DocumentKey } from '../model/documentKeys.ts';
+import { mapDocumentKey, parseDocumentKey, type DocumentKey, type MapDocumentKey } from '../model/documentKeys.ts';
+import { cloneJson, isJsonObject, type JsonValue } from '../model/json.ts';
 import { MapDocument } from '../model/MapDocument.ts';
 import { invertPatch, PatchConflictError, type Patch } from '../model/patches.ts';
 import type { RmmzMap } from '../model/rmmzTypes.ts';
@@ -86,6 +87,96 @@ const waysToFile = (step: HistoryStep, key: DocumentKey, direction: 'forward' | 
   const version = step.fileVersions?.find(each => each.document === key);
   const ways = version === undefined ? [ own ] : [ [ ...version.patches ], own ];
   return ways.map(patches => (direction === 'forward' ? patches : [ ...patches ].reverse().map(invertPatch)));
+};
+
+/**
+ * Lists the events a step puts on one map, by id: each set filling a slot of the map's events, and each event a splice
+ * puts in the list, as a step placing a pair in one patch did.
+ * @param {HistoryStep} step The step.
+ * @param {DocumentKey} key The map.
+ * @returns {Map<number, JsonValue>} The events, by id, in the order the step places them.
+ */
+const eventsPlacedBy = (step: HistoryStep, key: DocumentKey): Map<number, JsonValue> =>
+{
+  const placed = new Map<number, JsonValue>();
+  step.entries.filter(entry => entry.document === key).forEach(({ patch }) =>
+  {
+    if (patch.kind === 'set' && patch.path.length === 2 && patch.path[0] === 'events' && patch.before === null && isJsonObject(patch.after))
+    {
+      placed.set(patch.path[1] as number, patch.after);
+    }
+
+    if (patch.kind === 'splice' && patch.path.length === 1 && patch.path[0] === 'events')
+    {
+      patch.inserted.forEach((item, offset) => item !== null && placed.set(patch.index + offset, item));
+    }
+  });
+
+  return placed;
+};
+
+/**
+ * Builds the way a step reaches one map's file by the events it places alone, against the file as it stands: for an undo,
+ * each of their slots emptied of the event the file holds there; for a redo, each filled again, the file's list grown to
+ * reach it where it is short. Nothing else in the file is asked about: whatever the file holds besides, the rest of the
+ * list and every field of the door as last saved included, is the map's own, which the editor saved there, never a change
+ * made to the pair behind its back.
+ * @param {HistoryStep} step The step.
+ * @param {DocumentKey} key The map.
+ * @param {'forward' | 'backward'} direction Made or redone, or undone.
+ * @param {MapDocument} file The file, which is left as it is.
+ * @returns {Patch[] | null} The patches, in order; null for a redo finding one of the slots holding something.
+ */
+const slotsWay = (step: HistoryStep, key: DocumentKey, direction: 'forward' | 'backward', file: MapDocument): Patch[] | null =>
+{
+  const placed = [ ...eventsPlacedBy(step, key) ].sort(([ left ], [ right ]) => left - right);
+  if (direction === 'backward')
+  {
+    return placed.flatMap(([ id ]) =>
+    {
+      const held = file.valueAt([ 'events', id ]);
+      return held === null || held === undefined ? [] : [ file.setPatch([ 'events', id ], null) ];
+    });
+  }
+
+  // each slot past the end of the list is made, empty, before the event goes in, as placing it made it.
+  const copy = MapDocument.fromJson(key as MapDocumentKey, file.toJson());
+  const patches: Patch[] = [];
+  for (const [ id, event ] of placed)
+  {
+    const { length } = copy.valueAt([ 'events' ]) as JsonValue[];
+    if (id < length && copy.valueAt([ 'events', id ]) !== null)
+    {
+      return null;
+    }
+
+    const room: Patch[] = id < length ? [] : [ { kind: 'splice', path: [ 'events' ], index: length, removed: [], inserted: new Array(id - length + 1).fill(null) } ];
+    const filled: Patch = { kind: 'set', path: [ 'events', id ], before: null, after: cloneJson(event) };
+    [ ...room, filled ].forEach(patch =>
+    {
+      copy.apply(patch);
+      patches.push(patch);
+    });
+  }
+
+  return patches;
+};
+
+/**
+ * Lists the ways a move can reach a held map's file, as it stands, the likelier first: the step's own ways (see
+ * {@link waysToFile}), then the events alone (see {@link slotsWay}), which a file the map was saved to since takes
+ * whatever else that save put in it.
+ * @param {HistoryStep} step The step.
+ * @param {number} mapId The map.
+ * @param {'forward' | 'backward'} direction Made or redone, or undone.
+ * @param {MapDocument} file The file as it stands.
+ * @returns {Patch[][]} The ways, each the patches in the order they go in.
+ */
+const waysIntoFile = (step: HistoryStep, mapId: number, direction: 'forward' | 'backward', file: MapDocument): Patch[][] =>
+{
+  const key = mapDocumentKey(mapId);
+  const bySlots = slotsWay(step, key, direction, file);
+  return [ ...waysToFile(step, key, direction), ...(bySlots === null ? [] : [ bySlots ]) ];
 };
 
 /**
@@ -313,9 +404,11 @@ class PairWriter
 
   /**
    * Says why a pair must not move now, beyond the window's own histories: a map it reaches held here whose file, as this
-   * window knows it, holds no way the move could reach it, something having changed it on disk since, named as the map
-   * tree shows it. A map nobody here holds cannot be told, and the write itself checks it. Asked by every undo, redo and
-   * history jump (see HistoryRouter).
+   * window knows it, holds no way the move could reach it, named as the map tree shows it, with what to do. What the
+   * editor saved to a map's file since is never in the way: the pair reaches it by its own events alone (see
+   * {@link slotsWay}), so only a redo finding something else in a slot its events go in is refused, which saving the map,
+   * as it stands here, clears. A map nobody here holds cannot be told, and the write itself checks it. Asked by every
+   * undo, redo and history jump (see HistoryRouter).
    * @param {HistoryStep} step The step.
    * @param {'forward' | 'backward'} direction Redo or undo.
    * @param {(mapId: number) => string} mapName Names a map as the map tree shows it; each is "Map N" unless said.
@@ -331,11 +424,15 @@ class PairWriter
     const changed = mapsOfStep(step).find(mapId =>
     {
       const file = this.#fileAhead(mapId);
-      return file !== null && waysToFile(step, mapDocumentKey(mapId), direction).every(way => fitsFile(file, way) === false);
+      return file !== null && waysIntoFile(step, mapId, direction, file).every(way => fitsFile(file, way) === false);
     });
-    return changed === undefined
-      ? null
-      : `${documentName(mapDocumentKey(changed), mapName)} changed on disk since this transfer pair was written to it`;
+    if (changed === undefined)
+    {
+      return null;
+    }
+
+    const name = documentName(mapDocumentKey(changed), mapName);
+    return `${name}'s file holds something else where this pair's events go. Save ${name}, then try again`;
   }
 
   /**
@@ -392,8 +489,8 @@ class PairWriter
     const taken = new Map<number, Patch[]>();
     mapsOfStep(step).forEach(mapId =>
     {
-      const ways = waysToFile(step, mapDocumentKey(mapId), direction);
       const file = this.#fileAhead(mapId);
+      const ways = file === null ? waysToFile(step, mapDocumentKey(mapId), direction) : waysIntoFile(step, mapId, direction, file);
       const way = (file === null ? undefined : ways.find(each => fitsFile(file, each))) ?? ways[0];
       taken.set(mapId, way);
     });

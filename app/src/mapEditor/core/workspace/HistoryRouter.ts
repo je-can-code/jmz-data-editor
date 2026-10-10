@@ -1,5 +1,6 @@
 import { untrackedWords, type DocumentHub, type HistoryCheck, type HistoryFailure } from '../history/DocumentHub.ts';
 import { TREE_HISTORY_KEY, type HistoryKey } from '../history/historyKeys.ts';
+import { isSlotSplice } from '../history/patchInterference.ts';
 import type { HistoryStep } from '../history/HistoryStep.ts';
 import type { LeftPart } from '../history/stepParts.ts';
 import type { MapTreeService, TreeOutcome } from '../tree/MapTreeService.ts';
@@ -65,12 +66,49 @@ const fromHubFailure = (failure: HistoryFailure, direction: Direction, mapName: 
     {
       // the hub words each kind of blocked move itself, naming the edit in the way when it knows it; a document whose
       // record does not reach the step is named here, as the author knows it.
-      const why = failure.document === undefined
-        ? failure.message
-        : untrackedWords(documentName(failure.document, mapName), failure.step, direction);
-      return { ok: false, nothing: false, message: `"${failure.step.label}" cannot be ${verb}: ${why}.`, stuckStepId: failure.step.id };
+      const why = failure.reason === 'untracked' && failure.document !== undefined
+        ? untrackedWords(documentName(failure.document, mapName), failure.step, direction)
+        : failure.message;
+      return { ok: false, nothing: false, message: `"${failure.step.label}" cannot be ${verb}: ${why}${wayOutWords(failure, mapName)}.`, stuckStepId: failure.step.id };
     }
   }
+};
+
+/**
+ * Words where the edit standing in a blocked move's way was made, and what clears the way, to follow the hub's reason: on
+ * which map, as the map tree shows it, and that moving that edit first lets this one through. A refusal not naming both
+ * the edit and its document says nothing more.
+ * @param {HistoryFailure} failure The refusal.
+ * @param {MapName} mapName Names a map as the map tree shows it.
+ * @returns {string} The words, starting with their own separator, or nothing.
+ */
+const wayOutWords = (failure: HistoryFailure, mapName: MapName): string =>
+{
+  if (failure.reason !== 'conflict' && failure.reason !== 'moved')
+  {
+    return '';
+  }
+
+  const { blockedBy, document } = failure;
+  if (blockedBy === null || document === undefined)
+  {
+    return '';
+  }
+
+  // an edit undone since a step's undo is in its way out of the list; one made since, in its place.
+  const verb = failure.blockerUndone === true ? 'Redo' : 'Undo';
+  return `, on ${documentName(document, mapName)}. ${verb} "${blockedBy.label}" there first`;
+};
+
+/**
+ * Lists the parts a move left that the author would know as left: every one but the empty slots an undo leaves in a list
+ * (see patchInterference's isSlotSplice), which hold nothing.
+ * @param {readonly LeftPart[]} left The parts left.
+ * @returns {LeftPart[]} The parts worth telling of.
+ */
+const partsToTell = (left: readonly LeftPart[]): LeftPart[] =>
+{
+  return left.filter(part => isSlotSplice(part.patch) === false);
 };
 
 /**
@@ -248,10 +286,11 @@ class HistoryRouter
       return fromHubFailure(moved, direction, this.#mapName);
     }
 
-    // a move that left parts of its step says which, where the window can word them.
-    return moved.left === undefined || this.#leftWords === null
+    // a move that left parts of its step says which, where the window can word them, and where they hold anything.
+    const told = moved.left === undefined ? [] : partsToTell(moved.left);
+    return told.length === 0 || this.#leftWords === null
       ? { ok: true }
-      : { ok: true, message: this.#leftWords(moved.step, moved.left, direction) };
+      : { ok: true, message: this.#leftWords(moved.step, told, direction) };
   }
 
   /**

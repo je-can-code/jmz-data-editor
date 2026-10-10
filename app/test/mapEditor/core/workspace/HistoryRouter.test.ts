@@ -154,7 +154,7 @@ describe('HistoryRouter', () =>
       .toStrictEqual({
         ok: false,
         nothing: false,
-        message: '"Rename map" cannot be undone: "Rename from the event" later changed what "Rename map" changed.',
+        message: '"Rename map" cannot be undone: "Rename from the event" later changed what "Rename map" changed, on Map 1. Undo "Rename from the event" there first.',
         stuckStepId: stuck?.id,
       });
   });
@@ -192,7 +192,7 @@ describe('HistoryRouter', () =>
 
     // Assert: the first step redid; the second could not.
     expect([ outcome.ok === false && outcome.message, hub.map('map:1').property('note') ])
-      .toStrictEqual([ '"Second" cannot be redone: "Elsewhere" changed what "Second" changes.', 'one' ]);
+      .toStrictEqual([ '"Second" cannot be redone: "Elsewhere" changed what "Second" changes, on Map 1. Undo "Elsewhere" there first.', 'one' ]);
   });
 
   it('forgets a stuck step on request', async () =>
@@ -268,7 +268,32 @@ describe('HistoryRouter', () =>
 
     // Assert.
     expect([ blocked.ok === false && blocked.message, empty.ok === false && empty.nothing, asked ])
-      .toStrictEqual([ '"Rename map" cannot be undone: "Rename from the event" later changed what "Rename map" changed.', true, [] ]);
+      .toStrictEqual([ '"Rename map" cannot be undone: "Rename from the event" later changed what "Rename map" changed, on Map 1. Undo "Rename from the event" there first.', true, [] ]);
+  });
+
+  it('says where the edit in a blocked redo\'s way is, as the map tree names it, and to redo an edit undone since first', async () =>
+  {
+    // Arrange: an event's rename of the map, then the map's own; the map's undone, then the event's, whose undo now stands
+    // in the way of redoing the map's.
+    const hub = new DocumentHub({ clientId: 'window-a' });
+    hub.adopt('map:1', buildMapJson() as unknown as JsonValue);
+    hub.edit('Before', [ 'event:1:1' ], tx => tx.set('map:1', [ 'displayName' ], 'Port'));
+    const stuck = hub.edit('Rename map', [ mapHistoryKey(1) ], tx => tx.set('map:1', [ 'displayName' ], 'Harbor'));
+    hub.undo(mapHistoryKey(1));
+    hub.undo('event:1:1');
+    const router = new HistoryRouter(hub, null, null, null, () => 'Harbor Town');
+
+    // Act.
+    const outcome = await router.redo(mapHistoryKey(1));
+
+    // Assert.
+    expect(outcome)
+      .toStrictEqual({
+        ok: false,
+        nothing: false,
+        message: '"Rename map" cannot be redone: undoing "Before" changed what "Rename map" changes, on Harbor Town. Redo "Before" there first.',
+        stuckStepId: stuck?.id,
+      });
   });
 
   it('stops a jump at the step its guard refuses, having moved every step after it, and asking about none before it', async () =>

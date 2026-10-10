@@ -16,7 +16,7 @@ import {
   type HistoryStep,
   type StepEntry,
 } from './HistoryStep.ts';
-import { patchInterference, type Interference } from './patchInterference.ts';
+import { isSlotSplice, patchInterference, type Interference } from './patchInterference.ts';
 import {
   fileKeepsLeft,
   filePart,
@@ -84,9 +84,11 @@ type DocumentConflict =
  *
  * For the last three, {@code blockedBy} names the edit in the way when the window can tell which one it was, and
  * the step stays where it is, having changed nothing anywhere; the person can move the blocking edit first, or
- * forget this step ({@link DocumentHub.forgetStep}) and go on past it. An untracked one names its document too
- * ({@code document}), so a window that knows a map by its name in the tree can word it that way (see
- * {@link untrackedWords}); its {@code message} names the document by its label.
+ * forget this step ({@link DocumentHub.forgetStep}) and go on past it. Each names the document it was found on too
+ * ({@code document}), so a window that knows a map by its name in the tree can say where the edit in the way is, or, for
+ * an untracked one, word it that way (see {@link untrackedWords}); its {@code message} names no document but by its label.
+ * A redo blocked by an edit undone since, rather than one made since, says so ({@code blockerUndone}), since redoing that
+ * edit, not undoing it, is what clears the way.
  */
 type HistoryFailure =
   | { readonly ok: false; readonly reason: 'nothing'; readonly historyKey: HistoryKey }
@@ -98,6 +100,7 @@ type HistoryFailure =
     readonly blockedBy: HistoryStep | null;
     readonly message: string;
     readonly document?: DocumentKey;
+    readonly blockerUndone?: true;
   };
 
 /**
@@ -490,6 +493,41 @@ const interferenceOn = (key: DocumentKey, earlier: HistoryStep, later: HistorySt
     .find(interference => interference !== null);
 
   return found ?? null;
+};
+
+/**
+ * Relates a later step to an applied one on one document, for taking the applied one back out: as {@link interferenceOn}
+ * does, but for the empty slots the applied step made room with (see patchInterference's isSlotSplice), which stay as they
+ * are where the later step stands further along the list, rather than move it to another id. So a step is judged by the
+ * things and the fields it changed, never by how long it left a list: a door placed, then another event placed on the same
+ * map, still undoes, its slot left empty.
+ * @param {DocumentKey} key The document.
+ * @param {HistoryStep} step The step applied first, to be taken out.
+ * @param {HistoryStep} later The step applied after it.
+ * @returns {Interference | null} How the later step bears on the earlier one there, or null when it does not.
+ */
+const undoInterferenceOn = (key: DocumentKey, step: HistoryStep, later: HistoryStep): Interference | null =>
+{
+  const laterPatches = patchesOn(later, key);
+  const found = patchesOn(step, key)
+    .flatMap(stepPatch => laterPatches.map(laterPatch =>
+    {
+      const interference = patchInterference(stepPatch, laterPatch);
+      return interference === 'would-move' && isSlotSplice(stepPatch) ? null : interference;
+    }))
+    .find(interference => interference !== null);
+
+  return found ?? null;
+};
+
+/**
+ * Reports whether a step made room with empty slots (see patchInterference's isSlotSplice), which an undo may leave.
+ * @param {HistoryStep} step The step.
+ * @returns {boolean} True when one of its patches is such.
+ */
+const makesSlots = (step: HistoryStep): boolean =>
+{
+  return step.entries.some(entry => isSlotSplice(entry.patch));
 };
 
 /**
@@ -1527,6 +1565,8 @@ class DocumentHub
    * followers), the part of it that moves, by its own id, and every part left, when something is in the way there. The
    * file of a document held here that left parts is judged apart from the document (see {@link #fileSharesOf}). An edit
    * in its way on any of its other documents refuses it, as it would any step, and so does a document not recording it.
+   * An undo leaves the empty slots a step made room with wherever an edit since stands further along the list (see
+   * {@link undoInterferenceOn}), moving the rest, the same way.
    * @param {HistoryStep} step The step.
    * @param {'forward' | 'backward'} direction Redo or undo.
    * @returns {HistoryCheck} The step or the part of it that moves, with the parts left, or why it cannot move.
@@ -1536,7 +1576,8 @@ class DocumentHub
     const checked = direction === 'backward'
       ? this.#checkLaterEdits(step)
       : this.#checkMovesSinceUndo(step);
-    if (checked.ok === false || step.followers === undefined)
+    const leaves = step.followers !== undefined || (direction === 'backward' && makesSlots(step));
+    if (checked.ok === false || leaves === false)
     {
       return checked;
     }
@@ -1580,9 +1621,10 @@ class DocumentHub
 
   /**
    * Works out what a move of a step comes to on each of its patches: whole on a document that does not follow its
-   * change, whose edits in the way the move's check refuses; on a document held here that does, as far as no edit in the
-   * way changed what the patch changes; and on one written through that no window here holds, as far as its file would
-   * take the patch now (see {@link setFileFit}).
+   * change, whose edits in the way the move's check refuses, but for the empty slots an undo leaves where an edit since
+   * stands further along the list; on a document held here that does, as far as no edit in the way changed what the patch
+   * changes; and on one written through that no window here holds, as far as its file would take the patch now (see
+   * {@link setFileFit}).
    * @param {HistoryStep} step The step, its documents held but for those it writes through.
    * @param {'forward' | 'backward'} direction Redo or undo.
    * @returns {EntryPart[]} What the move comes to on each patch, in the step's order.
@@ -1594,7 +1636,9 @@ class DocumentHub
     {
       if (isFollowerOf(step, document) === false)
       {
-        return movesWhole(document, patch);
+        return direction === 'backward' && isSlotSplice(patch) && this.has(document)
+          ? this.#slotPart(step, document, patch)
+          : movesWhole(document, patch);
       }
 
       if (this.has(document) === false)
@@ -1610,6 +1654,24 @@ class DocumentHub
 
       return heldPart(document, patch, edits.get(document) as EditOnDocument[], direction);
     });
+  }
+
+  /**
+   * Works out what an undo comes to on the empty slots a step made room with in a list, on a document held here that does
+   * not follow the step's change: they stay, empty, when an edit applied since stands further along the list, which
+   * taking them out would move to another id; otherwise they go with the rest of the step.
+   * @param {HistoryStep} step The step, applied.
+   * @param {DocumentKey} document The document.
+   * @param {Patch} patch The slots, as the step made them.
+   * @returns {EntryPart} The part.
+   */
+  #slotPart(step: HistoryStep, document: DocumentKey, patch: Patch): EntryPart
+  {
+    const beyond = this.#editsInTheWay(step, document, 'backward')
+      .find(edit => edit.patches.some(other => patchInterference(patch, other) === 'would-move'));
+    return beyond === undefined
+      ? movesWhole(document, patch)
+      : { document, moving: null, left: patch, by: beyond.step };
   }
 
   /**
@@ -1737,13 +1799,14 @@ class DocumentHub
         continue;
       }
 
+      // the empty slots a step made room with are no reason to refuse it: an undo leaves them (see #slotPart).
       for (const edit of applied.slice(appliedAt + 1).reverse())
       {
-        const interference = interferenceOn(key, step, edit);
+        const interference = undoInterferenceOn(key, step, edit);
         if (interference !== null)
         {
           const { reason, describe } = BLOCKED_UNDO[interference];
-          return { ok: false, reason, step, blockedBy: edit, message: describe(step, edit) };
+          return { ok: false, reason, step, blockedBy: edit, message: describe(step, edit), document: key };
         }
       }
     }
@@ -1792,7 +1855,8 @@ class DocumentHub
           const inPlace = applied.some(each => each.id === edit.id);
           const phrase = inPlace ? `"${edit.label}"` : `undoing "${edit.label}"`;
           const { reason, describe } = BLOCKED_REDO[interference];
-          return { ok: false, reason, step, blockedBy: edit, message: describe(step, phrase) };
+          const undone = inPlace ? {} : { blockerUndone: true as const };
+          return { ok: false, reason, step, blockedBy: edit, message: describe(step, phrase), document: key, ...undone };
         }
       }
     }

@@ -1169,6 +1169,82 @@ describe('DocumentHub', () =>
 
   describe('undoing a step past later edits', () =>
   {
+    /**
+     * Renames map 1's door and, on map 2, makes an empty slot 5 past the end of the list and puts event 5 in it, as one
+     * step on both maps, the way placing a door pair does.
+     * @param {DocumentHub} hub The hub.
+     * @returns {HistoryStep} The step.
+     */
+    const placeSlottedPair = (hub: DocumentHub): HistoryStep => hub.edit('Place door pair', [ mapHistoryKey(1), mapHistoryKey(2) ], tx =>
+    {
+      tx.set(MAP_A, [ 'events', 1, 'name' ], 'Door to cave');
+      tx.apply(MAP_B, { kind: 'splice', path: [ 'events' ], index: 5, removed: [], inserted: [ null ] });
+      tx.apply(MAP_B, { kind: 'set', path: [ 'events', 5 ], before: null, after: createMapEvent(5, 0, 1) as unknown as JsonValue });
+    }) as HistoryStep;
+
+    it('undoes a step past an event placed after the empty slot it made, leaving the slot empty and the event its id', () =>
+    {
+      // Arrange: map 2 places event 6 after the pair's event 5.
+      const hub = buildHub();
+      placeSlottedPair(hub);
+      placeNewerEvent(hub, 6);
+
+      // Act: undo the pair from map 1, where it is still the newest step.
+      const result = hub.undo(mapHistoryKey(1));
+
+      // Assert: the slot alone is left, so event 6 keeps its id; the door's name is back.
+      expect([ result.ok, result.ok && result.left?.map(part => [ part.document, part.patch.kind, part.by?.label ]), slotsOf(hub), fileOf(hub, MAP_A).events[1]?.name ])
+        .toStrictEqual([ true, [ [ MAP_B, 'splice', 'Place event' ] ], [ null, '1:Door', null, '3:Chest', null, null, '6:Newer' ], 'Door' ]);
+    });
+
+    it('undoes a step whose empty slot nothing stands beyond, taking the slot out with the rest', () =>
+    {
+      // Arrange: the pair alone.
+      const hub = buildHub();
+      placeSlottedPair(hub);
+
+      // Act.
+      const result = hub.undo(mapHistoryKey(1));
+
+      // Assert: nothing is left; map 2's list is as long as it was.
+      expect([ result.ok, result.ok && result.left, slotsOf(hub) ])
+        .toStrictEqual([ true, undefined, [ null, '1:Door', null, '3:Chest', null ] ]);
+    });
+
+    it('redoes a step undone with its empty slot left, putting the event back in that slot', () =>
+    {
+      // Arrange: the pair undone past event 6.
+      const hub = buildHub();
+      placeSlottedPair(hub);
+      placeNewerEvent(hub, 6);
+      hub.undo(mapHistoryKey(1));
+
+      // Act.
+      const result = hub.redo(mapHistoryKey(1));
+
+      // Assert.
+      expect([ result.ok, slotsOf(hub), fileOf(hub, MAP_A).events[1]?.name ])
+        .toStrictEqual([ true, [ null, '1:Door', null, '3:Chest', null, '5:EV005', '6:Newer' ], 'Door to cave' ]);
+    });
+
+    it('still refuses to undo a step whose event a later edit changed, naming the edit and the map it is on', () =>
+    {
+      // Arrange: event 6 placed after the pair's event, which alone would not refuse it, then event 5 renamed.
+      const hub = buildHub();
+      placeSlottedPair(hub);
+      placeNewerEvent(hub, 6);
+      hub.edit('Rename event', [ mapHistoryKey(2) ], tx => tx.set(MAP_B, [ 'events', 5, 'name' ], 'Cave door'));
+      const histories = [ mapHistoryKey(1), mapHistoryKey(2) ];
+      const before = stateOf(hub, histories);
+
+      // Act.
+      const result = hub.undo(mapHistoryKey(1));
+
+      // Assert: refused before anything moved.
+      expect([ result.ok === false && result.reason, result.ok === false && 'blockedBy' in result && result.blockedBy?.label, result.ok === false && 'document' in result && result.document, stateOf(hub, histories) ])
+        .toStrictEqual([ 'conflict', 'Rename event', MAP_B, before ]);
+    });
+
     it('refuses to undo a step on two maps after a resize moved the tiles it changed, and changes nothing', () =>
     {
       // Arrange: map 1 grows a row after the pair, so the erased tile's cell has a new index, and the index it had
