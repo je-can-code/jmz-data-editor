@@ -23,6 +23,10 @@ type battler struct {
 
 	// pageCount is how many pages the event has in all.
 	pageCount int
+
+	// firstPage is the first of the pages naming the enemy, whole: what a new battler of that enemy is shaped
+	// after.
+	firstPage db.RpgMapEventPage
 }
 
 // scanMap returns every battler on a map, in event order.
@@ -81,6 +85,7 @@ func scanEvent(event *db.RpgMapEvent) ([]battler, error) {
 			y:           event.Y,
 			pageIndexes: []int{pageIndex},
 			pageCount:   len(event.Pages),
+			firstPage:   page,
 		})
 	}
 

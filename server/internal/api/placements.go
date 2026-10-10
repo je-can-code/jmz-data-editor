@@ -17,6 +17,17 @@ type EnemyPlacements struct {
 	Placements []placements.Placement `json:"placements"`
 }
 
+// EnemyBattlerPages is what GET /api/enemies/{enemyId}/battler-pages answers with.
+type EnemyBattlerPages struct {
+	// EnemyId is the enemy asked about, so an answer that arrives late can be told apart from the one
+	// for the enemy now picked.
+	EnemyId int `json:"enemyId"`
+
+	// Battlers are the map events standing as that enemy, by map id and then event, each with the first
+	// of its pages naming the enemy: an empty list, never null, when there are none.
+	Battlers []placements.BattlerPage `json:"battlers"`
+}
+
 // MapArrivals is what GET /api/maps/{mapId}/arrivals answers with.
 type MapArrivals struct {
 	// MapId is the map asked about, so an answer that arrives late can be told apart from the one for the
@@ -88,6 +99,36 @@ func LoadMapArrivals(index *placements.Index) http.HandlerFunc {
 		}
 
 		res.ToRestResponse(responseWriter, req.ProjectPath, "", &MapArrivals{MapId: mapId, Arrivals: found}, http.StatusOK)
+	}
+}
+
+// LoadEnemyBattlerPages serves GET /api/enemies/{enemyId}/battler-pages: every map event whose comments
+// make it a battler of the enemy, with its map, its id and name, and the first of its pages naming the
+// enemy, whole, inside the usual envelope. The map editor's battler brush shapes a new battler of the
+// enemy after the ones already placed. The same index as the placements answers it. A map that cannot be
+// read strictly is a 500 whose envelope names the file.
+func LoadEnemyBattlerPages(index *placements.Index) http.HandlerFunc {
+	return func(responseWriter http.ResponseWriter, httpRequest *http.Request) {
+		// enemy ids start at 1, as the rows of every database table do.
+		enemyId, ok := idFromPath(responseWriter, httpRequest, "enemyId", 1)
+		if ok == false {
+			return
+		}
+
+		var req RestRequest
+		if req.ToRestRequest(responseWriter, httpRequest) != nil {
+			return
+		}
+
+		found, err := index.BattlerPages(req.ProjectPath, enemyId)
+
+		var res RestResponse[*EnemyBattlerPages]
+		if err != nil {
+			res.ToRestResponse(responseWriter, req.ProjectPath, err.Error(), nil, http.StatusInternalServerError)
+			return
+		}
+
+		res.ToRestResponse(responseWriter, req.ProjectPath, "", &EnemyBattlerPages{EnemyId: enemyId, Battlers: found}, http.StatusOK)
 	}
 }
 

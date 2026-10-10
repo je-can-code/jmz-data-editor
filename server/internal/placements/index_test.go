@@ -86,6 +86,71 @@ func TestPlacementsAnswersAnEmptyListForAnEnemyPlacedNowhere(t *testing.T) {
 	}
 }
 
+// TestBattlerPagesListsEachBattlerWithTheFirstPageNamingTheEnemy covers the battler brush's answer: every
+// battler of the enemy, by map and event, each with the first of its pages naming the enemy, whole; the
+// bat naming another enemy, and the lamp whose dialogue quotes the tag, left out as the placements leave
+// them out; and the ambusher shaped after its second page, the one naming the enemy, never its first.
+func TestBattlerPagesListsEachBattlerWithTheFirstPageNamingTheEnemy(t *testing.T) {
+	// Arrange.
+	root := newFixtureProject(t)
+	index, reads := newCountingIndex(t, watch.NewHub("data"))
+
+	// Act.
+	found, err := index.BattlerPages(root, 5)
+	_, placementsErr := index.Placements(root, 5)
+
+	// Assert- the same reading of each map serves both answers.
+	if err != nil || placementsErr != nil {
+		t.Fatal(err, placementsErr)
+	}
+	expected := []BattlerPage{
+		{MapId: 1, EventId: 1, EventName: "Slime", Page: pageOf(commentOf(t, "<enemyId:5>"), commentOf(t, "<sight:4>"))},
+		{MapId: 1, EventId: 4, EventName: "Ambush", Page: pageOf(commentOf(t, "<enemyId:5>"))},
+		{MapId: 2, EventId: 2, EventName: "Slime", Page: pageOf(commentOf(t, "<enemyId: 5>"))},
+		{MapId: 3, EventId: 1, EventName: "Outcast", Page: pageOf(commentOf(t, "<enemyId:5>"))},
+	}
+	if reflect.DeepEqual(found, expected) == false {
+		t.Errorf("answered %+v\nexpected %+v", found, expected)
+	}
+	assertReads(t, reads, map[string]int{"Map001.json": 1, "Map002.json": 1, "Map003.json": 1})
+}
+
+// TestBattlerPagesAnswersAnEmptyListForAnEnemyPlacedNowhere covers an enemy no event names, whose list must
+// still be a list for the brush to fall back from.
+func TestBattlerPagesAnswersAnEmptyListForAnEnemyPlacedNowhere(t *testing.T) {
+	// Arrange.
+	root := newFixtureProject(t)
+	index, _ := newCountingIndex(t, watch.NewHub("data"))
+
+	// Act.
+	found, err := index.BattlerPages(root, 9)
+
+	// Assert.
+	if err != nil {
+		t.Fatal(err)
+	}
+	if found == nil || len(found) != 0 {
+		t.Errorf("answered %#v, expected an empty list", found)
+	}
+}
+
+// TestBattlerPagesNamesAMapTheModelsCannotRead covers a damaged map file: the answer fails, naming it, as the
+// placements do, rather than shaping a battler after a list missing that map's.
+func TestBattlerPagesNamesAMapTheModelsCannotRead(t *testing.T) {
+	// Arrange.
+	root := newFixtureProject(t)
+	writeFile(t, root, "data/Map002.json", `{"events":[null],"mystery":1}`)
+	index, _ := newCountingIndex(t, watch.NewHub("data"))
+
+	// Act.
+	_, err := index.BattlerPages(root, 5)
+
+	// Assert.
+	if err == nil || strings.Contains(err.Error(), "Map002.json") == false {
+		t.Errorf("answered %v", err)
+	}
+}
+
 // TestPlacementsReadsEachMapOnce covers the cache: a second answer, even about another enemy, reads no
 // map again.
 func TestPlacementsReadsEachMapOnce(t *testing.T) {

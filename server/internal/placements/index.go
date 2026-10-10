@@ -43,6 +43,18 @@ type Placement struct {
 	PageCount int `json:"pageCount"`
 }
 
+// BattlerPage is one map event standing as a battler of the enemy asked about, with the first of its pages naming
+// that enemy, whole: its picture, its settings and its comments, which is what the map editor shapes a new battler of
+// the enemy after.
+type BattlerPage struct {
+	MapId     int    `json:"mapId"`
+	EventId   int    `json:"eventId"`
+	EventName string `json:"eventName"`
+
+	// Page is the first of the event's pages naming the enemy, exactly as the map file holds it.
+	Page db.RpgMapEventPage `json:"page"`
+}
+
 // Arrival is one transfer, on any map, that names outright a tile of the map asked about as where it lands.
 type Arrival struct {
 	// MapId is the map the transfer is on, which may be the map asked about itself.
@@ -133,6 +145,35 @@ func (index *Index) Placements(root string, enemyId int) ([]Placement, error) {
 		for _, standing := range facts.battlers {
 			if standing.enemyId == enemyId {
 				found = append(found, placementOf(mapId, mapName, standing))
+			}
+		}
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return found, nil
+}
+
+// BattlerPages answers every map event in the project at root that stands as a battler of an enemy, by map id
+// and then event, each with the first of its pages naming the enemy, whole. The list is empty, never nil, when
+// there are none. The map editor shapes a new battler of the enemy after the ones already placed.
+//
+// A map that cannot be read strictly fails the whole answer, naming its file, as the placements do.
+func (index *Index) BattlerPages(root string, enemyId int) ([]BattlerPage, error) {
+	index.mu.Lock()
+	defer index.mu.Unlock()
+
+	found := []BattlerPage{}
+	err := index.eachMap(root, func(mapId int, _ string, facts mapFacts) {
+		for _, standing := range facts.battlers {
+			if standing.enemyId == enemyId {
+				found = append(found, BattlerPage{
+					MapId:     mapId,
+					EventId:   standing.eventId,
+					EventName: standing.eventName,
+					Page:      standing.firstPage,
+				})
 			}
 		}
 	})
