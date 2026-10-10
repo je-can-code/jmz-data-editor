@@ -2,11 +2,17 @@ import type { PluginsJsEntry } from '../../../services/plugins/PluginsJsReader.t
 import { pageCommentText } from '../../core/model/eventModel.ts';
 import type { RmmzMapEvent } from '../../core/model/rmmzTypes.ts';
 import type { PluginModule } from '../../core/modules/PluginModule.ts';
+import { battlerTagFields } from './battlerFields.ts';
 
 /**
  * J-ABS's file name, as js/plugins.js lists it.
  */
 const JABS_PLUGIN = 'J-ABS';
+
+/**
+ * J-LevelMaster's file name, as js/plugins.js lists it: the plugin that reads a J-ABS battler's level off its page.
+ */
+const LEVEL_PLUGIN = 'J-LevelMaster';
 
 /**
  * The id J-ABS's module registers battlers under.
@@ -60,8 +66,9 @@ const isBattler = (event: RmmzMapEvent): boolean =>
 
 /**
  * What the editor knows of J-ABS: its battlers, recognised by their enemy tag, which outrank every core kind since a
- * battler is otherwise an event of comments alone; and the events on its action map, which are the patterns its actions
- * are copied from, so none of them is taken for something placed on a map.
+ * battler is otherwise an event of comments alone; the tags on a battler's page, each a field a blueprint's copies follow
+ * on its own; and the events on its action map, which are the patterns its actions are copied from, so none of them is
+ * taken for something placed on a map.
  */
 const jabsModule: PluginModule = {
   id: 'jabs',
@@ -70,6 +77,10 @@ const jabsModule: PluginModule = {
   register: (contributions, context) =>
   {
     contributions.eventKind({ id: BATTLER_KIND_ID, title: 'Battler', priority: 50, detect: isBattler, marker: 'battler' });
+
+    // a copy of a blueprint follows each of a battler's tags on its own, and its level only while the plugin reading it is
+    // on too.
+    battlerTagFields(context.plugins.has(LEVEL_PLUGIN)).forEach(tag => contributions.commentTag(tag));
 
     // the registry switches this module on only while J-ABS is enabled, so the plugin is always listed here.
     const actionMapId = actionMapIdOf(context.plugins.get(JABS_PLUGIN) as PluginsJsEntry);

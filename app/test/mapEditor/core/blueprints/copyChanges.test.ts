@@ -6,6 +6,7 @@ import { createEventPage } from '../../../../src/mapEditor/core/model/eventModel
 import { cloneJson, type JsonValue } from '../../../../src/mapEditor/core/model/json.ts';
 import type { RmmzEventCommand, RmmzEventPage, RmmzMapEvent } from '../../../../src/mapEditor/core/model/rmmzTypes.ts';
 import { OTHER_TAGS_MISREAD } from '../../../../src/mapEditor/core/properties/noteText.ts';
+import { battlerTagFields, TYPE_TOP } from '../../../../src/mapEditor/modules/jabs/battlerFields.ts';
 import { lightTagFields } from '../../../../src/mapEditor/modules/lighting/lightFields.ts';
 import { PLUGIN_DEFAULTS } from '../../../../src/mapEditor/modules/lighting/lightTags.ts';
 import { command, event, page, text } from '../../support/eventKindFixtures.ts';
@@ -28,6 +29,10 @@ import { command, event, page, text } from '../../support/eventKindFixtures.ts';
  *   its tag and its place among that tag's lines, so it never moves by an offset, and a copy changing one tag line by hand
  *   still follows every other. A tag line the blueprint adds reaches a copy that follows its list; one it takes away goes
  *   from such a copy, with what the link kept of it.
+ * - With J-ABS's tags read, a battler's numbers (its sight, its move speed, its level beside J-LevelMaster, and the rest)
+ *   follow by offsets held to the ranges J-ABS allows, and its enemy is a choice. So a copy whose speed was raised by hand
+ *   follows its blueprint's level and motion like every other copy, keeps its speed, and holds it as an offset in its link
+ *   once the blueprint's speed moves.
  * - The name and the note's own text are choices, the link written after the note's text; a note whose text and link
  *   both stand is left byte for byte.
  * - A command of the blueprint's naming its own event by id names the copy, and one naming another event of its group
@@ -80,6 +85,19 @@ describe('planCopyChange', () =>
   {
     return event(5, [ page(list) ], { name: 'Goblin' });
   };
+
+  /**
+   * The blueprint's battler, event 5, as Chef Adventure writes one: its enemy, then its move speed and level on the same
+   * comment's later lines, then its motion in a comment of its own, before it growls.
+   * @returns {RmmzMapEvent} The event.
+   */
+  const battler = (): RmmzMapEvent => goblin([
+    comment('<enemyId:12>'),
+    later('<moveSpeed:4.0>'),
+    later('<level:7>'),
+    comment('<motion:[stretch]>'),
+    ...text([ 'Grr.' ]),
+  ]);
 
   /**
    * Builds a copy of an event as placing a blueprint would: under another id, standing elsewhere, its note holding its
@@ -772,19 +790,6 @@ describe('planCopyChange', () =>
 
   describe('tag lines no module reads', () =>
   {
-    /**
-     * The blueprint's battler, event 5, its tags read by no module: its enemy, then its move speed and level on the same
-     * comment's later lines, then its motion in a comment of its own, before it growls.
-     * @returns {RmmzMapEvent} The event.
-     */
-    const battler = (): RmmzMapEvent => goblin([
-      comment('<enemyId:12>'),
-      later('<moveSpeed:4.0>'),
-      later('<level:7>'),
-      comment('<motion:[stretch]>'),
-      ...text([ 'Grr.' ]),
-    ]);
-
     it('follows every other tag line of a copy whose one tag line was changed by hand, on its comment or another', () =>
     {
       // Arrange: one copy in line, and one whose move speed was raised by hand; the blueprint's level, beside the move
@@ -864,6 +869,127 @@ describe('planCopyChange', () =>
       // Assert: the copy's own list, its level followed.
       expect(copied.pages[0].list)
         .toStrictEqual(withLine(copy, 2, '<level:9>').pages[0].list);
+    });
+  });
+
+  describe('a battler tuned by hand, with J-ABS\'s tags read', () =>
+  {
+    /**
+     * The tags a game running J-ABS and J-LevelMaster reads as fields, beside J-Lighting's light.
+     */
+    const BATTLER_OPTIONS: CopyChangeOptions = { tags: [ ...OPTIONS.tags, ...battlerTagFields(true) ] };
+
+    /**
+     * Plans a change for a copy, with J-ABS's tags read, the battler's level among them.
+     * @param {RmmzMapEvent} before The blueprint's event before the change.
+     * @param {RmmzMapEvent} after It after the change.
+     * @param {RmmzMapEvent} copy The copy.
+     * @returns {CopyChange} The plan.
+     */
+    const planBattler = (before: RmmzMapEvent, after: RmmzMapEvent, copy: RmmzMapEvent): CopyChange =>
+    {
+      return planCopyChange({ before, after }, copy, BATTLER_OPTIONS);
+    };
+
+    /**
+     * Reads the first four lines of a battler's page: its enemy, move speed, level and motion.
+     * @param {RmmzMapEvent} source The battler.
+     * @returns {JsonValue[]} The lines' text.
+     */
+    const tagsOf = (source: RmmzMapEvent): JsonValue[] => [ 0, 1, 2, 3 ].map(index => lineOf(source, index));
+
+    it('follows the level and the motion on a copy whose move speed was raised by hand, as every other copy does', () =>
+    {
+      // Arrange: the hands-on try. A copy in line, and one whose speed was raised from 4.0 to 5.0 by hand; then the
+      // blueprint's level goes from 7 to 9, beside the speed on one comment, and its motion, in another, changes.
+      const before = battler();
+      const after = withLine(withLine(before, 2, '<level:9>'), 3, '<motion:[breathe]>');
+      const copies = [ copyOf(before), copyOf(withLine(before, 1, '<moveSpeed:5.0>')) ];
+
+      // Act.
+      const planned = copies.map(copy => changedTo(planBattler(before, after, copy)));
+
+      // Assert: both reach level 9 and breathe; the tuned one keeps its speed, which the change did not move, and its link.
+      expect(planned.map(({ event: copied, link }) => [ tagsOf(copied), link ]))
+        .toStrictEqual([
+          [ [ '<enemyId:12>', '<moveSpeed:4.0>', '<level:9>', '<motion:[breathe]>' ], LINK ],
+          [ [ '<enemyId:12>', '<moveSpeed:5.0>', '<level:9>', '<motion:[breathe]>' ], LINK ],
+        ]);
+    });
+
+    it('keeps a hand-raised move speed as an offset in the copy\'s link once the blueprint\'s speed moves, and moves by it after', () =>
+    {
+      // Arrange: the copy raised to 5.0 by hand, then followed to level 9; then the blueprint's speed goes from 4.0 to 4.5,
+      // and back.
+      const at7 = battler();
+      const at9 = withLine(at7, 2, '<level:9>');
+      const faster = withLine(at9, 1, '<moveSpeed:4.5>');
+      const tuned = changedTo(planBattler(at7, at9, copyOf(withLine(at7, 1, '<moveSpeed:5.0>')))).event;
+
+      // Act: each change planned on what the one before made of the copy.
+      const sped = changedTo(planBattler(at9, faster, tuned));
+      const slowed = changedTo(planBattler(faster, at9, sped.event));
+
+      // Assert: 1 faster than the blueprint all along, the offset held in the link the moment the speed moved.
+      expect([ lineOf(sped.event, 1), sped.event.note, lineOf(slowed.event, 1), slowed.link.differences, lineOf(slowed.event, 2) ])
+        .toStrictEqual([ '<moveSpeed:5.5>', '<blueprint:[k3x9q2mf, 5, p1.moveSpeed+1]>', '<moveSpeed:5.0>', [ 'p1.moveSpeed+1' ], '<level:9>' ]);
+    });
+
+    it('moves a level the copy tuned by its offset while J-LevelMaster reads it, and keeps it as the copy\'s own while nothing does', () =>
+    {
+      // Arrange: a copy at level 8 over the blueprint's 7, which goes to 9; J-ABS read with J-LevelMaster on, and off.
+      const before = battler();
+      const after = withLine(before, 2, '<level:9>');
+      const copy = copyOf(withLine(before, 2, '<level:8>'));
+      const withoutLevels: CopyChangeOptions = { tags: [ ...OPTIONS.tags, ...battlerTagFields(false) ] };
+
+      // Act.
+      const read = changedTo(planBattler(before, after, copy));
+      const unread = planCopyChange({ before, after }, copy, withoutLevels);
+
+      // Assert: 1 above the blueprint as a number; never moved by the blueprint's 2 as a choice.
+      expect([ lineOf(read.event, 2), read.link.differences, unread ])
+        .toStrictEqual([ '<level:10>', [ 'p1.level+1' ], { kind: 'stays' } ]);
+    });
+
+    it('never moves the enemy a copy fights as by an offset, J-ABS reading it as a choice', () =>
+    {
+      // Arrange: the blueprint turns from enemy 12 to 13; one copy fights as 12, one as 14.
+      const before = battler();
+      const after = withLine(before, 0, '<enemyId:13>');
+      const copies = [ copyOf(before), copyOf(withLine(before, 0, '<enemyId: 14>')) ];
+
+      // Act.
+      const outcomes = copies.map(copy => planBattler(before, after, copy));
+
+      // Assert: 12 follows to 13; 14 stays 14 and never becomes 15.
+      expect([ lineOf(changedTo(outcomes[0]).event, 0), outcomes[1] ])
+        .toStrictEqual([ '<enemyId:13>', { kind: 'stays' } ]);
+    });
+
+    it.each([
+      [ 'sight', 0, TYPE_TOP ],
+      [ 'pursuit', 0, TYPE_TOP ],
+      [ 'alertedSightBoost', 0, TYPE_TOP ],
+      [ 'alertedPursuitBoost', 0, TYPE_TOP ],
+      [ 'alertDuration', 0, TYPE_TOP ],
+      [ 'guardRange', 0, TYPE_TOP ],
+      [ 'moveSpeed', 0, TYPE_TOP ],
+      [ 'level', -TYPE_TOP, TYPE_TOP ],
+    ])('holds the %s at each end of its range, the copy\'s offset kept whole', (name, least, most) =>
+    {
+      // Arrange: a blueprint at 4, with a copy kept 1 below it and one kept 1 above.
+      const at = (value: number): RmmzMapEvent => goblin([ comment('<enemyId:12>'), later(`<${name}:${value}>`) ]);
+      const below = copyOf(at(3), [ `p1.${name}-1` ]);
+      const above = copyOf(at(5), [ `p1.${name}+1` ]);
+
+      // Act: the blueprint goes to the least its range allows, and to the most.
+      const bottom = changedTo(planBattler(at(4), at(least), below));
+      const top = changedTo(planBattler(at(4), at(most), above));
+
+      // Assert: each held at the end it would pass, its offset kept in its link.
+      expect([ lineOf(bottom.event, 1), bottom.link.differences, lineOf(top.event, 1), top.link.differences ])
+        .toStrictEqual([ `<${name}:${least}>`, [ `p1.${name}-1` ], `<${name}:${most}>`, [ `p1.${name}+1` ] ]);
     });
   });
 
