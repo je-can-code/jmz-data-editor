@@ -431,4 +431,17 @@ const battlerTagFields = (levels: boolean): CommentTagDefinition[] =>
   return tags.map(definitionOf);
 };
 
-export { AI_ROLES, AI_TRAITS, ANY_LEVEL, BATTLER_SETTINGS, battlerTagFields, FROM_ZERO, TYPE_TOP };
+export {
+  AI_ROLES,
+  AI_TRAITS,
+  ANY_LEVEL,
+  BATTLER_SETTINGS,
+  battlerLines,
+  battlerTagFields,
+  FROM_ZERO,
+  JABS_TAGS,
+  LEVEL_TAG,
+  TYPE_TOP,
+  writtenLine,
+};
+export type { BattlerTag };
