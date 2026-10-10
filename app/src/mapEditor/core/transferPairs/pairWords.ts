@@ -57,16 +57,18 @@ const nextPickWords = (picks: PairPicks, far: PairMap | null): string | null =>
 };
 
 /**
- * Says where a planned end sends the player, as the readout lists it.
+ * Says where a planned end sends the player, as the readout lists it: the first end takes them there, and the way back
+ * brings them back. The player lands; a door or a strip only sends them.
  * @param {PairPlan} plan The plan.
  * @param {number} index Which end.
  * @param {(mapId: number) => string} mapName Names a map.
- * @returns {string} The words, such as "lands on 8, 14 in Entrance".
+ * @returns {string} The words, such as "takes the player to 8, 14 in Entrance".
  */
-const landsWords = (plan: PairPlan, index: number, mapName: (mapId: number) => string): string =>
+const sendsWords = (plan: PairPlan, index: number, mapName: (mapId: number) => string): string =>
 {
   const { destination } = plan.ends[index];
-  return `lands on ${tileWords(destination)} in ${mapName(destination.mapId)}`;
+  const sends = index === 0 ? 'takes the player to' : 'brings them back to';
+  return `${sends} ${tileWords(destination)} in ${mapName(destination.mapId)}`;
 };
 
 /**
@@ -95,7 +97,7 @@ const startWords = (picks: PairPicks): string =>
 const planWords = (picks: PairPicks, plan: PairPlan, mapName: (mapId: number) => string): string =>
 {
   const { kind, exit } = picks;
-  const there = `${startWords(picks)} ${landsWords(plan, 0, mapName)}`;
+  const there = `${startWords(picks)} ${sendsWords(plan, 0, mapName)}`;
   if (plan.ends.length === 1)
   {
     return `${there}. No way back is placed.`;
@@ -105,7 +107,7 @@ const planWords = (picks: PairPicks, plan: PairPlan, mapName: (mapId: number) =>
   const back = kind === 'door'
     ? `the way out on ${tileWords(exit as MapCell)}`
     : 'the strip on the other edge';
-  return `${there}; ${back} ${landsWords(plan, 1, mapName)}.`;
+  return `${there}; ${back} ${sendsWords(plan, 1, mapName)}.`;
 };
 
 /**

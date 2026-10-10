@@ -81,9 +81,9 @@ describe('pairWords', () =>
       // Assert.
       expect([ doors, edges, oneWay ])
         .toStrictEqual([
-          'The door on 14, 6 lands on 8, 14 in Entrance; the way out on 8, 15 lands on 14, 7 in Northeast Section.',
-          'The 3-tile strip along the bottom edge lands on 17, 1 in Entrance; the strip on the other edge lands on 31, 28 in Northeast Section.',
-          'The 5-tile strip along the left edge lands on 33, 7 in Entrance. No way back is placed.',
+          'The door on 14, 6 takes the player to 8, 14 in Entrance; the way out on 8, 15 brings them back to 14, 7 in Northeast Section.',
+          'The 3-tile strip along the bottom edge takes the player to 17, 1 in Entrance; the strip on the other edge brings them back to 31, 28 in Northeast Section.',
+          'The 5-tile strip along the left edge takes the player to 33, 7 in Entrance. No way back is placed.',
         ]);
     });
 
