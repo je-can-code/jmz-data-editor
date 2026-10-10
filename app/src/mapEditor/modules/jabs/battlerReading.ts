@@ -218,15 +218,29 @@ const ROLES: readonly string[] = [ 'leader', 'follower', 'guardian', 'ward', 'so
 const LEGACY_ROLES: readonly string[] = [ 'leader', 'follower' ];
 
 /**
+ * Every word tag's pattern built so far, by tag and word: a map's battlers read the same few dozen thousands of times.
+ */
+const WORD_PATTERNS = new Map<string, RegExp>();
+
+/**
  * Builds the pattern of one of J-ABS's word tags, as J.ABS.RegExp writes each of them: {@code <aiTrait:careful>} and the
- * rest, in any case, one space allowed after the colon.
+ * rest, in any case, one space allowed after the colon. It holds no global flag, so one pattern serves every read.
  * @param {string} tag The tag: aiTrait, aiRole or jabsConfig.
  * @param {string} word The word.
  * @returns {RegExp} The pattern.
  */
 const wordPattern = (tag: string, word: string): RegExp =>
 {
-  return new RegExp(`<${tag}:[ ]?${word}>`, 'i');
+  const key = `${tag}:${word}`;
+  const known = WORD_PATTERNS.get(key);
+  if (known !== undefined)
+  {
+    return known;
+  }
+
+  const pattern = new RegExp(`<${tag}:[ ]?${word}>`, 'i');
+  WORD_PATTERNS.set(key, pattern);
+  return pattern;
 };
 
 /**
@@ -253,14 +267,44 @@ const jabsDefaultsOf = (plugin: PluginsJsEntry | undefined): JabsDefaults =>
 };
 
 /**
- * Lists the comment lines J-Base offers a plugin from a page (Game_Event#getValidCommentCommands): every comment line
- * that is one tag filling it, in order.
- * @param {RmmzEventPage} page The page.
- * @returns {string[]} The lines' text.
+ * One comment line J-Base offers a plugin from a page, with its tag in lowercase: what follows its opening bracket, up to
+ * its first colon or its close.
  */
-const offeredLines = (page: RmmzEventPage): string[] =>
+type TaggedLine = {
+  readonly tag: string;
+  readonly text: string;
+};
+
+/**
+ * A comment line's tag: what follows its opening bracket, up to its first colon or its close.
+ */
+const TAG_NAME = /^<([^:>]*)/u;
+
+/**
+ * Lists the comment lines J-Base offers a plugin from a page (Game_Event#getValidCommentCommands), every comment line
+ * that is one tag filling it, in order, each with its tag. A line is one tag from its opening bracket to its close, so
+ * only a line of a tag can match that tag's pattern, and each pattern need only be tried on its own tag's lines.
+ * @param {RmmzEventPage} page The page.
+ * @returns {TaggedLine[]} The lines.
+ */
+const taggedLines = (page: RmmzEventPage): TaggedLine[] =>
 {
-  return parsableCommentLines(page).map(line => line.text);
+  return parsableCommentLines(page).map(({ text }) =>
+  {
+    const [ , tag ] = TAG_NAME.exec(text) as RegExpExecArray;
+    return { tag: tag.toLowerCase(), text };
+  });
+};
+
+/**
+ * Picks the lines of some tags out of a page's lines, in the order written.
+ * @param {readonly TaggedLine[]} lines The page's lines.
+ * @param {readonly string[]} tags The tags, in lowercase.
+ * @returns {string[]} Their lines' text.
+ */
+const linesTagged = (lines: readonly TaggedLine[], ...tags: readonly string[]): string[] =>
+{
+  return lines.filter(line => tags.includes(line.tag)).map(line => line.text);
 };
 
 /**
@@ -480,6 +524,72 @@ const notePassives = (note: string): number[] =>
 };
 
 /**
+ * What an enemy's note says of its battlers, each value as the game reads it off the note, or null where the note says
+ * nothing; J-ABS's defaults are left to whoever reads it.
+ */
+type EnemyNote = {
+  readonly team: number | null;
+  readonly sight: number | null;
+  readonly pursuit: number | null;
+  readonly alertedSightBoost: number | null;
+  readonly alertedPursuitBoost: number | null;
+  readonly alertDuration: number | null;
+  readonly level: number | null;
+  readonly inanimate: boolean | null;
+  readonly idle: boolean | null;
+  readonly hpBar: boolean | null;
+  readonly name: boolean | null;
+  readonly traits: readonly string[];
+  readonly roles: readonly string[];
+  readonly passives: readonly number[];
+};
+
+/**
+ * Every enemy note read so far, by its text: the same few hundred notes stand behind every battler on every map.
+ */
+const ENEMY_NOTES = new Map<string, EnemyNote>();
+
+/**
+ * Reads an enemy's note as J-ABS's Game_Enemy and RPG_Enemy readers read it, J-LevelMaster's level and J-Passive's
+ * passives beside them, once for each note however many battlers stand for its enemy.
+ * @param {string} note The note.
+ * @returns {EnemyNote} What it says.
+ */
+const enemyNoteOf = (note: string): EnemyNote =>
+{
+  const known = ENEMY_NOTES.get(note);
+  if (known !== undefined)
+  {
+    return known;
+  }
+
+  // a team of 0 in the note reads as none at all, since J-ABS takes any falsy team there for the enemies'.
+  const team = noteNumber(note, JABS_PATTERNS.teamId);
+  const read: EnemyNote = {
+    team: team === null || team === 0 ? null : team,
+    sight: noteNumber(note, JABS_PATTERNS.sight),
+    pursuit: noteNumber(note, JABS_PATTERNS.pursuit),
+    alertedSightBoost: noteNumber(note, JABS_PATTERNS.alertedSightBoost),
+    alertedPursuitBoost: noteNumber(note, JABS_PATTERNS.alertedPursuitBoost),
+    alertDuration: noteNumber(note, JABS_PATTERNS.alertDuration),
+    level: noteNumber(note, LEVEL_PATTERN),
+    inanimate: noteSwitch(note, 'notInanimate', 'inanimate'),
+    idle: noteSwitch(note, 'noIdle', 'canIdle'),
+    hpBar: noteSwitch(note, 'noHpBar', 'showHpBar'),
+    name: noteSwitch(note, 'noName', 'showName'),
+    traits: TRAITS.filter(trait => noteHas(note, wordPattern('aiTrait', trait)) !== null),
+    roles: ROLES.filter(role =>
+    {
+      const legacy = LEGACY_ROLES.includes(role) ? noteHas(note, wordPattern('aiTrait', role)) : null;
+      return noteHas(note, wordPattern('aiRole', role)) !== null || legacy !== null;
+    }),
+    passives: notePassives(note),
+  };
+  ENEMY_NOTES.set(note, read);
+  return read;
+};
+
+/**
  * Works out one value the page sets or leaves to the enemy and then to J-ABS's default, as parseEnemyComments does with
  * {@code ??} for each of them.
  * @param {T | null} event What the page sets.
@@ -548,7 +658,7 @@ const hiddenWhenInanimate = (
  */
 const pageEnemyId = (page: RmmzEventPage): number | null =>
 {
-  return pageWhole(offeredLines(page), JABS_PATTERNS.enemyId);
+  return pageWhole(linesTagged(taggedLines(page), 'enemyid'), JABS_PATTERNS.enemyId);
 };
 
 /**
@@ -568,65 +678,68 @@ const pageEnemyId = (page: RmmzEventPage): number | null =>
  */
 const readBattlerPage = (page: RmmzEventPage, enemyOf: (enemyId: number) => EnemyRecord | null, defaults: JabsDefaults): BattlerReading | null =>
 {
-  const lines = offeredLines(page);
-  const enemyId = pageWhole(lines, JABS_PATTERNS.enemyId);
+  const lines = taggedLines(page);
+  const enemyId = pageWhole(linesTagged(lines, 'enemyid'), JABS_PATTERNS.enemyId);
   if (enemyId === null)
   {
     return null;
   }
 
   const enemy = enemyOf(enemyId);
-  const note = enemy === null ? '' : enemy.note;
+  const note = enemyNoteOf(enemy === null ? '' : enemy.note);
+  const settings = linesTagged(lines, 'jabsconfig');
 
   // the enemy's own inanimate state, which hides its HP bar, name and idling even under a page making it animate.
-  const enemyInanimateWord = noteSwitch(note, 'notInanimate', 'inanimate');
-  const inanimate = layered(pageSwitch(lines, 'notInanimate', 'inanimate'), enemyInanimateWord, defaults.inanimate);
-  const enemyInanimate = enemyInanimateWord ?? defaults.inanimate;
+  const inanimate = layered(pageSwitch(settings, 'notInanimate', 'inanimate'), note.inanimate, defaults.inanimate);
+  const enemyInanimate = note.inanimate ?? defaults.inanimate;
+  const team = layered(pageWhole(linesTagged(lines, 'teamid'), JABS_PATTERNS.teamId), note.team, TEAMS.enemies);
+  const eventTraits = pageTraits(linesTagged(lines, 'aitrait'));
+  const eventRoles = pageRoles(linesTagged(lines, 'airole', 'aitrait'));
+  const eventPassives = pagePassives(linesTagged(lines, 'passive'));
+  const eventSpeed = pageFraction(linesTagged(lines, 'movespeed'), JABS_PATTERNS.moveSpeed);
 
-  // a team of 0 in the note reads as none at all, since J-ABS takes any falsy team there for the enemies'.
-  const noteTeam = noteNumber(note, JABS_PATTERNS.teamId);
-  const team = layered(pageWhole(lines, JABS_PATTERNS.teamId), noteTeam === null || noteTeam === 0 ? null : noteTeam, TEAMS.enemies);
-
-  const enemyTraits = TRAITS.filter(trait => noteHas(note, wordPattern('aiTrait', trait)) !== null);
-  const enemyRoles = ROLES.filter(role =>
+  /**
+   * Reads one of the numbers J-ABS layers from the page, the enemy and its default, from the page's lines of its tag.
+   * @param {string} tag The tag, in lowercase.
+   * @param {RegExp} pattern The tag's pattern.
+   * @param {(lines: readonly string[], pattern: RegExp) => number | null} read How J-ABS reads it off the page.
+   * @param {number | null} fromNote What the enemy's note gives.
+   * @param {number} fallback J-ABS's default.
+   * @returns {BattlerValue<number>} The value.
+   */
+  const number = (tag: string, pattern: RegExp, read: (lines: readonly string[], pattern: RegExp) => number | null, fromNote: number | null, fallback: number): BattlerValue<number> =>
   {
-    const legacy = LEGACY_ROLES.includes(role) ? noteHas(note, wordPattern('aiTrait', role)) : null;
-    return noteHas(note, wordPattern('aiRole', role)) !== null || legacy !== null;
-  });
-  const eventTraits = pageTraits(lines);
-  const eventRoles = pageRoles(lines);
-  const enemyPassives = notePassives(note);
-  const eventPassives = pagePassives(lines);
-  const eventSpeed = pageFraction(lines, JABS_PATTERNS.moveSpeed);
+    return layered(read(linesTagged(lines, tag), pattern), fromNote, fallback);
+  };
 
   return {
     enemyId,
     enemy,
-    level: layered(pageLevel(lines), noteNumber(note, LEVEL_PATTERN), 0),
+    level: layered(pageLevel(linesTagged(lines, 'level', 'lv', 'lvl')), note.level, 0),
     moveSpeed: eventSpeed === null
       ? { event: null, enemy: null, value: page.moveSpeed, from: 'page' }
       : { event: eventSpeed, enemy: null, value: eventSpeed, from: 'event' },
-    sight: layered(pageWhole(lines, JABS_PATTERNS.sight), noteNumber(note, JABS_PATTERNS.sight), defaults.sight),
-    pursuit: layered(pageWhole(lines, JABS_PATTERNS.pursuit), noteNumber(note, JABS_PATTERNS.pursuit), defaults.pursuit),
-    alertedSightBoost: layered(pageWhole(lines, JABS_PATTERNS.alertedSightBoost), noteNumber(note, JABS_PATTERNS.alertedSightBoost), defaults.alertedSightBoost),
-    alertedPursuitBoost: layered(pageFraction(lines, JABS_PATTERNS.alertedPursuitBoost), noteNumber(note, JABS_PATTERNS.alertedPursuitBoost), defaults.alertedPursuitBoost),
-    alertDuration: layered(pageWhole(lines, JABS_PATTERNS.alertDuration), noteNumber(note, JABS_PATTERNS.alertDuration), defaults.alertDuration),
+    sight: number('sight', JABS_PATTERNS.sight, pageWhole, note.sight, defaults.sight),
+    pursuit: number('pursuit', JABS_PATTERNS.pursuit, pageWhole, note.pursuit, defaults.pursuit),
+    alertedSightBoost: number('alertedsightboost', JABS_PATTERNS.alertedSightBoost, pageWhole, note.alertedSightBoost, defaults.alertedSightBoost),
+    alertedPursuitBoost: number('alertedpursuitboost', JABS_PATTERNS.alertedPursuitBoost, pageFraction, note.alertedPursuitBoost, defaults.alertedPursuitBoost),
+    alertDuration: number('alertduration', JABS_PATTERNS.alertDuration, pageWhole, note.alertDuration, defaults.alertDuration),
     aiTraits: eventTraits === null
-      ? { event: null, enemy: enemyTraits, value: enemyTraits, from: 'enemy' }
-      : { event: eventTraits, enemy: enemyTraits, value: eventTraits, from: 'event' },
+      ? { event: null, enemy: note.traits, value: note.traits, from: 'enemy' }
+      : { event: eventTraits, enemy: note.traits, value: eventTraits, from: 'event' },
     // parseEnemyComments falls back to enemyBattler.jabsBattlerRole, which only the database row defines and the
     // Game_Enemy it asks lacks, so a battler whose page names no role has none, whatever its enemy's note names.
     aiRoles: eventRoles === null
-      ? { event: null, enemy: enemyRoles, value: [], from: 'default' }
-      : { event: eventRoles, enemy: enemyRoles, value: eventRoles, from: 'event' },
+      ? { event: null, enemy: note.roles, value: [], from: 'default' }
+      : { event: eventRoles, enemy: note.roles, value: eventRoles, from: 'event' },
     inanimate,
     team: inanimate.value
       ? { ...team, value: TEAMS.neutral, from: 'inanimate' }
       : team,
-    idle: hiddenWhenInanimate(pageSwitch(lines, 'noIdle', 'canIdle'), noteSwitch(note, 'noIdle', 'canIdle'), enemyInanimate, inanimate.value, defaults.canIdle),
-    hpBar: hiddenWhenInanimate(pageSwitch(lines, 'noHpBar', 'showHpBar'), noteSwitch(note, 'noHpBar', 'showHpBar'), enemyInanimate, inanimate.value, defaults.showHpBar),
-    name: hiddenWhenInanimate(pageSwitch(lines, 'noName', 'showName'), noteSwitch(note, 'noName', 'showName'), enemyInanimate, inanimate.value, defaults.showName),
-    passives: { event: eventPassives, enemy: enemyPassives, value: [ ...enemyPassives, ...eventPassives ] },
+    idle: hiddenWhenInanimate(pageSwitch(settings, 'noIdle', 'canIdle'), note.idle, enemyInanimate, inanimate.value, defaults.canIdle),
+    hpBar: hiddenWhenInanimate(pageSwitch(settings, 'noHpBar', 'showHpBar'), note.hpBar, enemyInanimate, inanimate.value, defaults.showHpBar),
+    name: hiddenWhenInanimate(pageSwitch(settings, 'noName', 'showName'), note.name, enemyInanimate, inanimate.value, defaults.showName),
+    passives: { event: eventPassives, enemy: note.passives, value: [ ...note.passives, ...eventPassives ] },
   };
 };
 
