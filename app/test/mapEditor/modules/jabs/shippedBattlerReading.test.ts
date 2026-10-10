@@ -244,12 +244,48 @@ const switchOf = (comments: readonly string[], off: RegExp, on: RegExp): boolean
 };
 
 /**
+ * What a page sets, as Game_Event's override readers read it, each null when it sets none.
+ */
+type GamePage = {
+  team: number | null;
+  traits: string[] | null;
+  roles: string[] | null;
+  sight: number | null;
+  alertedSight: number | null;
+  pursuit: number | null;
+  alertedPursuit: number | null;
+  alertDuration: number | null;
+  idle: boolean | null;
+  hpBar: boolean | null;
+  name: boolean | null;
+  inanimate: boolean | null;
+  speed: number | null;
+  level: number | null;
+  passives: number[];
+};
+
+/**
+ * What an enemy's note says, as RPGManager reads it, each null when it says nothing.
+ */
+type EnemySaid = {
+  sight: number | null;
+  alertedSight: number | null;
+  pursuit: number | null;
+  alertedPursuit: number | null;
+  alertDuration: number | null;
+  traits: string[];
+  roles: string[];
+  level: number | null;
+  passives: number[];
+};
+
+/**
  * Reads a page as Game_Event's override readers do, with J-LevelMaster's level, J-Passive's passives and J-Motion's
  * motions beside them.
  * @param {readonly string[]} comments The page's comment lines J-Base offers.
- * @returns {Record<string, unknown>} What the page sets, each null when it sets none.
+ * @returns {GamePage} What the page sets, each null when it sets none.
  */
-const gamePage = (comments: readonly string[]): Record<string, unknown> =>
+const gamePage = (comments: readonly string[]): GamePage =>
 {
   // the team's pattern is global, and a fresh boot reads the first page with it from the start of the line.
   RX.TeamId.lastIndex = 0;
@@ -284,9 +320,9 @@ const gamePage = (comments: readonly string[]): Record<string, unknown> =>
  * passives beside them.
  * @param {string} note The note.
  * @param {GameDefaults} defaults J-ABS's Default Enemy parameters.
- * @returns {{ said: Record<string, unknown>, team: number, inanimate: boolean, idle: boolean, hpBar: boolean, name: boolean }} What the note says, and what Game_Enemy answers for the team and switches.
+ * @returns {{ said: EnemySaid, team: number, inanimate: boolean, idle: boolean, hpBar: boolean, name: boolean }} What the note says, and what Game_Enemy answers for the team and switches.
  */
-const gameEnemy = (note: string, defaults: GameDefaults) =>
+const gameEnemy = (note: string, defaults: GameDefaults): { said: EnemySaid; team: number; inanimate: boolean; idle: boolean; hpBar: boolean; name: boolean } =>
 {
   const on = notes.bool(note, RX.ConfigInanimate);
   const off = notes.bool(note, RX.ConfigNotInanimate);
@@ -387,8 +423,8 @@ const gameBattler = (page: RmmzEventPage, enemies: (EnemyRecord | null)[], defau
   const own = gamePage(comments);
   const enemy = gameEnemy(enemies[enemyId]?.note ?? '', defaults);
   const { said } = enemy;
-  const inanimate = (own.inanimate ?? enemy.inanimate) as boolean;
-  const hidden = (key: 'idle' | 'hpBar' | 'name'): unknown => (inanimate && own[key] === null ? false : own[key] ?? enemy[key]);
+  const inanimate = own.inanimate ?? enemy.inanimate;
+  const hidden = (key: 'idle' | 'hpBar' | 'name'): boolean => (inanimate && own[key] === null ? false : own[key] ?? enemy[key]);
   return {
     enemyId,
     page: own,
@@ -408,7 +444,7 @@ const gameBattler = (page: RmmzEventPage, enemies: (EnemyRecord | null)[], defau
       inanimate,
       speed: own.speed ?? page.moveSpeed,
       level: layer(own.level, said.level, 0),
-      passives: [ ...said.passives as number[], ...own.passives as number[] ],
+      passives: [ ...said.passives, ...own.passives ],
     },
     motions: gameMotions(comments),
   };
