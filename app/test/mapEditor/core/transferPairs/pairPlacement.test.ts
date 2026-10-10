@@ -3,6 +3,7 @@ import { createEvent } from '../../../../src/mapEditor/core/events/eventEdits.ts
 import { mapHistoryKey } from '../../../../src/mapEditor/core/history/historyKeys.ts';
 import { blueprintMapId, mapDocumentKey } from '../../../../src/mapEditor/core/model/documentKeys.ts';
 import { createMapEvent } from '../../../../src/mapEditor/core/model/eventModel.ts';
+import type { Patch } from '../../../../src/mapEditor/core/model/patches.ts';
 import type { RmmzMap } from '../../../../src/mapEditor/core/model/rmmzTypes.ts';
 import { stripEvent } from '../../../../src/mapEditor/core/transferPairs/pairEvents.ts';
 import { placeTransfers, type PlacementOutcome } from '../../../../src/mapEditor/core/transferPairs/pairPlacement.ts';
@@ -100,11 +101,12 @@ describe('placeTransfers', () =>
     // Act.
     const outcome = await placeTransfers(window.sources, planOn(window, DOOR_PAIR));
 
-    // Assert: the step carries the inside map's end as a splice past the end of its file's events.
+    // Assert: the step carries the inside map's end as an empty slot made past the end of its file's events, then the
+    // door put in it.
     const step = outcome.ok ? outcome.step : null;
     const inside = step?.entries.filter(entry => entry.document === mapDocumentKey(INSIDE)).map(entry => entry.patch);
-    expect([ step?.through, step?.histories, window.hub.has(mapDocumentKey(INSIDE)), inside?.map(patch => [ patch.kind, patch.kind === 'splice' && patch.index ]) ])
-      .toStrictEqual([ [ mapDocumentKey(INSIDE) ], [ mapHistoryKey(OUTSIDE), mapHistoryKey(INSIDE) ], false, [ [ 'splice', 1 ] ] ]);
+    expect([ step?.through, step?.histories, window.hub.has(mapDocumentKey(INSIDE)), inside?.map(patch => [ patch.kind, patch.kind === 'splice' ? patch.index : patch.kind === 'set' && patch.path.join('/') ]) ])
+      .toStrictEqual([ [ mapDocumentKey(INSIDE) ], [ mapHistoryKey(OUTSIDE), mapHistoryKey(INSIDE) ], false, [ [ 'splice', 1 ], [ 'set', 'events/1' ] ] ]);
   });
 
   it('brings the other map in from the window holding it, so its end is placed in place there', async () =>
@@ -130,12 +132,14 @@ describe('placeTransfers', () =>
     // Act.
     const outcome = await placeTransfers(window.sources, planOn(window, DOOR_PAIR));
 
-    // Assert: the door is event 2 on the map and in its file, the file's slot 1 left empty; the clean inside map has none.
+    // Assert: the door is event 2 on the map and in its file, each slot made empty first and the door put in slot 2; the
+    // file's slot 1 is left empty; the clean inside map has no version.
     const step = outcome.ok ? outcome.step : null;
-    const own = step?.entries.find(entry => entry.document === mapDocumentKey(OUTSIDE))?.patch;
-    const version = step?.fileVersions?.map(each => [ each.document, each.patches.map(patch => (patch.kind === 'splice' ? [ patch.index, patch.inserted.map(item => (item === null ? null : (item as { id: number }).id)) ] : null)) ]);
-    expect([ own?.kind === 'splice' && [ own.index, own.inserted.length ], version ])
-      .toStrictEqual([ [ 2, 1 ], [ [ mapDocumentKey(OUTSIDE), [ [ 1, [ null, 2 ] ] ] ] ] ]);
+    const shape = (patch: Patch) => (patch.kind === 'splice' ? [ patch.index, patch.inserted ] : [ patch.kind === 'set' && patch.path.join('/'), (patch as unknown as { after: { id: number } }).after.id ]);
+    const own = step?.entries.filter(entry => entry.document === mapDocumentKey(OUTSIDE)).map(entry => shape(entry.patch));
+    const version = step?.fileVersions?.map(each => [ each.document, each.patches.map(shape) ]);
+    expect([ own, version ])
+      .toStrictEqual([ [ [ 2, [ null ] ], [ 'events/2', 2 ] ], [ [ mapDocumentKey(OUTSIDE), [ [ 1, [ null, null ] ], [ 'events/2', 2 ] ] ] ] ]);
   });
 
   it('refuses a landing the player cannot stand on, saying why, and places nothing', async () =>
@@ -345,7 +349,7 @@ describe('placeTransfers', () =>
 
     // Assert.
     const step = placed.ok ? placed.step : null;
-    expect([ refusalOf(walled), step?.histories, step?.entries.map(entry => entry.document), window.hub.has(mapDocumentKey(INSIDE)) ])
+    expect([ refusalOf(walled), step?.histories, [ ...new Set(step?.entries.map(entry => entry.document)) ], window.hub.has(mapDocumentKey(INSIDE)) ])
       .toStrictEqual([ 'The player can\'t land on 4, 0 in Entrance. The tiles there let no one through.', [ mapHistoryKey(OUTSIDE) ], [ mapDocumentKey(OUTSIDE) ], false ]);
   });
 

@@ -4,12 +4,14 @@ import { createEvent } from '../../../../src/mapEditor/core/events/eventEdits.ts
 import { mapHistoryKey } from '../../../../src/mapEditor/core/history/historyKeys.ts';
 import type { HistoryStep } from '../../../../src/mapEditor/core/history/HistoryStep.ts';
 import { blueprintMapKey, mapDocumentKey } from '../../../../src/mapEditor/core/model/documentKeys.ts';
+import { createMapEvent } from '../../../../src/mapEditor/core/model/eventModel.ts';
 import type { JsonValue } from '../../../../src/mapEditor/core/model/json.ts';
 import type { RmmzMap } from '../../../../src/mapEditor/core/model/rmmzTypes.ts';
 import { placeTransfers } from '../../../../src/mapEditor/core/transferPairs/pairPlacement.ts';
 import { NO_PICKS, pairPlanOf, type PairPicks, type PairPlan } from '../../../../src/mapEditor/core/transferPairs/pairPlans.ts';
 import { isPairStep } from '../../../../src/mapEditor/core/transferPairs/PairWriter.ts';
-import { INSIDE, OUTSIDE, PAIR_LOOKS, pairMapOf, pairWindow, settlePairs, type PairWindow } from '../../support/pairFixtures.ts';
+import { HistoryRouter } from '../../../../src/mapEditor/core/workspace/HistoryRouter.ts';
+import { INSIDE, OUTSIDE, PAIR_LOOKS, pairMapName, pairMapOf, pairWindow, settlePairs, type PairWindow } from '../../support/pairFixtures.ts';
 
 /*
  * A transfer pair's two ends stand on two maps, and a save writes one map at a time, so the pair is written at once, the
@@ -25,7 +27,11 @@ import { INSIDE, OUTSIDE, PAIR_LOOKS, pairMapOf, pairWindow, settlePairs, type P
  * - an act the disk refuses writes nothing, and the pair, with every move made since, is taken back here so the window and
  *   the disk agree, and the author hears why; a pair that cannot be taken back is an alarm, and stays unwritten;
  * - a move made in another window is that window's to write; a transfer on one map is saved with its map, not here;
- * - an undo of a pair whose held map's file changed on disk since is refused before anything moves, naming the map.
+ * - a pair is judged by its own events, never by the rest of a map's list or by what the editor saved to a map's file
+ *   since: an event placed after the door leaves the door's place empty on an undo rather than refusing it, and a file
+ *   the map was saved to takes the door out by its place alone; only a redo finding another event in a door's place in a
+ *   held map's file is refused before anything moves, naming the map and saying what to do; an edit to the door itself
+ *   still refuses an undo, naming the edit, its map and what to do.
  */
 describe('PairWriter', () =>
 {
@@ -218,9 +224,9 @@ describe('PairWriter', () =>
     window.failNextWrite(new Error('the disk is full'));
     const plan = pairPlanOf(DOOR_PAIR, pairMapOf(window.disk, OUTSIDE), pairMapOf(window.disk, INSIDE), PAIR_LOOKS) as PairPlan;
 
-    // Act: an event placed after the door while the act is on its way, which taking the door out would move.
+    // Act: the door renamed while the act is on its way, which taking the door out would undo.
     const outcome = await placeTransfers(window.sources, plan);
-    createEvent(window.hub, OUTSIDE, { x: 9, y: 9 });
+    window.hub.edit('Rename door', [ mapHistoryKey(OUTSIDE) ], tx => tx.set(mapDocumentKey(OUTSIDE), [ 'events', 1, 'name' ], 'Front door'));
     release();
     await settlePairs();
 
@@ -248,42 +254,193 @@ describe('PairWriter', () =>
       .toStrictEqual([ true, [], true ]);
   });
 
-  it('refuses to undo a pair whose held map\'s file changed on disk since, naming the map, before anything moves', async () =>
+  /**
+   * Places the door pair and undoes it, then has the outside map's file found holding a sign in the door's place, as an
+   * event placed there in MZ would leave it.
+   * @param {PairWindow} window The window.
+   * @returns {Promise<HistoryStep>} The pair's step, undone.
+   */
+  const signInTheDoorsPlace = async (window: PairWindow): Promise<HistoryStep> =>
   {
-    // Arrange: a pair written, then the outside map's file found without its door, taken out in MZ.
+    const step = await placeDoorPair(window);
+    window.hub.undo(mapHistoryKey(OUTSIDE));
+    await settlePairs();
+    const changed = structuredClone(window.disk.get(OUTSIDE)) as RmmzMap;
+    changed.events = [ null, { ...createMapEvent(1, 8, 8), name: 'Sign' } ];
+    window.hub.noteWritten(mapDocumentKey(OUTSIDE), changed as unknown as JsonValue);
+    return step;
+  };
+
+  it('refuses to redo a pair whose door\'s place in a held map\'s file holds another event, naming the map and what to do', async () =>
+  {
+    // Arrange: a pair placed and undone, asked about once before the outside map's file changes.
     const window = pairWindow({ held: [ OUTSIDE, INSIDE ] });
     const step = await placeDoorPair(window);
-    const untouched = window.writer.guard(step, 'backward');
+    window.hub.undo(mapHistoryKey(OUTSIDE));
+    await settlePairs();
+    const untouched = window.writer.guard(step, 'forward');
     const changed = structuredClone(window.disk.get(OUTSIDE)) as RmmzMap;
-    changed.events = [ null ];
+    changed.events = [ null, { ...createMapEvent(1, 8, 8), name: 'Sign' } ];
 
     // Act.
     window.hub.noteWritten(mapDocumentKey(OUTSIDE), changed as unknown as JsonValue);
-    const guarded = window.writer.guard(step, 'backward');
+    const guarded = window.writer.guard(step, 'forward');
+    const oneMap = window.writer.guard({ ...step, entries: step.entries.filter(entry => entry.document === mapDocumentKey(OUTSIDE)) }, 'forward');
 
     // Assert: the inside map's file still fits, so only the outside map is named; a step on one map is not the writer's.
-    expect([ untouched, guarded, window.writer.guard({ ...step, entries: step.entries.slice(0, 1) }, 'backward') ])
-      .toStrictEqual([ null, `Map ${OUTSIDE} changed on disk since this transfer pair was written to it`, null ]);
+    expect([ untouched, guarded, oneMap ])
+      .toStrictEqual([ null, `Map ${OUTSIDE}'s file holds something else where this pair's events go. Save Map ${OUTSIDE}, then try again`, null ]);
   });
 
-  it('names the map whose file changed on disk as the map tree shows it, and by its id where the tree gives it no name', async () =>
+  it('names the map whose file stands in a redo\'s way as the map tree shows it, and by its id where the tree gives it no name', async () =>
   {
-    // Arrange: as above, the outside map's file found without its door.
+    // Arrange: as above, a sign in the door's place in the outside map's file.
     const window = pairWindow({ held: [ OUTSIDE, INSIDE ] });
-    const step = await placeDoorPair(window);
-    const changed = structuredClone(window.disk.get(OUTSIDE)) as RmmzMap;
-    changed.events = [ null ];
-    window.hub.noteWritten(mapDocumentKey(OUTSIDE), changed as unknown as JsonValue);
+    const step = await signInTheDoorsPlace(window);
 
     // Act: asked once by a window naming the outside map, and once by one whose tree gives it no name.
-    const named = window.writer.guard(step, 'backward', mapId => (mapId === OUTSIDE ? 'Riverside Stroll' : 'Harbor Inn'));
-    const unnamed = window.writer.guard(step, 'backward', () => '');
+    const named = window.writer.guard(step, 'forward', mapId => (mapId === OUTSIDE ? 'Riverside Stroll' : 'Harbor Inn'));
+    const unnamed = window.writer.guard(step, 'forward', () => '');
 
     // Assert.
     expect([ named, unnamed ])
       .toStrictEqual([
-        'Riverside Stroll changed on disk since this transfer pair was written to it',
-        `Map ${OUTSIDE} changed on disk since this transfer pair was written to it`,
+        'Riverside Stroll\'s file holds something else where this pair\'s events go. Save Riverside Stroll, then try again',
+        `Map ${OUTSIDE}'s file holds something else where this pair's events go. Save Map ${OUTSIDE}, then try again`,
+      ]);
+  });
+
+  it('lets an undo through whatever a held map\'s file holds in the door\'s place, the door taken out of it, or nothing where it is gone', async () =>
+  {
+    // Arrange: two pairs written; one outside map's file found with its door renamed, the other's without it.
+    const renamed = pairWindow({ held: [ OUTSIDE, INSIDE ] });
+    const gone = pairWindow({ held: [ OUTSIDE, INSIDE ] });
+    const steps = [ await placeDoorPair(renamed), await placeDoorPair(gone) ];
+    const renamedFile = structuredClone(renamed.disk.get(OUTSIDE)) as RmmzMap;
+    (renamedFile.events[1] as { name: string }).name = 'Front door';
+    const goneFile = structuredClone(gone.disk.get(OUTSIDE)) as RmmzMap;
+    goneFile.events = [ null, null ];
+    renamed.disk.set(OUTSIDE, structuredClone(renamedFile));
+    gone.disk.set(OUTSIDE, structuredClone(goneFile));
+    renamed.hub.noteWritten(mapDocumentKey(OUTSIDE), renamedFile as unknown as JsonValue);
+    gone.hub.noteWritten(mapDocumentKey(OUTSIDE), goneFile as unknown as JsonValue);
+
+    // Act.
+    const guarded = [ renamed.writer.guard(steps[0], 'backward'), gone.writer.guard(steps[1], 'backward') ];
+    renamed.hub.undo(mapHistoryKey(INSIDE));
+    gone.hub.undo(mapHistoryKey(INSIDE));
+    await settlePairs();
+
+    // Assert: the renamed door is taken out, its slot left; the file without the door is not written to at all.
+    expect([ guarded, (renamed.disk.get(OUTSIDE) as RmmzMap).events, gone.acts.at(-1)?.maps.map(each => [ each.map, each.patches.length ]), renamed.problems, gone.problems ])
+      .toStrictEqual([ [ null, null ], [ null, null ], [ [ INSIDE, 2 ] ], [], [] ]);
+  });
+
+  it('undoes a pair from the map it leads to once another event stands after the door, leaving the door\'s place empty', async () =>
+  {
+    // Arrange: a pair placed, then another event placed on the outside map, after the door, and left unsaved.
+    const window = pairWindow({ held: [ OUTSIDE, INSIDE ] });
+    const original = structuredClone(window.disk.get(INSIDE));
+    await placeDoorPair(window);
+    createEvent(window.hub, OUTSIDE, { x: 9, y: 9 });
+    const router = new HistoryRouter(window.hub, null, (step, direction, mapName) => window.writer.guard(step, direction, mapName), () => 'copies left', pairMapName);
+
+    // Act.
+    const outcome = await router.undo(mapHistoryKey(INSIDE));
+    await settlePairs();
+
+    // Assert: the new event keeps its id, the door's slot left empty in the map; the outside file never held the new event,
+    // so it goes back to how it was before the pair; the inside map and its file are as they were; nothing is told.
+    const outside = window.hub.map(mapDocumentKey(OUTSIDE));
+    expect([ outcome, outside.event(1), outside.event(2)?.name, (window.disk.get(OUTSIDE) as RmmzMap).events, window.disk.get(INSIDE), window.hub.map(mapDocumentKey(INSIDE)).event(1), window.problems ])
+      .toStrictEqual([ { ok: true }, null, 'EV002', [ null ], original, null, [] ]);
+  });
+
+  it('redoes a pair undone with its door\'s place left empty, putting the door back in that place on the map and in its file', async () =>
+  {
+    // Arrange: as above, the pair undone from the inside map with another event after the door.
+    const window = pairWindow({ held: [ OUTSIDE, INSIDE ] });
+    await placeDoorPair(window);
+    createEvent(window.hub, OUTSIDE, { x: 9, y: 9 });
+    window.hub.undo(mapHistoryKey(INSIDE));
+    await settlePairs();
+
+    // Act.
+    const redone = window.hub.redo(mapHistoryKey(INSIDE));
+    await settlePairs();
+
+    // Assert: the door is back as event 1, before the other event, on the map and in its file.
+    const outside = window.hub.map(mapDocumentKey(OUTSIDE));
+    expect([ redone.ok, outside.event(1)?.name, outside.event(2)?.name, onDisk(window, OUTSIDE, 1), onDisk(window, INSIDE, 1), window.problems ])
+      .toStrictEqual([ true, 'Transfer (Entrance)', 'EV002', 'Transfer (Entrance)', 'Transfer (Northeast Section)', [] ]);
+  });
+
+  it('undoes a pair once the map holding the door was saved with an event after it, the save never counting as a change on disk', async () =>
+  {
+    // Arrange: a pair placed, another event placed outside after the door, and the outside map saved.
+    const window = pairWindow({ held: [ OUTSIDE, INSIDE ] });
+    const original = structuredClone(window.disk.get(INSIDE));
+    await placeDoorPair(window);
+    createEvent(window.hub, OUTSIDE, { x: 9, y: 9 });
+    await window.hub.save(mapDocumentKey(OUTSIDE));
+    const check = window.hub.canUndo(mapHistoryKey(INSIDE));
+
+    // Act.
+    const guarded = check.ok ? window.writer.guard(check.step, 'backward') : 'refused';
+    const undone = window.hub.undo(mapHistoryKey(INSIDE));
+    await settlePairs();
+
+    // Assert: the door is out of the outside file as of the map, the saved event kept, so the map reads as saved.
+    expect([ guarded, undone.ok, (window.disk.get(OUTSIDE) as RmmzMap).events.map(event => (event === null ? null : event.name)), window.disk.get(INSIDE), window.hub.dirtyKeys(), window.problems ])
+      .toStrictEqual([ null, true, [ null, null, 'EV002' ], original, [], [] ]);
+  });
+
+  it('undoes a pair from the map holding the door once that map was saved with a later event and the event undone since', async () =>
+  {
+    // Arrange: as above, then the later event undone, leaving the door the outside map's newest step.
+    const window = pairWindow({ held: [ OUTSIDE, INSIDE ] });
+    await placeDoorPair(window);
+    createEvent(window.hub, OUTSIDE, { x: 9, y: 9 });
+    await window.hub.save(mapDocumentKey(OUTSIDE));
+    window.hub.undo(mapHistoryKey(OUTSIDE));
+    const check = window.hub.canUndo(mapHistoryKey(OUTSIDE));
+
+    // Act.
+    const guarded = check.ok ? window.writer.guard(check.step, 'backward') : 'refused';
+    const undone = window.hub.undo(mapHistoryKey(OUTSIDE));
+    await settlePairs();
+
+    // Assert: the file the save wrote loses the door and keeps the saved event, which the map no longer holds, so the map
+    // reads as unsaved.
+    expect([ guarded, undone.ok, (window.disk.get(OUTSIDE) as RmmzMap).events.map(event => (event === null ? null : event.name)), window.hub.map(mapDocumentKey(OUTSIDE)).eventIds(), window.hub.dirtyKeys(), window.problems ])
+      .toStrictEqual([ null, true, [ null, null, 'EV002' ], [], [ mapDocumentKey(OUTSIDE) ], [] ]);
+  });
+
+  it('still refuses a pair\'s undo once a later edit changed the door itself, naming the edit, its map and what to do', async () =>
+  {
+    // Arrange: a pair placed; another event placed after the door, which alone would not stand in the way; then the door
+    // renamed.
+    const window = pairWindow({ held: [ OUTSIDE, INSIDE ] });
+    const step = await placeDoorPair(window);
+    createEvent(window.hub, OUTSIDE, { x: 9, y: 9 });
+    window.hub.edit('Rename door', [ mapHistoryKey(OUTSIDE) ], tx => tx.set(mapDocumentKey(OUTSIDE), [ 'events', 1, 'name' ], 'Front door'));
+    const router = new HistoryRouter(window.hub, null, (each, direction, mapName) => window.writer.guard(each, direction, mapName), null, pairMapName);
+
+    // Act.
+    const outcome = await router.undo(mapHistoryKey(INSIDE));
+    await settlePairs();
+
+    // Assert: nothing moved, on either map or on disk.
+    expect([ outcome, window.hub.map(mapDocumentKey(OUTSIDE)).event(1)?.name, onDisk(window, INSIDE, 1) ])
+      .toStrictEqual([
+        {
+          ok: false,
+          nothing: false,
+          message: '"Place door pair" cannot be undone: "Rename door" later changed what "Place door pair" changed, on Northeast Section. Undo "Rename door" there first.',
+          stuckStepId: step.id,
+        },
+        'Front door',
+        'Transfer (Northeast Section)',
       ]);
   });
 

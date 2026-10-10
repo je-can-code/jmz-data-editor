@@ -595,6 +595,6 @@ describe.skipIf(project === null)('undoing a blueprint\'s change on the shipped 
 
     // Assert.
     expect([ undone.ok === false && undone.message, hub.map(mapDocumentKey(OTHER_MAP_ID)).property('note') ])
-      .toStrictEqual([ '"Place door pair" cannot be undone: "Rename door" later changed what "Place door pair" changed.', 'paired with Foothills' ]);
+      .toStrictEqual([ `"Place door pair" cannot be undone: "Rename door" later changed what "Place door pair" changed, on Map ${MAP_ID}. Undo "Rename door" there first.`, 'paired with Foothills' ]);
   });
 });
