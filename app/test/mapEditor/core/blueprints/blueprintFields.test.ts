@@ -4,34 +4,45 @@ import {
   clampTo,
   decimalPlaces,
   eventFields,
+  LINE_VALUE,
+  lineFieldName,
   listLessTags,
   MOVE_FREQUENCY,
   MOVE_SPEED,
   ownNoteOf,
+  parsableCommentLines,
+  tagFieldKey,
   tagLinesOf,
+  UNDECLARED_TAG,
   type CommentTagDefinition,
   type Field,
 } from '../../../../src/mapEditor/core/blueprints/blueprintFields.ts';
 import { LINK_MISREAD, withBlueprintLink } from '../../../../src/mapEditor/core/blueprints/blueprintLink.ts';
 import type { JsonValue } from '../../../../src/mapEditor/core/model/json.ts';
-import type { RmmzEventPage } from '../../../../src/mapEditor/core/model/rmmzTypes.ts';
+import type { RmmzEventCommand, RmmzEventPage } from '../../../../src/mapEditor/core/model/rmmzTypes.ts';
 import { INTENSITY_FIELD, lightTagFields, RADIUS_FIELD } from '../../../../src/mapEditor/modules/lighting/lightFields.ts';
 import { PLUGIN_DEFAULTS } from '../../../../src/mapEditor/modules/lighting/lightTags.ts';
-import { command, event, page } from '../../support/eventKindFixtures.ts';
+import { command, event, page, text } from '../../support/eventKindFixtures.ts';
 
 /*
  * A copy of a blueprint differs from it field by field, so an event is read as fields, each a number with a range or a
  * choice. An event's name is a choice, and so is its note's own text, read without the link to its blueprint; where it
  * stands is no field at all. Each page has its own: move speed (1 to 6) and move frequency (1 to 5) are numbers;
  * conditions, image, move type, move route, walking, stepping, direction fix, through, priority and trigger are choices;
- * and the command list, less every tag a module reads from its comments, is one choice. Each such tag is read by its
- * module as fields of their own, keyed by page, by the line's key and by the field's name (p1.light2.radius), so a light's
- * reach can be a number while the list around it is a choice. A tag no module reads stays inside the command list, so an
- * enemy's id, which reads like a number, is never a number field.
+ * and the command list, less every tag line, is one choice.
  *
- * The list less its tags stands each tag line as a mark naming the tag and the line's key, which no comment's text can
- * pass for, so a light whose values differ still compares alike, and one that moved does not; and a fold MZ's window drew
- * shut counts for nothing. A module's lines must be named so a link can hold them, each once.
+ * Every tag line is a field of its own, wherever it sits: on a comment's first line or a later one, in one comment or
+ * spread over several. A tag line is a comment line J-Base offers to plugins, one tag filling it. A line a module reads is
+ * read by that module as fields, keyed by page, by the line's key and by the field's name (p1.light2.radius), or by the
+ * line's key alone for a line giving one value (p1.sight), so a light's reach can be a number while the list around it is
+ * a choice. Every other tag line is one choice holding the whole line, keyed by its tag between angle brackets (p1.<motion>),
+ * and by its place among the page's lines of that tag when the tag repeats (p1.<motion>#2), so an enemy's id, which reads
+ * like a number, is never a number field, and changing one tag line leaves every other where it was.
+ *
+ * The list less its tags stands each tag line as a mark naming the tag reading it and the line's key, which no comment's
+ * text can pass for, so a tag line whose values differ still compares alike, and one that moved does not; and a fold MZ's
+ * window drew shut counts for nothing. A module's lines must be named so a link can hold them, each once, and never by the
+ * name of one of the page's own fields.
  *
  * Offsets are worked out as the decimals the numbers are written as, so moving 4.35 by 0.1 gives 4.45 and never a binary
  * fraction no author wrote, and a number is held to its field's range, both ends allowed.
@@ -51,6 +62,28 @@ describe('blueprintFields', () =>
   const comment = (words: string) => command(108, [ words ]);
 
   /**
+   * Builds a later line of a comment, which MZ writes under the comment's first.
+   * @param {string} words The line's text.
+   * @returns {RmmzEventCommand} The command.
+   */
+  const later = (words: string): RmmzEventCommand => command(408, [ words ]);
+
+  /**
+   * The names of a page's own fields, its command list among them, as each page's keys hold them.
+   */
+  const OWN_NAMES = [ 'speed', 'frequency', 'conditions', 'image', 'moveType', 'moveRoute', 'walking', 'stepping', 'directionFix', 'through', 'priority', 'trigger', 'commands' ];
+
+  /**
+   * Reads the fields of an event's tag lines, leaving out its name, its note, and each page's own fields and command list.
+   * @param {readonly Field[]} fields The event's fields.
+   * @returns {Field[]} The tag lines' fields, in order.
+   */
+  const tagFieldsOf = (fields: readonly Field[]): Field[] =>
+  {
+    return fields.filter(field => /^p\d+\./u.test(field.key) && OWN_NAMES.includes(field.key.slice(field.key.indexOf('.') + 1)) === false);
+  };
+
+  /**
    * A stand-in module tag reading every comment line saying "mark NAME" as a line keyed NAME, with one choice field.
    * @param {string} id The tag's id.
    * @returns {CommentTagDefinition} The tag.
@@ -63,7 +96,20 @@ describe('blueprintFields', () =>
       const match = typeof words === 'string' ? /^mark (\S+)$/u.exec(words) : null;
       return match === null ? [] : [ { listIndex, key: match[1], fields: [ { name: 'value', kind: { kind: 'choice' } as const, value: words } ] } ];
     }),
-    write: text => text,
+    write: words => words,
+  });
+
+  /**
+   * A stand-in module tag reading the first line of a page as one line under the key given, with the fields given, each a
+   * choice.
+   * @param {string} key The line's key.
+   * @param {{ name: string, value: JsonValue }[]} fields The line's fields.
+   * @returns {CommentTagDefinition} The tag.
+   */
+  const firstLine = (key: string, fields: { name: string; value: JsonValue }[]): CommentTagDefinition => ({
+    id: 'test.one',
+    read: () => [ { listIndex: 0, key, fields: fields.map(field => ({ ...field, kind: { kind: 'choice' } as const })) } ],
+    write: words => words,
   });
 
   /**
@@ -88,10 +134,9 @@ describe('blueprintFields', () =>
       const keys = eventFields(lit, [ LIGHTS ]).map(field => field.key);
 
       // Assert.
-      const own = [ 'speed', 'frequency', 'conditions', 'image', 'moveType', 'moveRoute', 'walking', 'stepping', 'directionFix', 'through', 'priority', 'trigger', 'commands' ];
       const lights = [ 'light1', 'light2' ].flatMap(light => [ 'radius', 'color', 'intensity', 'effect' ].map(name => `p1.${light}.${name}`));
       expect(keys)
-        .toStrictEqual([ 'name', 'note', ...own.map(name => `p1.${name}`), ...lights, ...own.map(name => `p2.${name}`) ]);
+        .toStrictEqual([ 'name', 'note', ...OWN_NAMES.map(name => `p1.${name}`), ...lights, ...OWN_NAMES.map(name => `p2.${name}`) ]);
     });
 
     it('reads move speed and frequency as numbers with MZ\'s ranges, and every other field as a choice', () =>
@@ -184,7 +229,7 @@ describe('blueprintFields', () =>
         ]);
     });
 
-    it('reads no field from a tag no module reads, which stays inside the command list as written', () =>
+    it('reads a tag line no module reads as a choice of its own holding the whole line, however like a number it reads', () =>
     {
       // Arrange: a battler's enemy and level, which read like numbers, and a light, with only lighting's tag read.
       const battler = event(5, [ page([ comment('<enemyId:12>'), comment('<level:5>'), comment('<light:[4]>') ]) ]);
@@ -193,18 +238,22 @@ describe('blueprintFields', () =>
       const fields = eventFields(battler, [ LIGHTS ]);
       const commands = fieldAt(fields, 'p1.commands')?.value as JsonValue[];
 
-      // Assert: the light's fields are the only tag fields, and the enemy and level stay text in the list.
-      expect(fields.filter(field => field.key.split('.').length === 3).map(field => field.key))
-        .toStrictEqual([ 'p1.light1.radius', 'p1.light1.color', 'p1.light1.intensity', 'p1.light1.effect' ]);
+      // Assert: the enemy and the level are choices keyed by their tags, and all three lines stand as marks in the list.
+      expect(tagFieldsOf(fields).slice(0, 3))
+        .toStrictEqual([
+          { key: 'p1.<enemyId>', kind: { kind: 'choice' }, value: '<enemyId:12>' },
+          { key: 'p1.<level>', kind: { kind: 'choice' }, value: '<level:5>' },
+          { key: 'p1.light1.radius', kind: RADIUS_FIELD, value: 4 },
+        ]);
       expect(commands.slice(0, 3))
         .toStrictEqual([
-          { code: 108, indent: 0, parameters: [ '<enemyId:12>' ] },
-          { code: 108, indent: 0, parameters: [ '<level:5>' ] },
+          { code: 108, indent: 0, parameters: [ { tag: 'core.tag', key: '<enemyId>' } ] },
+          { code: 108, indent: 0, parameters: [ { tag: 'core.tag', key: '<level>' } ] },
           { code: 108, indent: 0, parameters: [ { tag: 'lighting.light', key: 'light1' } ] },
         ]);
     });
 
-    it('reads every tag as part of the command list when no module reads tags at all', () =>
+    it('reads a light as a tag line no module reads while no module reads lights', () =>
     {
       // Arrange.
       const lit = event(5, [ page([ comment('<light:[4]>') ]) ]);
@@ -214,8 +263,61 @@ describe('blueprintFields', () =>
       const [ first ] = (fieldAt(fields, 'p1.commands') as Field).value as JsonValue[];
 
       // Assert.
-      expect([ fields.length, first ])
-        .toStrictEqual([ 15, { code: 108, indent: 0, parameters: [ '<light:[4]>' ] } ]);
+      expect([ tagFieldsOf(fields), first ])
+        .toStrictEqual([
+          [ { key: 'p1.<light>', kind: { kind: 'choice' }, value: '<light:[4]>' } ],
+          { code: 108, indent: 0, parameters: [ { tag: 'core.tag', key: '<light>' } ] },
+        ]);
+    });
+
+    it('keys a tag repeated on a page by its place among that tag\'s lines, the first by the tag alone, on every page', () =>
+    {
+      // Arrange: three motions around an enemy on one page, and one motion on the next.
+      const floating = event(5, [
+        page([ comment('<motion:[float]>'), comment('<enemyId:3>'), comment('<motion:[breathe]>'), later('<motion:[swing]>') ]),
+        page([ comment('<motion:[stretch]>') ]),
+      ]);
+
+      // Act.
+      const fields = tagFieldsOf(eventFields(floating, []));
+
+      // Assert.
+      expect(fields.map(field => [ field.key, field.value ]))
+        .toStrictEqual([
+          [ 'p1.<motion>', '<motion:[float]>' ],
+          [ 'p1.<enemyId>', '<enemyId:3>' ],
+          [ 'p1.<motion>#2', '<motion:[breathe]>' ],
+          [ 'p1.<motion>#3', '<motion:[swing]>' ],
+          [ 'p2.<motion>', '<motion:[stretch]>' ],
+        ]);
+    });
+
+    it('reads the same tag fields from tags in one comment as from the same tags spread over several', () =>
+    {
+      // Arrange: an enemy, its sight and its motion on one comment's lines, and each in a comment of its own.
+      const together = event(5, [ page([ comment('<enemyId:3>'), later('<sight:4>'), later('<motion:[float]>') ]) ]);
+      const apart = event(5, [ page([ comment('<enemyId:3>'), comment('<sight:4>'), comment('<motion:[float]>') ]) ]);
+
+      // Act.
+      const [ one, several ] = [ together, apart ].map(each => tagFieldsOf(eventFields(each, [])));
+
+      // Assert: three fields either way, the same ones.
+      expect([ one.length, one ])
+        .toStrictEqual([ 3, several ]);
+    });
+
+    it('reads no tag line from a line J-Base offers no plugin, which stays in the command list as written', () =>
+    {
+      // Arrange: a tag with words after it, one with a space before it, words alone, and a tag spoken in a message.
+      const lines = [ comment('<enemyId:3> the boss'), comment(' <sight:4>'), comment('mark one'), ...text([ '<motion:[float]>' ]) ];
+      const near = event(5, [ page(lines) ]);
+
+      // Act.
+      const fields = eventFields(near, []);
+
+      // Assert.
+      expect([ tagFieldsOf(fields), (fieldAt(fields, 'p1.commands') as Field).value ])
+        .toStrictEqual([ [], [ ...lines, command(0) ] ]);
     });
   });
 
@@ -246,7 +348,7 @@ describe('blueprintFields', () =>
       const badField: CommentTagDefinition = {
         id: 'test.field',
         read: () => [ { listIndex: 0, key: 'line', fields: [ { name: 'has-dash', kind: { kind: 'choice' }, value: 0 } ] } ],
-        write: text => text,
+        write: words => words,
       };
 
       // Act.
@@ -261,6 +363,164 @@ describe('blueprintFields', () =>
         .toThrow('read a tag line as'));
       expect(tagLinesOf(twice, [ marking('test.mark') ]).length)
         .toBe(1);
+    });
+
+    it('lets a line give one value alone, and refuses one naming it beside other fields, or named like a page\'s own field', () =>
+    {
+      // Arrange: a line of one value; one beside a named field; one named speed, which would be known by the very key of
+      // the page's move speed; and a line of named fields keyed like the page's command list.
+      const one = page([ comment('<sight:4>') ]);
+
+      // Act.
+      const alone = tagLinesOf(one, [ firstLine('sight', [ { name: LINE_VALUE, value: 4 } ]) ]);
+      const refused = [
+        () => tagLinesOf(one, [ firstLine('sight', [ { name: LINE_VALUE, value: 4 }, { name: 'boost', value: 2 } ]) ]),
+        () => tagLinesOf(one, [ firstLine('speed', [ { name: LINE_VALUE, value: 4 } ]) ]),
+        () => tagLinesOf(one, [ firstLine('commands', [ { name: 'value', value: 4 } ]) ]),
+      ];
+
+      // Assert.
+      expect(alone.map(line => [ line.tag.id, line.key ]))
+        .toStrictEqual([ [ 'test.one', 'sight' ] ]);
+      refused.forEach(read => expect(read)
+        .toThrow('read a tag line as'));
+    });
+
+    it('reads every tag line the modules leave as a choice of the field model\'s own, in its place among the rest', () =>
+    {
+      // Arrange: a light, an enemy, and a light no light reads, reaching nothing.
+      const mixed = page([ comment('<light:[4]>'), comment('<enemyId:3>'), later('<light:[0]>') ]);
+
+      // Act.
+      const lines = tagLinesOf(mixed, [ LIGHTS ]);
+
+      // Assert: the line J-Lighting leaves is one choice like the enemy, and only the line it reads is its own.
+      expect(lines.map(line => [ line.tag.id, line.key, line.listIndex, line.fields.length ]))
+        .toStrictEqual([ [ 'lighting.light', 'light1', 0, 4 ], [ 'core.tag', '<enemyId>', 1, 1 ], [ 'core.tag', '<light>', 2, 1 ] ]);
+    });
+
+    it('never reads a line a module reads as a choice of its own too', () =>
+    {
+      // Arrange: a module reading the enemy's line, which no other reads.
+      const enemy: CommentTagDefinition = {
+        id: 'test.enemy',
+        read: () => [ { listIndex: 0, key: 'enemyId', fields: [ { name: LINE_VALUE, kind: { kind: 'choice' }, value: 3 } ] } ],
+        write: words => words,
+      };
+
+      // Act.
+      const lines = tagLinesOf(page([ comment('<enemyId:3>'), comment('<sight:4>') ]), [ enemy ]);
+
+      // Assert.
+      expect(lines.map(line => [ line.tag.id, line.key ]))
+        .toStrictEqual([ [ 'test.enemy', 'enemyId' ], [ 'core.tag', '<sight>' ] ]);
+    });
+  });
+
+  describe('parsableCommentLines', () =>
+  {
+    it('finds each comment line one tag fills, on a comment\'s first line or a later one, wherever it sits', () =>
+    {
+      // Arrange: a tag, words, a later line's tag past a message, and the closing command.
+      const lines = page([ comment('<enemyId:3>'), comment('words'), ...text([ 'Grr.' ]), comment('notes'), later('<sight: 4>') ]);
+
+      // Act.
+      const found = parsableCommentLines(lines);
+
+      // Assert.
+      expect(found)
+        .toStrictEqual([ { listIndex: 0, text: '<enemyId:3>' }, { listIndex: 5, text: '<sight: 4>' } ]);
+    });
+
+    it('finds no line J-Base would not offer a plugin', () =>
+    {
+      // Arrange: words after a tag, a space before one, a character J-Base refuses, a tag spoken in a message, a script
+      // line holding one, and a comment line holding something other than text.
+      const nearMisses = page([
+        comment('<enemyId:3> boss'),
+        comment(' <enemyId:3>'),
+        comment('<enemyId:3$>'),
+        ...text([ '<enemyId:3>' ]),
+        command(655, [ '<enemyId:3>' ]),
+        command(108, [ 3 ]),
+      ]);
+
+      // Act.
+      const found = parsableCommentLines(nearMisses);
+
+      // Assert.
+      expect(found)
+        .toStrictEqual([]);
+    });
+  });
+
+  describe('UNDECLARED_TAG', () =>
+  {
+    it('reads every tag line on a page as a choice holding the line, whatever reads it', () =>
+    {
+      // Arrange: a light and two motions.
+      const lines = page([ comment('<light:[4]>'), comment('<motion:[float]>'), later('<motion:[breathe]>') ]);
+
+      // Act.
+      const read = UNDECLARED_TAG.read(lines);
+
+      // Assert.
+      expect(read)
+        .toStrictEqual([
+          { listIndex: 0, key: '<light>', fields: [ { name: LINE_VALUE, kind: { kind: 'choice' }, value: '<light:[4]>' } ] },
+          { listIndex: 1, key: '<motion>', fields: [ { name: LINE_VALUE, kind: { kind: 'choice' }, value: '<motion:[float]>' } ] },
+          { listIndex: 2, key: '<motion>#2', fields: [ { name: LINE_VALUE, kind: { kind: 'choice' }, value: '<motion:[breathe]>' } ] },
+        ]);
+    });
+
+    it('writes another line of the same tag whole in place of the line', () =>
+    {
+      // Arrange: a motion, and a motion with no value at all.
+      const lines = [ '<motion:[float]>', '<noRespawn>' ];
+
+      // Act.
+      const written = [
+        UNDECLARED_TAG.write(lines[0], LINE_VALUE, '<motion:[swing, 15, 200]>'),
+        UNDECLARED_TAG.write(lines[1], LINE_VALUE, '<noRespawn>'),
+      ];
+
+      // Assert.
+      expect(written)
+        .toStrictEqual([ '<motion:[swing, 15, 200]>', '<noRespawn>' ]);
+    });
+
+    it('refuses a line of another tag, words no plugin is offered, a value that is no line, and a field the line has not', () =>
+    {
+      // Arrange.
+      const line = '<motion:[float]>';
+
+      // Act.
+      const writes = [
+        () => UNDECLARED_TAG.write(line, LINE_VALUE, '<motions:[float]>'),
+        () => UNDECLARED_TAG.write(line, LINE_VALUE, '<motion:[float]> again'),
+        () => UNDECLARED_TAG.write(line, LINE_VALUE, 4),
+        () => UNDECLARED_TAG.write(line, 'value', '<motion:[swing]>'),
+      ];
+
+      // Assert.
+      writes.forEach(write => expect(write)
+        .toThrow('a tag line no plugin reads can only be written as another line of the same tag'));
+    });
+  });
+
+  describe('lineFieldName', () =>
+  {
+    it('names a tag line\'s field by the line and the field, and the one value a line gives alone by the line', () =>
+    {
+      // Arrange: a light's reach, and a sight given alone.
+      const fields = [ [ 'light1', 'radius' ], [ 'sight', LINE_VALUE ] ];
+
+      // Act.
+      const names = fields.map(([ line, name ]) => [ lineFieldName(line, name), tagFieldKey(1, line, name) ]);
+
+      // Assert.
+      expect(names)
+        .toStrictEqual([ [ 'light1.radius', 'p2.light1.radius' ], [ 'sight', 'p2.sight' ] ]);
     });
   });
 

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { CommandCatalog } from '../../../../src/mapEditor/core/commands/CommandCatalog.ts';
 import { PluginModuleRegistry } from '../../../../src/mapEditor/core/modules/PluginModuleRegistry.ts';
+import { battlerTagFields } from '../../../../src/mapEditor/modules/jabs/battlerFields.ts';
 import { actionMapIdOf, isBattler, jabsModule } from '../../../../src/mapEditor/modules/jabs/jabsModule.ts';
 import { registerCoreEventKinds } from '../../../../src/mapEditor/services/coreEventKinds.ts';
 import type { PluginsJsEntry } from '../../../../src/services/plugins/PluginsJsReader.ts';
@@ -17,6 +18,9 @@ import { command, event, page, text, transferPage } from '../../support/eventKin
  * case, with one space allowed after the colon; the same words anywhere but a comment, or a tag J-ABS would not read,
  * make no battler. A battler outranks every core kind, so a door that also fights is a battler, and its marker shows
  * the battler's symbol.
+ *
+ * While J-ABS is enabled, every tag it reads off a battler's page is a field a blueprint's copies follow on its own, and
+ * the battler's level is one too while J-LevelMaster, which reads it, is enabled beside it.
  */
 describe('jabsModule', () =>
 {
@@ -29,17 +33,25 @@ describe('jabsModule', () =>
   const jabs = (status: boolean, parameters: Record<string, string>): PluginsJsEntry => ({ name: 'j/abs/J-ABS', status, description: '', parameters });
 
   /**
-   * A window's registry with the core's kinds, and J-ABS's module activated over the given plugin.
+   * A window's registry with the core's kinds, and J-ABS's module activated over the given plugin and any others.
    * @param {PluginsJsEntry} plugin J-ABS.
+   * @param {PluginsJsEntry[]} others The project's other plugins.
    * @returns {PluginModuleRegistry} The registry.
    */
-  const registryWith = (plugin: PluginsJsEntry): PluginModuleRegistry =>
+  const registryWith = (plugin: PluginsJsEntry, others: PluginsJsEntry[] = []): PluginModuleRegistry =>
   {
     const registry = new PluginModuleRegistry(new CommandCatalog());
     registerCoreEventKinds(registry);
-    registry.activate([ jabsModule ], [ plugin ]);
+    registry.activate([ jabsModule ], [ plugin, ...others ]);
     return registry;
   };
+
+  /**
+   * J-LevelMaster as js/plugins.js lists it.
+   * @param {boolean} status Whether it is enabled.
+   * @returns {PluginsJsEntry} The entry.
+   */
+  const levelMaster = (status: boolean): PluginsJsEntry => ({ name: 'j/level/J-LevelMaster', status, description: '', parameters: {} });
 
   describe('actionMapIdOf', () =>
   {
@@ -96,6 +108,25 @@ describe('jabsModule', () =>
       // Assert: the module is on, and every map still claims the event.
       expect([ registry.isActive('jabs'), registry.kindOf(swing, 0)?.id, registry.kindOf(swing, 2)?.id ])
         .toStrictEqual([ true, 'core.decor', 'core.decor' ]);
+    });
+
+    it('reads a battler\'s tags as fields while J-ABS is enabled, its level only beside an enabled J-LevelMaster', () =>
+    {
+      // Arrange: J-ABS alone, beside J-LevelMaster on and off, and off itself beside J-LevelMaster on.
+      const plugins: [ PluginsJsEntry, PluginsJsEntry[] ][] = [
+        [ jabs(true, { actionMapId: '2' }), [] ],
+        [ jabs(true, { actionMapId: '2' }), [ levelMaster(true) ] ],
+        [ jabs(true, { actionMapId: '2' }), [ levelMaster(false) ] ],
+        [ jabs(false, { actionMapId: '2' }), [ levelMaster(true) ] ],
+      ];
+
+      // Act.
+      const read = plugins.map(([ plugin, others ]) => registryWith(plugin, others).commentTags().map(tag => tag.id));
+
+      // Assert: the same tags as J-ABS's own fields, the level among them only beside J-LevelMaster, and none with J-ABS off.
+      const own = battlerTagFields(false).map(tag => tag.id);
+      expect([ own.length, read ])
+        .toStrictEqual([ 15, [ own, [ ...own, 'jabs.level' ], own, [] ] ]);
     });
 
     it('claims a battler over the transfer its page also is, with the battler\'s symbol, and leaves it with J-ABS off', () =>
