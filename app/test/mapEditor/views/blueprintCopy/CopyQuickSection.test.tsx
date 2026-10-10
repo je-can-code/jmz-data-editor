@@ -13,7 +13,7 @@ import { PluginModuleRegistry } from '../../../../src/mapEditor/core/modules/Plu
 import { jabsModule } from '../../../../src/mapEditor/modules/jabs/jabsModule.ts';
 import { lightingModule } from '../../../../src/mapEditor/modules/lighting/lightingModule.ts';
 import { registerCoreEventKinds } from '../../../../src/mapEditor/services/coreEventKinds.ts';
-import type { MapEditorServices } from '../../../../src/mapEditor/services/MapEditorServicesContext.tsx';
+import type { MapEditorServices } from '../../../../src/mapEditor/services/MapEditorServices.ts';
 import { MapEditorServicesProvider } from '../../../../src/mapEditor/services/MapEditorServicesContext.tsx';
 import { QuickPanelHost } from '../../../../src/mapEditor/views/quickPanel/QuickPanelHost.tsx';
 import { holdBlueprints } from '../../support/blueprintFixtures.ts';
