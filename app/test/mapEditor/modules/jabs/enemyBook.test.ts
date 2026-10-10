@@ -15,7 +15,10 @@ describe('enemyBook', () =>
    * Waits for the reads under way to land.
    * @returns {Promise<void>} Settles once they have.
    */
-  const settle = (): Promise<void> => new Promise(resolve => setTimeout(resolve, 0));
+  const settle = (): Promise<void> => new Promise(resolve =>
+  {
+    setTimeout(resolve, 0);
+  });
 
   /**
    * The enemies a project holds.
