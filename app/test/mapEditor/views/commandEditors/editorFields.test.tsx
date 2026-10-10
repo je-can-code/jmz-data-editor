@@ -3,15 +3,17 @@
  */
 import React from 'react';
 import { describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import { NumberField } from '../../../../src/mapEditor/views/commandEditors/editorFields.tsx';
+import { TYPING_PAUSE_MS } from '../../../../src/mapEditor/views/commandEditors/TypingBurst.ts';
 
 /*
  * The number input lets the author type freely and brings a typed number back inside its bounds when they leave
- * it. It owes the command one more thing: a stored number is never changed just because the author passed
- * through the input. Real data holds numbers outside the bounds the editor offers, and tabbing across one must
- * not rewrite it.
+ * it. A number typed lands as one step, once the typing pauses or the author leaves, never one per digit: every
+ * number handed on is a step in the event's history, and undo should take back what was typed, not its last digit.
+ * It owes the command one more thing: a stored number is never changed just because the author passed through the
+ * input. Real data holds numbers outside the bounds the editor offers, and tabbing across one must not rewrite it.
  */
 describe('NumberField', () =>
 {
@@ -56,18 +58,57 @@ describe('NumberField', () =>
       .toStrictEqual([ 0, [ [ 255 ] ] ]);
   });
 
-  it('hands on a typed number inside its bounds as it is typed, and puts back text that is no number', () =>
+  it('hands on a number typed inside its bounds once, when the typing pauses, rather than once per digit', () =>
   {
-    // Arrange.
+    // Arrange: typing 120 a digit at a time, the clock held still between keys.
+    vi.useFakeTimers();
     const { onChange, input } = renderField(128);
 
     // Act.
+    fireEvent.change(input, { target: { value: '1' } });
+    fireEvent.change(input, { target: { value: '12' } });
+    fireEvent.change(input, { target: { value: '120' } });
+    const whileTyping = onChange.mock.calls.length;
+    act(() => vi.advanceTimersByTime(TYPING_PAUSE_MS));
+    vi.useRealTimers();
+
+    // Assert.
+    expect([ whileTyping, onChange.mock.calls ])
+      .toStrictEqual([ 0, [ [ 120 ] ] ]);
+  });
+
+  it('forgets a number typed once the text stops being one, and puts back the stored value on leaving', () =>
+  {
+    // Arrange.
+    vi.useFakeTimers();
+    const { onChange, input } = renderField(128);
+
+    // Act: 64 is typed, then turned into text before the typing pauses; the pause then passes.
     fireEvent.change(input, { target: { value: '64' } });
     fireEvent.change(input, { target: { value: 'lots' } });
+    act(() => vi.advanceTimersByTime(TYPING_PAUSE_MS));
     fireEvent.blur(input);
+    vi.useRealTimers();
 
-    // Assert: the typed 64 went out; the text did not, and the input shows the stored value again.
+    // Assert: nothing went out, and the input shows the stored value again.
     expect([ onChange.mock.calls, (input as HTMLInputElement).value ])
-      .toStrictEqual([ [ [ 64 ] ], '128' ]);
+      .toStrictEqual([ [], '128' ]);
+  });
+
+  it('hands on a number typed at once when the author leaves, and only once', () =>
+  {
+    // Arrange.
+    vi.useFakeTimers();
+    const { onChange, input } = renderField(128);
+
+    // Act: 64 is typed and left before the typing pauses; the pause then passes too.
+    fireEvent.change(input, { target: { value: '64' } });
+    fireEvent.blur(input);
+    act(() => vi.advanceTimersByTime(TYPING_PAUSE_MS));
+    vi.useRealTimers();
+
+    // Assert.
+    expect(onChange.mock.calls)
+      .toStrictEqual([ [ 64 ] ]);
   });
 });

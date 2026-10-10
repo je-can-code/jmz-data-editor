@@ -26,13 +26,14 @@ const POSITIONS = [
 ];
 
 /**
- * The message's text box, which keeps its own copy of the text so typing never loses the caret.
+ * The message's text box, which keeps its own copy of the text so typing never loses the caret, and hands it on once
+ * per burst of typing, so a line typed is one step in history; the preview follows every key.
  * @param {{ text: string, onChange: (text: string) => void }} props The text and what to do with a change.
  * @returns {React.JSX.Element} The text box and its preview.
  */
 const MessageText = (props: { text: string; onChange: (text: string) => void }) =>
 {
-  const [ draft, change ] = useDraftText(props.text, props.onChange);
+  const [ draft, change, finish ] = useDraftText(props.text, props.onChange);
   const lineCount = draft === '' ? 0 : draft.split('\n').length;
 
   return (
@@ -45,6 +46,7 @@ const MessageText = (props: { text: string; onChange: (text: string) => void }) 
         value={draft}
         helperText={lineCount === 1 ? '1 line' : `${lineCount} lines`}
         onChange={event => change(event.target.value)}
+        onBlur={finish}
         slotProps={{ htmlInput: { spellCheck: true } }}
       />
       <MessagePreview text={draft}/>

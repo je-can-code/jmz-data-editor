@@ -182,8 +182,9 @@ describe('MoveRouteEditor', () =>
     render(<Holder initial={routeOf(WALK)}/>);
     select('Move Left ×3');
 
-    // Act.
+    // Act: type, then leave the box, which ends the burst.
     fireEvent.change(screen.getByLabelText('Times'), { target: { value: '5' } });
+    fireEvent.blur(screen.getByLabelText('Times'));
 
     // Assert.
     expect(rows())
@@ -242,8 +243,9 @@ describe('MoveRouteEditor', () =>
     render(<Holder initial={routeOf([ { code: 15, parameters: [ 60 ] }, { code: 15, parameters: [ 60 ] } ])}/>);
     select('Wait: 60 frames ×2');
 
-    // Act.
+    // Act: type, then leave the box, which ends the burst.
     fireEvent.change(screen.getByLabelText('Frames'), { target: { value: '20' } });
+    fireEvent.blur(screen.getByLabelText('Frames'));
 
     // Assert.
     expect(heldSteps())
@@ -402,8 +404,9 @@ describe('MoveRouteEditor', () =>
     render(<Holder initial={routeOf([ { code: 44, parameters: [ { name: 'Door1', volume: 90, pitch: 100, pan: 0 } ] } ])}/>);
     select('Play SE: Door1 (90, 100, 0)');
 
-    // Act.
+    // Act: type, then leave the box, which ends the burst.
     fireEvent.change(screen.getByLabelText('Volume'), { target: { value: '60' } });
+    fireEvent.blur(screen.getByLabelText('Volume'));
 
     // Assert.
     expect(heldSteps())
@@ -416,8 +419,9 @@ describe('MoveRouteEditor', () =>
     render(<Holder initial={routeOf([ { code: 44, parameters: [ '' ] } ])}/>);
     select('Play SE:');
 
-    // Act.
+    // Act: type, then leave the box, which ends the burst.
     fireEvent.change(screen.getByLabelText('Pan'), { target: { value: '10' } });
+    fireEvent.blur(screen.getByLabelText('Pan'));
 
     // Assert.
     expect(heldSteps())
@@ -430,10 +434,12 @@ describe('MoveRouteEditor', () =>
     render(<Holder initial={routeOf([ { code: 45, parameters: [ 'a();' ] }, { code: 41, parameters: [ 'Actor1', 0 ] } ])}/>);
     select('Script: a();');
 
-    // Act: the script's own box, not the pads' Script key.
+    // Act: the script's own box, not the pads' Script key; leaving each box ends its burst.
     fireEvent.change(screen.getByRole('textbox', { name: 'Script' }), { target: { value: 'b();' } });
+    fireEvent.blur(screen.getByRole('textbox', { name: 'Script' }));
     select('Change Image: Actor1 (0)');
     fireEvent.change(screen.getByRole('textbox', { name: 'Image' }), { target: { value: 'Actor2' } });
+    fireEvent.blur(screen.getByRole('textbox', { name: 'Image' }));
 
     // Assert.
     expect(heldSteps())

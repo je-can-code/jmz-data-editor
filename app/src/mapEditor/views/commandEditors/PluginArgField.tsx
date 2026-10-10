@@ -75,14 +75,14 @@ const TextInput = (props: ArgInputProps & { multiline?: boolean }) =>
 const NumberInput = (props: ArgInputProps) =>
 {
   const { arg, value, onChange, label } = props;
-  const [ draft, change ] = useDraftText(value, onChange);
-  const bounds = [ arg.min === undefined ? null : `at least ${arg.min}`, arg.max === undefined ? null : `at most ${arg.max}` ].filter(Boolean).join(', ');
+  const [ draft, change, finish ] = useDraftText(value, onChange);
+  const bounds =[ arg.min === undefined ? null : `at least ${arg.min}`, arg.max === undefined ? null : `at most ${arg.max}` ].filter(Boolean).join(', ');
   const number = Number(draft);
   const invalid = draft.trim() !== '' && (Number.isFinite(number) === false || (arg.min !== undefined && number < arg.min) || (arg.max !== undefined && number > arg.max));
   return (
     <TextField size={'small'} label={label} value={draft} error={invalid} helperText={bounds === '' ? undefined : bounds} sx={{ width: 180 }}
       placeholder={arg.default} slotProps={{ htmlInput: { inputMode: (arg.decimals ?? 0) > 0 ? 'decimal' : 'numeric' } }}
-      onChange={event => change(event.target.value)}/>
+      onChange={event => change(event.target.value)} onBlur={finish}/>
   );
 };
 
@@ -105,17 +105,28 @@ const BooleanInput = (props: ArgInputProps) =>
 };
 
 /**
- * A combo: one of the header's options, or text of its own, kept on screen as typed.
+ * A combo: one of the header's options, or text of its own, kept on screen as typed and handed on once per burst of
+ * typing; an option picked from the list is handed on at once, being a pick rather than typing.
  * @param {ArgInputProps} props The argument and what to do with a change.
  * @returns {React.JSX.Element} The input.
  */
 const ComboInput = (props: ArgInputProps) =>
 {
   const { arg, value, onChange, label } = props;
-  const [ draft, change ] = useDraftText(value, onChange);
+  const [ draft, change, finish ] = useDraftText(value, onChange);
   return (
     <Autocomplete freeSolo size={'small'} sx={{ width: 260 }} options={(arg.options ?? []).map(option => String(option.value))}
-      inputValue={draft} onInputChange={(_event, text) => change(text)} renderInput={params => <TextField {...params} label={label}/>}/>
+      inputValue={draft}
+      onInputChange={(_event, text, reason) =>
+      {
+        change(text);
+        if (reason !== 'input')
+        {
+          finish();
+        }
+      }}
+      onBlur={finish}
+      renderInput={params => <TextField {...params} label={label}/>}/>
   );
 };
 
