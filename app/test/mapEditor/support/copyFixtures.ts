@@ -59,13 +59,16 @@ const needler = (overrides: Partial<RmmzEventPage> = {}): RmmzMapEvent =>
 };
 
 /**
- * The blueprint "Needler nest", of events alone: the needler, and whatever other events the test gives it.
+ * The blueprint "Needler nest", of events alone: the needler, and whatever other events the test gives it, the stamp
+ * reaching just far enough to hold every one where it stands, as a stamp read back from the blueprints must.
  * @param {readonly RmmzMapEvent[]} events Its events; the needler alone by default.
  * @returns {Blueprint} The blueprint.
  */
 const needlerNest = (events: readonly RmmzMapEvent[] = [ needler() ]): Blueprint =>
 {
-  return { id: NEST_ID, name: 'Needler nest', stamp: stampOf({ id: blueprintStampId(NEST_ID), events: [ ...events ] }) };
+  const width = Math.max(...events.map(each => each.x)) + 1;
+  const height = Math.max(...events.map(each => each.y)) + 1;
+  return { id: NEST_ID, name: 'Needler nest', stamp: stampOf({ id: blueprintStampId(NEST_ID), width, height, events: [ ...events ] }) };
 };
 
 /**
