@@ -3,6 +3,7 @@ import type { PluginsJsEntry } from '../../../services/plugins/PluginsJsReader.t
 import type { CommentTagDefinition } from '../blueprints/blueprintFields.ts';
 import type { CommandCatalogEntry } from '../commands/catalogTypes.ts';
 import type { EventMarkerSymbol } from '../eventKinds/eventMarkers.ts';
+import type { EventWindowTarget } from '../eventWindow/eventWindowTarget.ts';
 import type { AreaReader } from '../events/eventAreas.ts';
 import type { MapDocumentKey } from '../model/documentKeys.ts';
 import type { JsonValue } from '../model/json.ts';
@@ -16,6 +17,7 @@ import type { MapPropertiesSource } from '../properties/moduleProperties.ts';
 import type { LightingLayerDefinition } from '../renderer/lightingLayer.ts';
 import type { OverlayDefinition } from '../renderer/MapRenderer.ts';
 import type { SkyWeather, WeatherLayerDefinition } from '../renderer/weatherLayer.ts';
+import type { Stamp } from '../stamps/stamp.ts';
 import type { SkyPick } from '../time/WindowClock.ts';
 
 /**
@@ -24,6 +26,33 @@ import type { SkyPick } from '../time/WindowClock.ts';
 type QuickPanelProps = {
   readonly documentKey: MapDocumentKey;
   readonly eventIds: readonly number[];
+};
+
+/**
+ * What a kind's section of the event window is handed: the event the window edits, and the page it shows.
+ */
+type PageSectionProps = {
+  readonly target: EventWindowTarget;
+  readonly pageIndex: number;
+};
+
+/**
+ * What a palette entry's own picker is handed in the Stamps panel: how to take up a stamp as the brush, so each click on
+ * a map places it, how to put it down, the stamp in hand, and how to name a new stamp.
+ */
+type PalettePickerProps = {
+  readonly takeUp: (stamp: Stamp) => void;
+  readonly putDown: () => void;
+
+  /**
+   * The id of the stamp the stamp tool holds, or null while it holds none.
+   */
+  readonly inHand: string | null;
+
+  /**
+   * Names a new stamp, uniquely across every window.
+   */
+  readonly newStampId: () => string;
 };
 
 /**
@@ -60,6 +89,12 @@ type EventKindDefinition = {
   readonly quickPanel?: ComponentType<QuickPanelProps>;
 
   /**
+   * A section the event window shows under the page's own settings, for the page it shows, such as a battler's settings
+   * for a page naming an enemy. Each change it makes is one step in the event's own history.
+   */
+  readonly pageSection?: ComponentType<PageSectionProps>;
+
+  /**
    * The overlays the kind draws on the map.
    */
   readonly overlays?: readonly OverlayDefinition[];
@@ -72,7 +107,8 @@ type EventKindDefinition = {
 };
 
 /**
- * Something the palette offers to place, such as a battler or a light.
+ * Something a module offers to place, such as a battler or a light, at the top of the Stamps panel: placed with each
+ * click on a map, as a stamp is.
  */
 type PaletteEntry = {
   /**
@@ -91,13 +127,19 @@ type PaletteEntry = {
   readonly kind: string;
 
   /**
-   * Builds the event to place.
+   * Builds the event to place, for an entry placing one event as it is. Left out, the entry places through its picker.
    * @param {number} id The event id it will take.
    * @param {number} x The column.
    * @param {number} y The row.
    * @returns {RmmzMapEvent} The event.
    */
-  readonly createEvent: (id: number, x: number, y: number) => RmmzMapEvent;
+  readonly createEvent?: (id: number, x: number, y: number) => RmmzMapEvent;
+
+  /**
+   * The entry's own picker, for an entry that asks something first, such as which enemy a battler fights as: it takes up
+   * what it places as the brush itself.
+   */
+  readonly picker?: ComponentType<PalettePickerProps>;
 };
 
 /**
@@ -723,7 +765,9 @@ export type {
   ModuleContributions,
   ModuleNotice,
   OnDemandConfig,
+  PageSectionProps,
   PaletteEntry,
+  PalettePickerProps,
   PassabilityQuery,
   PassabilityRule,
   PluginModule,

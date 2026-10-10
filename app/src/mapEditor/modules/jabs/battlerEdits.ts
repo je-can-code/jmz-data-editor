@@ -304,7 +304,9 @@ const insertTagLine = (draft: ListDraft, text: string): void =>
  */
 const setNumber = (draft: ListDraft, row: NumberRow | 'team' | 'enemy', value: number | null): void =>
 {
-  const tag = row === 'team' ? jabsTag('teamId') : row === 'enemy' ? jabsTag('enemyId') : numberTag(row);
+  const tag = row === 'team' || row === 'enemy'
+    ? jabsTag(`${row}Id`)
+    : numberTag(row);
   const lines = linesMatching(draft.list, tag.pattern);
   if (value === null)
   {

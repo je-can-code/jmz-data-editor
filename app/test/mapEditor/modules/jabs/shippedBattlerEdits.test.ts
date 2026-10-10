@@ -272,7 +272,7 @@ const wrongRows = (shipped: ShippedPage, context: BattlerContext, respelled: Res
  */
 const wrongMotions = (shipped: ShippedPage, context: BattlerContext): string[] =>
 {
-  const page = shipped.event.pages[0];
+  const [ page ] = shipped.event.pages;
   const lines = motionLinesOf(page);
   const changes = lines.flatMap((line, motion) =>
   {

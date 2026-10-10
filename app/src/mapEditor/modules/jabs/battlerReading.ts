@@ -321,7 +321,7 @@ const lastCapture = (lines: readonly string[], pattern: RegExp): string | null =
     const match = pattern.exec(line);
     if (match !== null)
     {
-      found = match[1];
+      [ , found ] = match;
     }
   });
 

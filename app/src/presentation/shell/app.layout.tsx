@@ -18,6 +18,7 @@ import { APP_ROUTES } from '@platform/compositionRoot/routing.config.tsx';
 import { BOARD_GROUPS, type BoardGroup } from '@platform/registry/board.interfaces.ts';
 import { ErrorBoundary } from '../routing/error.boundary.tsx';
 import GlobalBottomBar from '../../components/bottombar/bottom-bar.global.tsx';
+import { useRowLinkHost } from '../hooks/useRowLinkHost.ts';
 
 /**
  * Width of the navigation rail. Wide enough for a label beside its icon, which is what lets the rail
@@ -29,6 +30,9 @@ const AppLayout = () =>
 {
   const location = useLocation();
   const navigate = useNavigate();
+
+  // the map editor's links to a row, such as a battler's enemy, land here.
+  useRowLinkHost();
 
   // sections start open; collapsing is for getting the half you are not using out of the way, not a
   // state anyone should have to restore on every launch.

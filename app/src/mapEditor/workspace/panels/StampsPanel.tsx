@@ -27,6 +27,7 @@ import { usePaintSettings } from '../../render/tools/PaintToolBar.tsx';
 import type { WorkspaceController } from '../WorkspaceController.ts';
 import { useDocumentRevision, useTilesets, useWorkspace } from '../workspaceHooks.tsx';
 import { BlueprintWhereUsed } from './BlueprintWhereUsed.tsx';
+import { PalettePickers } from './PalettePickers.tsx';
 import { usePaintScope } from './palette/paintScope.tsx';
 import { useTilesetSheets } from './palette/paletteHooks.ts';
 import { CHECKERBOARD } from './palette/TileThumb.tsx';
@@ -772,6 +773,7 @@ const StampsPanel = () =>
       data-testid={'stamps-panel'}
       onKeyDown={onKeyDown}
     >
+      <PalettePickers painting={painting} pickedId={pickedId}/>
       {blueprints.kind === 'open' && <BlueprintsSection blueprints={blueprints.blueprints} spots={blueprints.spots} painting={painting}/>}
       {blueprints.kind === 'opening' && (
         <Typography variant={'caption'} color={'text.secondary'} sx={{ display: 'block', px: 1.5, pt: 1 }}>

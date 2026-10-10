@@ -2,7 +2,10 @@ import type { PluginsJsEntry } from '../../../services/plugins/PluginsJsReader.t
 import { pageCommentText } from '../../core/model/eventModel.ts';
 import type { RmmzMapEvent } from '../../core/model/rmmzTypes.ts';
 import type { PluginModule } from '../../core/modules/PluginModule.ts';
+import { battlerBrushFor } from './BattlerBrush.tsx';
 import { battlerTagFields } from './battlerFields.ts';
+import { battlerPageSectionFor, battlerQuickPanelFor } from './BattlerQuickPanel.tsx';
+import { battlerSetupOf, MOTION_CONFIG, MOTION_PLUGIN } from './battlerSetup.ts';
 
 /**
  * J-ABS's file name, as js/plugins.js lists it.
@@ -18,6 +21,11 @@ const LEVEL_PLUGIN = 'J-LevelMaster';
  * The id J-ABS's module registers battlers under.
  */
 const BATTLER_KIND_ID = 'jabs.battler';
+
+/**
+ * The id of the battler brush J-ABS's module offers to place with.
+ */
+const BATTLER_BRUSH_ID = 'jabs.battlers';
 
 /**
  * The tag that makes an event a J-ABS battler, as J-ABS itself reads it from a page's comments: the enemy it fights as,
@@ -69,14 +77,33 @@ const isBattler = (event: RmmzMapEvent): boolean =>
  * battler is otherwise an event of comments alone; the tags on a battler's page, each a field a blueprint's copies follow
  * on its own; and the events on its action map, which are the patterns its actions are copied from, so none of them is
  * taken for something placed on a map.
+ *
+ * A battler's quick panel, and its section of the event window, show everything it fights with, as the game builds it
+ * from the page, the enemy's database note and J-ABS's defaults, marking which the page sets; each change writes the
+ * page's own tag in place, and taking one out leaves the enemy's. Its level shows while J-LevelMaster is on, its passives
+ * while J-Passive and its affix extension are, and its motions while J-Motion is, with J-Motion's config filling in what
+ * a motion leaves out. At the top of the Stamps panel, the battler brush places a battler of the enemy picked with each
+ * click, shaped like most of that enemy's battlers already placed.
  */
 const jabsModule: PluginModule = {
   id: 'jabs',
   title: 'J-ABS',
   plugins: [ JABS_PLUGIN ],
+  extensionConfigs: [ { name: MOTION_CONFIG, plugins: [ MOTION_PLUGIN ] } ],
   register: (contributions, context) =>
   {
-    contributions.eventKind({ id: BATTLER_KIND_ID, title: 'Battler', priority: 50, detect: isBattler, marker: 'battler' });
+    // the registry reads J-Motion's config before the module switches on, whenever J-Motion is enabled beside J-ABS.
+    const setup = battlerSetupOf(context.plugins, context.configs.get(MOTION_CONFIG) ?? null, context.pageWords);
+    contributions.eventKind({
+      id: BATTLER_KIND_ID,
+      title: 'Battler',
+      priority: 50,
+      detect: isBattler,
+      marker: 'battler',
+      quickPanel: battlerQuickPanelFor(setup),
+      pageSection: battlerPageSectionFor(setup),
+    });
+    contributions.paletteEntry({ id: BATTLER_BRUSH_ID, title: 'Battlers', kind: BATTLER_KIND_ID, picker: battlerBrushFor() });
 
     // a copy of a blueprint follows each of a battler's tags on its own, and its level only while the plugin reading it is
     // on too.
@@ -91,4 +118,4 @@ const jabsModule: PluginModule = {
   },
 };
 
-export { actionMapIdOf, BATTLER_KIND_ID, isBattler, jabsModule };
+export { actionMapIdOf, BATTLER_BRUSH_ID, BATTLER_KIND_ID, isBattler, jabsModule };

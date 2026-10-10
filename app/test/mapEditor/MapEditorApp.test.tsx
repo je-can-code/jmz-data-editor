@@ -71,7 +71,8 @@ describe('MapEditorApp', () =>
       claims: () => false,
     });
 
-    // an event window's command list reads the catalog and editors; the window holds its map already, so it opens nothing.
+    // an event window's command list reads the catalog and editors, and its sections the modules, none of them on here; the
+    // window holds its map already, so it opens nothing.
     const services = {
       view,
       shell,
@@ -83,6 +84,7 @@ describe('MapEditorApp', () =>
       pluginHeaders: new PluginHeaderStore(),
       locationPicks,
       landings,
+      modules: new PluginModuleRegistry(new CommandCatalog()),
       loadCommandResources: async () => undefined,
     } as unknown as MapEditorServices;
     render(

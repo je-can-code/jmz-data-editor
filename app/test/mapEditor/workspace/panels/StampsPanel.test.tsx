@@ -11,7 +11,9 @@ import { BlueprintCopyCounter, type EventNote } from '../../../../src/mapEditor/
 import { BlueprintWriter } from '../../../../src/mapEditor/core/blueprints/blueprintWriter.ts';
 import { BLUEPRINTS_DOCUMENT, blueprintsOf } from '../../../../src/mapEditor/core/blueprints/blueprints.ts';
 import { BLUEPRINT_USES_DOCUMENT, usesOf, type PlacedSpot } from '../../../../src/mapEditor/core/blueprints/blueprintUses.ts';
+import { CommandCatalog } from '../../../../src/mapEditor/core/commands/CommandCatalog.ts';
 import { DocumentHub } from '../../../../src/mapEditor/core/history/DocumentHub.ts';
+import { PluginModuleRegistry } from '../../../../src/mapEditor/core/modules/PluginModuleRegistry.ts';
 import type { DocumentKey } from '../../../../src/mapEditor/core/model/documentKeys.ts';
 import { createMapEvent } from '../../../../src/mapEditor/core/model/eventModel.ts';
 import type { JsonValue } from '../../../../src/mapEditor/core/model/json.ts';
@@ -28,6 +30,12 @@ import { holdBlueprints, holdBlueprintUses, storedBlueprints, storedUses, type B
 import { mapWithEvents } from '../../support/eventFixtures.ts';
 import { stampOf } from '../../support/stampFixtures.ts';
 import { UsesServer } from '../../support/usesServer.ts';
+
+/**
+ * The window's plugin modules with none switched on, so the panel offers no module's picker above its stamps.
+ * @returns {PluginModuleRegistry} The modules.
+ */
+const noModules = (): PluginModuleRegistry => new PluginModuleRegistry(new CommandCatalog());
 
 /*
  * The Stamps panel lists every stamp copied in the window this session, newest first, each with a picture and what it
@@ -48,7 +56,7 @@ describe('StampsPanel', () =>
   {
     const hub = new DocumentHub({ clientId: 'window-a' });
     const paints = new WindowPaints(window);
-    const services = { hub, api: null, stamps, paints } as unknown as MapEditorServices;
+    const services = { hub, api: null, stamps, paints, modules: noModules() } as unknown as MapEditorServices;
     const controller = new WorkspaceController(services);
     render(
       <MapEditorServicesProvider services={services}>
@@ -186,6 +194,7 @@ describe('StampsPanel', () =>
       api: { loadImage },
       stamps,
       paints: new WindowPaints(window),
+      modules: noModules(),
       openDocument: () => Promise.reject(new Error('no tilesets in this test')),
     } as unknown as MapEditorServices;
     const hero = { ...createMapEvent(1, 0, 0), pages: [ { ...createMapEvent(1, 0, 0).pages[0], image: { tileId: 0, characterName: 'Hero', direction: 2, pattern: 1, characterIndex: 0 } } ] };
@@ -319,6 +328,7 @@ describe('StampsPanel: blueprints', () =>
       paints,
       blueprintCopies,
       blueprintWriter,
+      modules: noModules(),
       openDocument: async (key: DocumentKey) =>
       {
         if (open === 'on-ask' && hub.has(key) === false && key === BLUEPRINTS_DOCUMENT)
@@ -627,6 +637,7 @@ describe('StampsPanel: blueprints', () =>
       stamps: new StampHistory('window-a'),
       paints: new WindowPaints(window),
       blueprintCopies: new BlueprintCopyCounter({ hub, readNotes: null }),
+      modules: noModules(),
     } as unknown as MapEditorServices;
 
     // Act.
@@ -800,6 +811,7 @@ describe('StampsPanel: where a blueprint is used', () =>
       paints: new WindowPaints(window),
       blueprintCopies,
       copyMaps: { driftOf },
+      modules: noModules(),
       openDocument: async (key: DocumentKey) => hub.document(key),
     } as unknown as MapEditorServices;
     const controller = new WorkspaceController(services);
@@ -988,6 +1000,7 @@ describe('StampsPanel: where a blueprint is used', () =>
       stamps: new StampHistory('window-a'),
       paints: new WindowPaints(window),
       blueprintCopies: new BlueprintCopyCounter({ hub, readNotes: null }),
+      modules: noModules(),
       openDocument: async (key: DocumentKey) => hub.document(key),
     } as unknown as MapEditorServices;
 

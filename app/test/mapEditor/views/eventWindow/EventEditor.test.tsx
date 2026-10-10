@@ -20,6 +20,7 @@ import { createEventPage } from '../../../../src/mapEditor/core/model/eventModel
 import type { JsonValue } from '../../../../src/mapEditor/core/model/json.ts';
 import type { RmmzMap, RmmzTileset } from '../../../../src/mapEditor/core/model/rmmzTypes.ts';
 import type { MapEditorApi } from '../../../../src/mapEditor/core/api/MapEditorApi.ts';
+import { PluginModuleRegistry } from '../../../../src/mapEditor/core/modules/PluginModuleRegistry.ts';
 import type { MapEditorServices } from '../../../../src/mapEditor/services/MapEditorServices.ts';
 import { MapEditorServicesProvider } from '../../../../src/mapEditor/services/MapEditorServicesContext.tsx';
 import { SoundPlayerContext } from '../../../../src/mapEditor/views/commandList/commandListResources.ts';
@@ -106,6 +107,7 @@ describe('EventWindowView', () =>
       loadCommandResources: async () => undefined,
       openDocument,
       shell: new WindowShell({ channel: null, origin: 'http://ui', openWindow: () => null, readClipboardText: async () => options.clipboard ?? '' }),
+      modules: new PluginModuleRegistry(new CommandCatalog()),
     } as unknown as MapEditorServices;
     render(
       <MapEditorServicesProvider services={services}>

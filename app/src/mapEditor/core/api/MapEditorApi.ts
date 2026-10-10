@@ -5,7 +5,7 @@ import type { CommandUsageCounts } from '../commandList/commandUsage.ts';
 import type { DatabaseNamesJson } from '../commandList/databaseNames.ts';
 import { isEditorDataName } from '../model/documentKeys.ts';
 import { isJsonObject, type JsonValue } from '../model/json.ts';
-import type { RmmzCommonEvent, RmmzMap, RmmzMapInfo, RmmzSystem, RmmzTileset } from '../model/rmmzTypes.ts';
+import type { RmmzCommonEvent, RmmzEventPage, RmmzMap, RmmzMapInfo, RmmzSystem, RmmzTileset } from '../model/rmmzTypes.ts';
 import type { FreshSave } from '../pageRule/freshSave.ts';
 import type { MapArrival } from '../properties/arrivals.ts';
 
@@ -35,6 +35,26 @@ type BlueprintWrite = {
   readonly check?: boolean;
   readonly blueprints?: JsonValue;
   readonly maps: readonly { readonly map: number; readonly patches: readonly Patch[] }[];
+};
+
+/**
+ * One enemy of Enemies.json, as much of it as the map editor reads: its id, its name and its note.
+ */
+type EnemyRow = {
+  readonly id: number;
+  readonly name: string;
+  readonly note: string;
+};
+
+/**
+ * One map event standing as a battler of an enemy, with the first of its pages naming that enemy, whole (GET
+ * /api/enemies/{enemyId}/battler-pages).
+ */
+type EnemyBattlerPage = {
+  readonly mapId: number;
+  readonly eventId: number;
+  readonly eventName: string;
+  readonly page: RmmzEventPage;
 };
 
 /**
@@ -291,6 +311,23 @@ interface MapEditorApi
    * @returns {Promise<FreshSave>} The new game's party.
    */
   loadNewGame?(): Promise<FreshSave>;
+
+  /**
+   * Reads the enemies, {@code data/Enemies.json}, through the database route the data editor uses: J-ABS's battler panel
+   * reads each one's name and the note its battler tags fall back to. Optional, so a client that cannot read them still
+   * serves everything else; the panel then names enemies by id and reads no note.
+   * @returns {Promise<(EnemyRow | null)[]>} The rows, index 0 null.
+   */
+  loadEnemies?(): Promise<(EnemyRow | null)[]>;
+
+  /**
+   * Reads every map event on disk standing as a battler of an enemy, each with the first of its pages naming it, which
+   * J-ABS's battler brush shapes a new battler of that enemy after. Optional, so a client that cannot read them still
+   * serves everything else; the brush then shapes every battler after the game's most common one.
+   * @param {number} enemyId The enemy.
+   * @returns {Promise<EnemyBattlerPage[]>} The battlers, by map and then event; empty when the enemy stands nowhere.
+   */
+  loadEnemyBattlerPages?(enemyId: number): Promise<EnemyBattlerPage[]>;
 }
 
 /**
@@ -389,6 +426,21 @@ const requireMapId = (mapId: number): number =>
   }
 
   return mapId;
+};
+
+/**
+ * Checks an enemy id before it becomes part of a URL.
+ * @param {number} enemyId The enemy id.
+ * @returns {number} The same id.
+ */
+const requireEnemyId = (enemyId: number): number =>
+{
+  if (Number.isInteger(enemyId) === false || enemyId < 1)
+  {
+    throw new MapEditorApiError(`an enemy id is a positive integer, not ${enemyId}`, 0);
+  }
+
+  return enemyId;
 };
 
 /**
@@ -658,6 +710,23 @@ class HttpMapEditorApi implements MapEditorApi
     return this.#getJson<FreshSave>('/api/new-game');
   }
 
+  async loadEnemies(): Promise<(EnemyRow | null)[]>
+  {
+    return this.#getJson<(EnemyRow | null)[]>('/api/enemies');
+  }
+
+  async loadEnemyBattlerPages(enemyId: number): Promise<EnemyBattlerPage[]>
+  {
+    // the answer names the enemy it is about, so a late answer for another enemy is never taken for this one's.
+    const answer = await this.#getJson<{ enemyId: number; battlers: EnemyBattlerPage[] }>(`/api/enemies/${requireEnemyId(enemyId)}/battler-pages`);
+    if (answer.enemyId !== enemyId)
+    {
+      throw new MapEditorApiError(`GET /api/enemies/${enemyId}/battler-pages answered about enemy ${answer.enemyId}`, 0);
+    }
+
+    return answer.battlers;
+  }
+
   /**
    * Reads a JSON route and unwraps the server's envelope.
    * @param {string} route The route, from {@code /api} on.
@@ -740,4 +809,4 @@ class HttpMapEditorApi implements MapEditorApi
 }
 
 export { CLIENT_HEADER, HttpMapEditorApi, MapEditorApiError };
-export type { AudioFolder, BlueprintWrite, HttpMapEditorApiOptions, ImageFolder, MapEditorApi };
+export type { AudioFolder, BlueprintWrite, EnemyBattlerPage, EnemyRow, HttpMapEditorApiOptions, ImageFolder, MapEditorApi };

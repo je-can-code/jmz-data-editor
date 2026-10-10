@@ -36,6 +36,7 @@ import { MovementSettings } from '../eventPage/MovementSettings.tsx';
 import { eventWindowTitle } from '../mapEditorViews.ts';
 import { EventHeader } from './EventHeader.tsx';
 import { useReadyMark } from './eventWindowMarks.ts';
+import { KindPageSection } from './KindPageSection.tsx';
 import { PageConditions } from './PageConditions.tsx';
 import { PageOptions, PagePriorityTrigger } from './PageSettings.tsx';
 import { PageTabs } from './PageTabs.tsx';
@@ -379,6 +380,7 @@ const EventEditor = (props: { readonly target: EventWindowTarget }) =>
               onTrigger={trigger => runOnPage(at => setPageTrigger(hub, target, at, trigger))}
             />
           </Section>
+          <KindPageSection target={target} event={event} pageIndex={pageIndex}/>
         </Box>
         <Box sx={{ flex: 1, minWidth: 0, overflowY: 'auto', p: 1 }}>
           <CommandList

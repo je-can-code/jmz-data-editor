@@ -198,7 +198,176 @@ type GameBattler = {
 };
 
 /**
- * Builds a battler from a page the way J-ABS, J-LevelMaster, J-Passive and J-Motion do, each as its source reads.
+ * Keeps the last capture of a pattern among comment lines, as each of Game_Event's override readers does.
+ * @param {readonly string[]} comments The comment lines.
+ * @param {RegExp} structure The pattern.
+ * @param {(text: string) => number} read How the capture is read.
+ * @returns {number | null} The last line's, or null when none matches.
+ */
+const lastOf = (comments: readonly string[], structure: RegExp, read: (text: string) => number): number | null =>
+{
+  let value: number | null = null;
+  comments.forEach(comment =>
+  {
+    const result = structure.exec(comment);
+    if (result !== null)
+    {
+      value = read(result[1]);
+    }
+  });
+  return value;
+};
+
+/**
+ * Reads a switch off comment lines as Game_Event's config readers do: the off word, then the on word, line by line.
+ * @param {readonly string[]} comments The comment lines.
+ * @param {RegExp} off The off word's pattern.
+ * @param {RegExp} on The on word's pattern.
+ * @returns {boolean | null} The switch, or null when no line names either.
+ */
+const switchOf = (comments: readonly string[], off: RegExp, on: RegExp): boolean | null =>
+{
+  let value: boolean | null = null;
+  comments.forEach(comment =>
+  {
+    if (off.test(comment))
+    {
+      value = false;
+    }
+
+    if (on.test(comment))
+    {
+      value = true;
+    }
+  });
+  return value;
+};
+
+/**
+ * Reads a page as Game_Event's override readers do, with J-LevelMaster's level, J-Passive's passives and J-Motion's
+ * motions beside them.
+ * @param {readonly string[]} comments The page's comment lines J-Base offers.
+ * @returns {Record<string, unknown>} What the page sets, each null when it sets none.
+ */
+const gamePage = (comments: readonly string[]): Record<string, unknown> =>
+{
+  // the team's pattern is global, and a fresh boot reads the first page with it from the start of the line.
+  RX.TeamId.lastIndex = 0;
+  const traits = TRAIT_RX.filter(([ , structure ]) => comments.some(comment => structure.test(comment))).map(([ word ]) => word);
+  const roles = ROLE_RX.filter(([ , structures ]) => comments.some(comment => structures.some(structure => structure.test(comment)))).map(([ word ]) => word);
+  return {
+    team: lastOf(comments, RX.TeamId, text => parseInt(text)),
+    traits: traits.length === 0 ? null : traits,
+    roles: roles.length === 0 ? null : roles,
+    sight: lastOf(comments, RX.Sight, text => parseInt(text)),
+    alertedSight: lastOf(comments, RX.AlertedSightBoost, text => parseInt(text)),
+    pursuit: lastOf(comments, RX.Pursuit, text => parseInt(text)),
+    alertedPursuit: lastOf(comments, RX.AlertedPursuitBoost, text => parseFloat(text)),
+    alertDuration: lastOf(comments, RX.AlertDuration, text => parseInt(text)),
+    idle: switchOf(comments, RX.ConfigNoIdle, RX.ConfigCanIdle),
+    hpBar: switchOf(comments, RX.ConfigNoHpBar, RX.ConfigShowHpBar),
+    name: switchOf(comments, RX.ConfigNoName, RX.ConfigShowName),
+    inanimate: switchOf(comments, RX.ConfigNotInanimate, RX.ConfigInanimate),
+    speed: lastOf(comments, RX.MoveSpeed, text => parseFloat(text)),
+    level: lastOf(comments, LEVEL_RX, text => parseInt(text)),
+    passives: comments.flatMap(comment =>
+    {
+      PASSIVE_RX.lastIndex = 0;
+      const result = PASSIVE_RX.exec(comment);
+      return result === null ? [] : JSON.parse(result[1]) as number[];
+    }),
+  };
+};
+
+/**
+ * Reads an enemy's note as Game_Enemy's readers do, through RPGManager, with J-LevelMaster's level and J-Passive's
+ * passives beside them.
+ * @param {string} note The note.
+ * @param {GameDefaults} defaults J-ABS's Default Enemy parameters.
+ * @returns {{ said: Record<string, unknown>, team: number, inanimate: boolean, idle: boolean, hpBar: boolean, name: boolean }} What the note says, and what Game_Enemy answers for the team and switches.
+ */
+const gameEnemy = (note: string, defaults: GameDefaults) =>
+{
+  const on = notes.bool(note, RX.ConfigInanimate);
+  const off = notes.bool(note, RX.ConfigNotInanimate);
+  const notOn = off === null ? defaults.inanimate : !off;
+  const inanimate = on ?? notOn;
+  const enemySwitch = (allow: RegExp, refuse: RegExp, fallback: boolean): boolean =>
+  {
+    const allowed = notes.bool(note, allow);
+    const refused = notes.bool(note, refuse);
+    if (allowed !== null)
+    {
+      return allowed;
+    }
+
+    if (refused !== null)
+    {
+      return !refused;
+    }
+
+    return inanimate ? false : fallback;
+  };
+  const team = notes.number(note, RX.TeamId);
+  return {
+    said: {
+      sight: notes.number(note, RX.Sight),
+      alertedSight: notes.number(note, RX.AlertedSightBoost),
+      pursuit: notes.number(note, RX.Pursuit),
+      alertedPursuit: notes.number(note, RX.AlertedPursuitBoost),
+      alertDuration: notes.number(note, RX.AlertDuration),
+      traits: TRAIT_RX.filter(([ , structure ]) => notes.bool(note, structure) !== null).map(([ word ]) => word),
+      roles: ROLE_RX.filter(([ , structures ]) => structures.some(structure => notes.bool(note, structure) !== null)).map(([ word ]) => word),
+      level: notes.number(note, LEVEL_RX),
+      passives: (notes.array(note, PASSIVE_RX) ?? []) as number[],
+    },
+    team: team ? team : 1,
+    inanimate,
+    idle: enemySwitch(RX.ConfigCanIdle, RX.ConfigNoIdle, defaults.canIdle),
+    hpBar: enemySwitch(RX.ConfigShowHpBar, RX.ConfigNoHpBar, defaults.showHpBar),
+    name: enemySwitch(RX.ConfigShowName, RX.ConfigNoName, defaults.showName),
+  };
+};
+
+/**
+ * Reads the motions on a page as J-Motion's MotionTagParser#parseComments does, keeping what MotionTypeRegistry knows.
+ * @param {readonly string[]} comments The page's comment lines J-Base offers.
+ * @returns {{ type: string, values: string[], sync: boolean }[]} The motions.
+ */
+const gameMotions = (comments: readonly string[]): { type: string; values: string[]; sync: boolean }[] =>
+{
+  return comments.flatMap(comment =>
+  {
+    const result = MOTION_RX.exec(comment);
+    if (result === null)
+    {
+      return [];
+    }
+
+    const [ type, ...rest ] = result[1].slice(1, -1).split(/, |,/);
+    const values = rest.filter(value => parseString(value) !== 'sync');
+    const count = MOTION_COUNTS[String(parseString(type))];
+    return count === undefined || values.length > count
+      ? []
+      : [ { type, values, sync: values.length !== rest.length } ];
+  });
+};
+
+/**
+ * Takes a value from the page, else the enemy, else the default, as parseEnemyComments does with each.
+ * @param {unknown} page What the page sets.
+ * @param {unknown} enemy What the enemy's note sets.
+ * @param {unknown} fallback J-ABS's default.
+ * @returns {unknown} The value.
+ */
+const layer = (page: unknown, enemy: unknown, fallback: unknown): unknown =>
+{
+  return page ?? enemy ?? fallback;
+};
+
+/**
+ * Builds a battler from a page the way J-ABS, J-LevelMaster, J-Passive and J-Motion do, each as its source reads
+ * (Game_Event#parseEnemyComments for J-ABS's part).
  * @param {RmmzEventPage} page The page.
  * @param {(EnemyRecord | null)[]} enemies Enemies.json.
  * @param {GameDefaults} defaults J-ABS's Default Enemy parameters.
@@ -214,153 +383,34 @@ const gameBattler = (page: RmmzEventPage, enemies: (EnemyRecord | null)[], defau
     return null;
   }
 
-  // Game_Event's override readers, each keeping the last line's capture.
-  const last = (structure: RegExp, read: (text: string) => number): number | null =>
-  {
-    let value: number | null = null;
-    comments.forEach(comment =>
-    {
-      const result = structure.exec(comment);
-      if (result !== null)
-      {
-        value = read(result[1]);
-      }
-    });
-    return value;
-  };
-  const switchOf = (off: RegExp, on: RegExp): boolean | null =>
-  {
-    let value: boolean | null = null;
-    comments.forEach(comment =>
-    {
-      if (off.test(comment))
-      {
-        value = false;
-      }
-
-      if (on.test(comment))
-      {
-        value = true;
-      }
-    });
-    return value;
-  };
-
-  // the team's pattern is global, and a fresh boot reads the first page with it from the start of the line.
-  RX.TeamId.lastIndex = 0;
-  const enemyId = last(RX.EnemyId, text => parseInt(text)) as number;
-  const pageTeam = last(RX.TeamId, text => parseInt(text));
-  const pageTraits = TRAIT_RX.filter(([ , structure ]) => comments.some(comment => structure.test(comment))).map(([ word ]) => word);
-  const pageRoles = ROLE_RX.filter(([ , structures ]) => comments.some(comment => structures.some(structure => structure.test(comment)))).map(([ word ]) => word);
-  const pageSight = last(RX.Sight, text => parseInt(text));
-  const pageAlertedSight = last(RX.AlertedSightBoost, text => parseInt(text));
-  const pagePursuit = last(RX.Pursuit, text => parseInt(text));
-  const pageAlertedPursuit = last(RX.AlertedPursuitBoost, text => parseFloat(text));
-  const pageAlertDuration = last(RX.AlertDuration, text => parseInt(text));
-  const pageIdle = switchOf(RX.ConfigNoIdle, RX.ConfigCanIdle);
-  const pageHpBar = switchOf(RX.ConfigNoHpBar, RX.ConfigShowHpBar);
-  const pageName = switchOf(RX.ConfigNoName, RX.ConfigShowName);
-  const pageInanimate = switchOf(RX.ConfigNotInanimate, RX.ConfigInanimate);
-  const pageSpeed = last(RX.MoveSpeed, text => parseFloat(text));
-  const pageLevel = last(LEVEL_RX, text => parseInt(text));
-  const pagePassives = comments.flatMap(comment =>
-  {
-    PASSIVE_RX.lastIndex = 0;
-    const result = PASSIVE_RX.exec(comment);
-    return result === null ? [] : JSON.parse(result[1]) as number[];
-  });
-
-  // Game_Enemy's readers, through RPGManager on the enemy's note.
-  const note = enemies[enemyId]?.note ?? '';
-  const enemyTeam = notes.number(note, RX.TeamId);
-  const enemySight = notes.number(note, RX.Sight);
-  const enemyAlertedSight = notes.number(note, RX.AlertedSightBoost);
-  const enemyPursuit = notes.number(note, RX.Pursuit);
-  const enemyAlertedPursuit = notes.number(note, RX.AlertedPursuitBoost);
-  const enemyAlertDuration = notes.number(note, RX.AlertDuration);
-  const enemyTraits = TRAIT_RX.filter(([ , structure ]) => notes.bool(note, structure) !== null).map(([ word ]) => word);
-  const enemyRoles = ROLE_RX.filter(([ , structures ]) => structures.some(structure => notes.bool(note, structure) !== null)).map(([ word ]) => word);
-  const isInanimate = (): boolean =>
-  {
-    const on = notes.bool(note, RX.ConfigInanimate);
-    if (on !== null)
-    {
-      return on;
-    }
-
-    const off = notes.bool(note, RX.ConfigNotInanimate);
-    return off !== null ? !off : defaults.inanimate;
-  };
-  const enemySwitch = (on: RegExp, off: RegExp, fallback: boolean): boolean =>
-  {
-    const allowed = notes.bool(note, on);
-    if (allowed !== null)
-    {
-      return allowed;
-    }
-
-    const refused = notes.bool(note, off);
-    if (refused !== null)
-    {
-      return !refused;
-    }
-
-    return isInanimate() ? false : fallback;
-  };
-
-  // Game_Event#parseEnemyComments.
-  let teamId = pageTeam ?? (enemyTeam ? enemyTeam : 1);
-  const inanimate = pageInanimate ?? isInanimate();
-  let canIdle = pageIdle ?? enemySwitch(RX.ConfigCanIdle, RX.ConfigNoIdle, defaults.canIdle);
-  let showHpBar = pageHpBar ?? enemySwitch(RX.ConfigShowHpBar, RX.ConfigNoHpBar, defaults.showHpBar);
-  let showName = pageName ?? enemySwitch(RX.ConfigShowName, RX.ConfigNoName, defaults.showName);
-  if (inanimate)
-  {
-    teamId = 2;
-    if (pageIdle === null) canIdle = false;
-    if (pageHpBar === null) showHpBar = false;
-    if (pageName === null) showName = false;
-  }
-
-  // J-Motion's MotionTagParser#parseComments, keeping what MotionTypeRegistry knows.
-  const motions = comments.flatMap(comment =>
-  {
-    const result = MOTION_RX.exec(comment);
-    if (result === null)
-    {
-      return [];
-    }
-
-    const [ type, ...rest ] = result[1].slice(1, -1).split(/, |,/);
-    const values = rest.filter(value => parseString(value) !== 'sync');
-    const count = MOTION_COUNTS[String(parseString(type))];
-    return count === undefined || values.length > count
-      ? []
-      : [ { type, values, sync: values.length !== rest.length } ];
-  });
-
-  const enemyLevel = notes.number(note, LEVEL_RX);
-  const enemyPassives = (notes.array(note, PASSIVE_RX) ?? []) as number[];
+  const enemyId = lastOf(comments, RX.EnemyId, text => parseInt(text)) as number;
+  const own = gamePage(comments);
+  const enemy = gameEnemy(enemies[enemyId]?.note ?? '', defaults);
+  const { said } = enemy;
+  const inanimate = (own.inanimate ?? enemy.inanimate) as boolean;
+  const hidden = (key: 'idle' | 'hpBar' | 'name'): unknown => (inanimate && own[key] === null ? false : own[key] ?? enemy[key]);
   return {
     enemyId,
-    page: {
-      team: pageTeam, traits: pageTraits.length === 0 ? null : pageTraits, roles: pageRoles.length === 0 ? null : pageRoles,
-      sight: pageSight, alertedSight: pageAlertedSight, pursuit: pagePursuit, alertedPursuit: pageAlertedPursuit,
-      alertDuration: pageAlertDuration, idle: pageIdle, hpBar: pageHpBar, name: pageName, inanimate: pageInanimate,
-      speed: pageSpeed, level: pageLevel, passives: pagePassives,
-    },
-    enemy: {
-      sight: enemySight, alertedSight: enemyAlertedSight, pursuit: enemyPursuit, alertedPursuit: enemyAlertedPursuit,
-      alertDuration: enemyAlertDuration, traits: enemyTraits, roles: enemyRoles, level: enemyLevel, passives: enemyPassives,
-    },
+    page: own,
+    enemy: said,
     value: {
-      team: teamId, traits: pageTraits.length === 0 ? enemyTraits : pageTraits, roles: pageRoles.length === 0 ? [] : pageRoles,
-      sight: pageSight ?? enemySight ?? defaults.sight, alertedSight: pageAlertedSight ?? enemyAlertedSight ?? defaults.alertedSightBoost,
-      pursuit: pagePursuit ?? enemyPursuit ?? defaults.pursuit, alertedPursuit: pageAlertedPursuit ?? enemyAlertedPursuit ?? defaults.alertedPursuitBoost,
-      alertDuration: pageAlertDuration ?? enemyAlertDuration ?? defaults.alertDuration, idle: canIdle, hpBar: showHpBar, name: showName,
-      inanimate, speed: pageSpeed ?? page.moveSpeed, level: pageLevel ?? (0 + (enemyLevel ?? 0)), passives: [ ...enemyPassives, ...pagePassives ],
+      team: inanimate ? 2 : own.team ?? enemy.team,
+      traits: own.traits ?? said.traits,
+      roles: own.roles ?? [],
+      sight: layer(own.sight, said.sight, defaults.sight),
+      alertedSight: layer(own.alertedSight, said.alertedSight, defaults.alertedSightBoost),
+      pursuit: layer(own.pursuit, said.pursuit, defaults.pursuit),
+      alertedPursuit: layer(own.alertedPursuit, said.alertedPursuit, defaults.alertedPursuitBoost),
+      alertDuration: layer(own.alertDuration, said.alertDuration, defaults.alertDuration),
+      idle: hidden('idle'),
+      hpBar: hidden('hpBar'),
+      name: hidden('name'),
+      inanimate,
+      speed: own.speed ?? page.moveSpeed,
+      level: layer(own.level, said.level, 0),
+      passives: [ ...said.passives as number[], ...own.passives as number[] ],
     },
-    motions,
+    motions: gameMotions(comments),
   };
 };
 
@@ -419,7 +469,7 @@ describe.skipIf(project === null)('the battler panel against the game, on every 
   it('reads every battler page as the game builds its battler, page, enemy and value alike', () =>
   {
     // Arrange: J-ABS's defaults as the game's js/plugins.js sets them, read as J-ABS's metadata reads them.
-    const parameters = (jabs as NonNullable<typeof jabs>).parameters;
+    const { parameters } = jabs as NonNullable<typeof jabs>;
     const gameDefaults: GameDefaults = {
       sight: Number(parameters['defaultEnemySightRange']),
       pursuit: Number(parameters['defaultEnemyPursuitRange']),
