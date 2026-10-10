@@ -17,12 +17,13 @@ import type { MapEditorApi } from '../../core/api/MapEditorApi.ts';
 import { mapLabel, mapOptions, type MapOption } from '../../core/commands/editors/mapOptions.ts';
 import type { LandingGround, LandingProblem } from '../../core/locations/landingCheck.ts';
 import { MAP_INFOS_KEY, mapDocumentKey, TILESETS_KEY } from '../../core/model/documentKeys.ts';
+import type { MapDocument } from '../../core/model/MapDocument.ts';
 import type { TilesetsDocument } from '../../core/model/JsonDocument.ts';
 import type { RmmzMapInfo } from '../../core/model/rmmzTypes.ts';
 import type { MapCell, MapSize } from '../../core/renderer/camera.ts';
 import { lookAtDocument } from '../../core/sync/lookAtDocument.ts';
 import { defaultDoorLook, type DoorLook, type DoorSprite } from '../../core/transferPairs/doorSprites.ts';
-import { placeTransfers } from '../../core/transferPairs/pairPlacement.ts';
+import { placeTransfers, spotProblems } from '../../core/transferPairs/pairPlacement.ts';
 import { NO_PICKS, pairPlanOf, partnerOf, type PairKind, type PairMap, type PairPicks, type PairPlan, type PairWays } from '../../core/transferPairs/pairPlans.ts';
 import { edgesAt, insideArrival, stripCentredOn, stripFromDrag, stripRect } from '../../core/transferPairs/pairShapes.ts';
 import { pairReadout, placedWords, tileWords } from '../../core/transferPairs/pairWords.ts';
@@ -285,7 +286,20 @@ const TransferPairBody = (props: TransferPairDialogProps) =>
   const problems = plan === null
     ? []
     : plan.ends.map(end => groundOf(end.destination.mapId)?.problemAt(end.destination.x, end.destination.y) ?? null);
-  const readout = pairReadout(picks, far, plan, problems, mapName);
+
+  // where each end stands judged on its map as the author sees it, as placing it would judge it: the left map held here,
+  // the right one as opened.
+  const placedOn = (endMapId: number): MapDocument | null =>
+  {
+    if (endMapId === mapId)
+    {
+      return held;
+    }
+
+    return opened !== null && opened.map.mapId === endMapId ? opened.map : null;
+  };
+  const spots = plan === null ? [] : spotProblems(plan, placedOn, mapName);
+  const readout = pairReadout(picks, far, plan, problems, mapName, spots);
   const marks = paneMarks(picks, plan, look, problems, nearSize, far === null ? null : far.size);
   const hints = paneHints(picks.kind, picks.ways);
 
@@ -365,7 +379,7 @@ const TransferPairBody = (props: TransferPairDialogProps) =>
    */
   const place = () =>
   {
-    if (plan === null || tilesets === null || problems.some(problem => problem !== null))
+    if (plan === null || tilesets === null || readout.problem)
     {
       return;
     }
@@ -526,7 +540,8 @@ const TransferPairBody = (props: TransferPairDialogProps) =>
  * opposite edge on the right until clicked elsewhere along it; either may go one way only, the landing clicked on the
  * right. The door's picture, its creak and the sound of passing through are chosen above, each remembered for as long as
  * the window is open. Where the player lands is marked on each map, cyan where they can stand and red where they
- * cannot, with the reason under the maps, and nothing is placed until every landing passes. Placing makes every end in
+ * cannot, with the reason under the maps, and an end on tiles another event already uses is said there too, in the words
+ * placing would refuse it in; nothing is placed until every end and every landing passes. Placing makes every end in
  * one step, which undoes from either map; a click outside the placer does nothing, so picks are never lost to a stray
  * click.
  * @param {TransferPairDialogProps} props Where to start, and who hears how it ends.

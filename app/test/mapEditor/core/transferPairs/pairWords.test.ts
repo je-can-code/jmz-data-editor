@@ -5,8 +5,9 @@ import { landingRefusalWords, pairReadout, placedWords } from '../../../../src/m
 /*
  * Under the two maps, placing transfers says one thing at a time, in words for an author: what to pick next, in the order
  * the picks are made (the other map, then the door or the strip, then the way out or the landing); once every pick is
- * made, what the picks place, end by end; and, while the player could not land where an end sends them, why, as a
- * problem that keeps anything from being placed. A landing not judged yet is no problem.
+ * made, what the picks place, end by end; and, while an end could not stand where it is planned, or after that the player
+ * could not land where an end sends them, why, as a problem that keeps anything from being placed. A spot or a landing
+ * not judged yet is no problem.
  */
 describe('pairWords', () =>
 {
@@ -99,6 +100,26 @@ describe('pairWords', () =>
       // Assert.
       expect(readout)
         .toStrictEqual({ text: 'The player can\'t land on 14, 7 in Northeast Section. The tiles there let no one through.', problem: true });
+    });
+
+    it('says why an end cannot stand where it is planned, as a problem, before any landing, and nothing for spots all clear', () =>
+    {
+      // Arrange: a door pair whose way out stands on another event's tile and whose way back lands on a wall, and the same
+      // pair with every spot clear.
+      const picks = picked({ kind: 'door', door: { x: 14, y: 6 }, exit: { x: 8, y: 15 } });
+      const plan = pairPlanOf(picks, OUTSIDE, INSIDE, LOOKS);
+      const taken = [ null, 'Barrel (event 4) already stands on 8, 15 in Entrance.' ];
+
+      // Act.
+      const blocked = pairReadout(picks, INSIDE, plan, [ null, { kind: 'blocked' } ], mapName, taken);
+      const clear = pairReadout(picks, INSIDE, plan, [], mapName, [ null, null ]);
+
+      // Assert.
+      expect([ blocked, clear ])
+        .toStrictEqual([
+          { text: 'Barrel (event 4) already stands on 8, 15 in Entrance.', problem: true },
+          { text: 'The door on 14, 6 takes the player to 8, 14 in Entrance; the way out on 8, 15 brings them back to 14, 7 in Northeast Section.', problem: false },
+        ]);
     });
   });
 

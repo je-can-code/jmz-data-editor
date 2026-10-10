@@ -123,14 +123,17 @@ const landingRefusalWords = (cell: MapCell, mapName: string, problem: LandingPro
 };
 
 /**
- * Says what placing transfers holds under the maps: what to pick next; or what the picks place; or why the player could
- * not land where an end sends them, as the maps stand, which nothing is placed over.
+ * Says what placing transfers holds under the maps: what to pick next; or what the picks place; or, as a problem nothing
+ * is placed over, why an end cannot stand where it is planned, on tiles another event already uses, say, and then why the
+ * player could not land where an end sends them, as the maps stand.
  * @param {PairPicks} picks What the author picked.
  * @param {PairMap | null} far The map the transfer leads to, or null while none is chosen.
  * @param {PairPlan | null} plan What the picks place, or null while a pick is missing.
  * @param {readonly (LandingProblem | null)[]} problems Why the player cannot land where each end sends them, in the plan's
  * order, null where they can or where it is not judged yet.
  * @param {(mapId: number) => string} mapName Names a map.
+ * @param {readonly (string | null)[]} spots Why each end cannot stand where it is planned, in the plan's order, in words
+ * for the author (see pairPlacement's spotProblems), null where it can or where it is not judged yet.
  * @returns {PairReadout} The words.
  */
 const pairReadout = (
@@ -139,12 +142,20 @@ const pairReadout = (
   plan: PairPlan | null,
   problems: readonly (LandingProblem | null)[],
   mapName: (mapId: number) => string,
+  spots: readonly (string | null)[] = [],
 ): PairReadout =>
 {
   const next = nextPickWords(picks, far);
   if (next !== null)
   {
     return { text: next, problem: false };
+  }
+
+  // where an end stands comes before where it sends anyone.
+  const spot = spots.find(each => each !== null);
+  if (spot !== undefined && spot !== null)
+  {
+    return { text: spot, problem: true };
   }
 
   // with every pick its kind needs made, the picks always plan something.

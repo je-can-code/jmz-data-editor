@@ -6,7 +6,8 @@ import { createMapEvent } from '../../../../src/mapEditor/core/model/eventModel.
 import type { Patch } from '../../../../src/mapEditor/core/model/patches.ts';
 import type { RmmzMap } from '../../../../src/mapEditor/core/model/rmmzTypes.ts';
 import { stripEvent } from '../../../../src/mapEditor/core/transferPairs/pairEvents.ts';
-import { placeTransfers, type PlacementOutcome } from '../../../../src/mapEditor/core/transferPairs/pairPlacement.ts';
+import { MapDocument } from '../../../../src/mapEditor/core/model/MapDocument.ts';
+import { placeTransfers, spotProblems, type PlacementOutcome } from '../../../../src/mapEditor/core/transferPairs/pairPlacement.ts';
 import { NO_PICKS, pairPlanOf, type PairMap, type PairPicks, type PairPlan } from '../../../../src/mapEditor/core/transferPairs/pairPlans.ts';
 import {
   INSIDE,
@@ -14,6 +15,7 @@ import {
   PAIR_LOOKS,
   pairDisk,
   pairMapFile,
+  pairMapName,
   pairMapOf,
   pairWindow,
   type PairWindow,
@@ -414,5 +416,33 @@ describe('placeTransfers', () =>
     // Assert.
     expect([ refusalOf(outcome), window.hub.map(mapDocumentKey(OUTSIDE)).event(1) ])
       .toStrictEqual([ 'Not today.', null ]);
+  });
+});
+
+/*
+ * The placer shows, under its two maps and before anything is placed, why an end cannot stand where it is planned, so the
+ * author puts it right before Place rather than hear it refused after. So this owes the placer, end by end in the plan's
+ * order, the very words placing would refuse the end in, judged on each map as the author sees it, and nothing for an end
+ * whose map is not read yet, which cannot be judged.
+ */
+describe('spotProblems', () =>
+{
+  it('says why an end stands on another event\'s tile, and nothing for an end beside it or on a map not read yet', () =>
+  {
+    // Arrange: a barrel on the outside map at 5, 3, where one plan's door goes, while another's door goes beside it.
+    const disk = pairDisk();
+    const outside = disk.get(OUTSIDE) as RmmzMap;
+    disk.set(OUTSIDE, { ...outside, events: [ null, { ...createMapEvent(1, 5, 3), name: 'Barrel' } ] });
+    const plan = (door: { x: number; y: number }) => pairPlanOf({ ...NO_PICKS, kind: 'door', ways: 'both', door, exit: { x: 4, y: 7 } }, pairMapOf(disk, OUTSIDE), pairMapOf(disk, INSIDE), PAIR_LOOKS) as PairPlan;
+    const mapOf = (mapId: number) => MapDocument.fromJson(mapDocumentKey(mapId), structuredClone(disk.get(mapId) as RmmzMap));
+
+    // Act.
+    const onBarrel = spotProblems(plan({ x: 5, y: 3 }), mapOf, pairMapName);
+    const beside = spotProblems(plan({ x: 6, y: 3 }), mapOf, pairMapName);
+    const unread = spotProblems(plan({ x: 5, y: 3 }), () => null, pairMapName);
+
+    // Assert.
+    expect([ onBarrel, beside, unread ])
+      .toStrictEqual([ [ 'Barrel (event 1) already stands on 5, 3 in Northeast Section.', null ], [ null, null ], [ null, null ] ]);
   });
 });

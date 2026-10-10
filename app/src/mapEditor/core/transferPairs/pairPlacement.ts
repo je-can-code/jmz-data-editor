@@ -278,15 +278,14 @@ const tilesCoveredBy = (event: RmmzMapEvent): CellRect[] =>
  * stand on any of them, as MZ never stacks two events on one tile, nor spread over any of them, as an edge exit already
  * along the edge is, and no other end on the same map may share one.
  * @param {PlannedEnd} end The end.
- * @param {EndMap} side Its map.
+ * @param {MapDocument} map Its map, as the author sees it.
  * @param {PairPlan} plan The plan, for the other ends.
  * @param {string} name Its map's name.
  * @returns {string | null} Why not, or null.
  */
-const areaProblem = (end: PlannedEnd, side: EndMap, plan: PairPlan, name: string): string | null =>
+const spotProblem = (end: PlannedEnd, map: MapDocument, plan: PairPlan, name: string): string | null =>
 {
   const { area } = end;
-  const { map } = side;
   if (area.x < 0 || area.y < 0 || area.x + area.width > map.width || area.y + area.height > map.height)
   {
     return `That runs off ${name}, which is ${map.width} by ${map.height} tiles.`;
@@ -309,6 +308,25 @@ const areaProblem = (end: PlannedEnd, side: EndMap, plan: PairPlan, name: string
   return shared
     ? `Both ends would stand on the same tiles in ${name}.`
     : null;
+};
+
+/**
+ * Says, end by end, why a plan's end cannot go where it is planned on its map as the author sees it now (see
+ * {@link spotProblem}), in the very words placing it would refuse it in: what the placer shows under the maps before
+ * anything is placed, so a door or a strip on tiles another event already uses is put right before Place, never after.
+ * @param {PairPlan} plan The plan.
+ * @param {(mapId: number) => MapDocument | null} mapOf The map an end goes on, as the author sees it, or null while it is
+ * not read yet.
+ * @param {(mapId: number) => string} mapName Names a map for the author.
+ * @returns {(string | null)[]} Why not, in the plan's order; null where an end can go there, or its map is not read yet.
+ */
+const spotProblems = (plan: PairPlan, mapOf: (mapId: number) => MapDocument | null, mapName: (mapId: number) => string): (string | null)[] =>
+{
+  return plan.ends.map(end =>
+  {
+    const map = mapOf(end.mapId);
+    return map === null ? null : spotProblem(end, map, plan, mapName(end.mapId));
+  });
 };
 
 /**
@@ -498,13 +516,10 @@ const placeTransfers = async (sources: PlacementSources, plan: PairPlan): Promis
 
   const sides = maps as EndMap[];
   const events = eventsFor(plan, sides);
-  for (const end of plan.ends)
+  const spotted = spotProblems(plan, endMapId => (sides.find(side => side.mapId === endMapId) as EndMap).map, sources.mapName).find(problem => problem !== null);
+  if (spotted !== undefined)
   {
-    const problem = areaProblem(end, sides.find(side => side.mapId === end.mapId) as EndMap, plan, sources.mapName(end.mapId));
-    if (problem !== null)
-    {
-      return refused(problem);
-    }
+    return refused(spotted as string);
   }
 
   const placed = mapsPlaced(sides, events, gathered.looked);
@@ -527,5 +542,5 @@ const placeTransfers = async (sources: PlacementSources, plan: PairPlan): Promis
   return { ok: true, step, placed: plan.ends.map(end => ({ mapId: end.mapId, eventId: (events.get(end) as RmmzMapEvent).id })) };
 };
 
-export { placeTransfers };
+export { placeTransfers, spotProblems };
 export type { PlacedEvent, PlacementOutcome, PlacementSources };
