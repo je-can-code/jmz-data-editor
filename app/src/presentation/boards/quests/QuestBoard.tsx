@@ -483,7 +483,7 @@ const QuestBoard = () =>
 
   const selectedTagObjects = tags.filter(t => applicableTags.includes(t.key));
 
-  const { updateUrl } = useUrlSelection(
+  const { updateUrl, linkedIndex } = useUrlSelection(
     'questKey',
     quests,
     (q) => q.key,
@@ -494,8 +494,7 @@ const QuestBoard = () =>
   useEffect(() =>
   {
     if (quests.length === 0) return;
-    const params = new URLSearchParams(window.location.search);
-    if (params.get('questKey')) return;
+    if (linkedIndex !== -1) return;
     if (selectedQuest === null) handleQuestListItemOnClickEvent(0);
   }, [ quests ]);
 

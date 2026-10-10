@@ -138,7 +138,7 @@ const EnemiesBoard = () =>
     }
   };
 
-  const { updateUrl } = useUrlSelection(
+  const { updateUrl, linkedIndex } = useUrlSelection(
     'enemyId',
     enemies,
     (e) => e.id,
@@ -160,8 +160,7 @@ const EnemiesBoard = () =>
       return;
     }
 
-    const params = new URLSearchParams(window.location.search);
-    if (!selectedEnemy && params.get('enemyId')) return;
+    if (!selectedEnemy && linkedIndex !== -1) return;
 
     const idx = Math.min(Math.max(0, selectedEnemyIndex), enemies.length - 1);
     let next: RPG_EnemyDomainModel = enemies[idx];
@@ -180,7 +179,7 @@ const EnemiesBoard = () =>
       setSelectedEnemy(next);
       updateUrlRef.current(next);
     }
-  }, [ enemies, selectedEnemyIndex, selectedEnemy ]);
+  }, [ enemies, selectedEnemyIndex, selectedEnemy, linkedIndex ]);
 
   const listWrapperRef = useRef<HTMLDivElement>(null);
 

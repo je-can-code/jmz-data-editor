@@ -557,7 +557,7 @@ const SkillsBoard = () =>
   {
   });
 
-  const { updateUrl } = useUrlSelection(
+  const { updateUrl, linkedIndex } = useUrlSelection(
     'skillId',
     skills,
     (s) => s.id,
@@ -621,8 +621,7 @@ const SkillsBoard = () =>
       return;
     }
 
-    const params = new URLSearchParams(window.location.search);
-    if (selectedSkillRef.current === null && params.get('skillId')) return;
+    if (selectedSkillRef.current === null && linkedIndex !== -1) return;
 
     const idx = Math.min(Math.max(0, selectedSkillIndex), skills.length - 1);
     let next: RPG_SkillDomainModel = skills[idx];
@@ -650,8 +649,7 @@ const SkillsBoard = () =>
       return;
     }
 
-    const params = new URLSearchParams(window.location.search);
-    if (params.get('skillId'))
+    if (linkedIndex !== -1)
     {
       return;
     }
