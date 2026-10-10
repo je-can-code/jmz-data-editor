@@ -489,5 +489,5 @@ const walkRoute = (start: Walker, steps: readonly RmmzMoveCommand[], map: WalkMa
   return { steps: taken, end: walker, stuck: false };
 };
 
-export { face, RouteCode, walkRoute };
+export { canPass, columnAfter, face, reverse, RouteCode, rowAfter, walkRoute };
 export type { Facing, RouteWalk, WalkMap, Walker, WalkStep };
