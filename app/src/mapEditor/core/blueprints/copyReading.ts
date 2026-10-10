@@ -292,5 +292,5 @@ const differencesOf = (fields: readonly CopyField[]): CopyDifferences =>
   return { own: count('own'), pinned: count('pinned'), offsets: count('offset') };
 };
 
-export { BLUEPRINT_GONE, differencesOf, NO_SUCH_EVENT, readCopy, sourceFor };
+export { BLUEPRINT_GONE, differencesOf, NO_SUCH_EVENT, readCopy };
 export type { CopyContext, CopyDifferences, CopyField, CopyFieldState, CopyReading };
