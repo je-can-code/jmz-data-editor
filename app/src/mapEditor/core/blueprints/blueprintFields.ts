@@ -257,19 +257,20 @@ const MOVE_FREQUENCY: NumberField = { kind: 'number', min: 1, max: 5 };
 
 /**
  * A page's own fields, in the order the event window shows them: move speed and frequency are numbers; the rest are
- * choices. The command list is a field of its own, read less every tag line (see {@link listLessTags}).
+ * choices. The command list is a field of its own, read less every tag line (see {@link listLessTags}). Each is named as
+ * the window's section and label name it together, the page's movement speed never to be taken for a battler's.
  */
 const PAGE_FIELDS: readonly PageField[] = [
   {
     name: 'speed',
-    words: 'speed',
+    words: 'movement speed',
     kind: MOVE_SPEED,
     read: page => page.moveSpeed,
     write: (page, value) => ({ ...page, moveSpeed: value as number }),
   },
   {
     name: 'frequency',
-    words: 'frequency',
+    words: 'movement frequency',
     kind: MOVE_FREQUENCY,
     read: page => page.moveFrequency,
     write: (page, value) => ({ ...page, moveFrequency: value as number }),
@@ -516,18 +517,61 @@ const writtenWholeLine = (text: string, field: string, value: JsonValue): string
 const UNDECLARED_KEY = /^<([^>]*)>(?:#([0-9]+))?$/u;
 
 /**
- * Names a tag line no module reads the way an author knows it: as the comment it is, by its tag, and by which line of that
- * tag it is past the first.
- * @param {string} line The line's key, such as <motion> or <motion>#2.
- * @returns {string} The words, such as "motion comment" or "motion comment 2".
+ * Where a tag's name breaks into words: before a capital that follows a small letter or a digit, as in timeRangePage,
+ * and before the last capital of a run of them that starts a word, as in XPRate.
+ *
+ * <pre>
+ * Structure:
+ *  wordWord
+ *  WORDWord
+ *
+ * Example:
+ *  timeRangePage
+ *
+ * Translation:
+ *  time, Range, Page
+ * </pre>
+ */
+const WORD_BREAK = /(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])/u;
+
+/**
+ * What else parts the words of a tag's name: spaces, underscores and hyphens, as in no-rng-passives.
+ */
+const WORD_SPACE = /[\s_-]+/u;
+
+/**
+ * Says a tag's name as words: broken where its capitals and marks break it, each word in small letters but for one
+ * written all in capitals, which is a name of its own, such as AI. A name with no words in it at all is the comment it
+ * sits in.
+ * @param {string} name The tag's name, as written.
+ * @returns {string} The words, such as "time range page" for timeRangePage.
+ */
+const spokenTagName = (name: string): string =>
+{
+  const words = name
+    .split(WORD_SPACE)
+    .flatMap(part => part.split(WORD_BREAK))
+    .filter(word => word !== '')
+    .map(word => (word === word.toUpperCase() ? word : word.toLowerCase()));
+  return words.length === 0
+    ? 'comment'
+    : words.join(' ');
+};
+
+/**
+ * Names a tag line no module reads the way an author knows it: by its tag, said as words, and by which line of that tag
+ * it is past the first, as a module's lines are named.
+ * @param {string} line The line's key, such as <timeRangePage> or <motion>#2.
+ * @returns {string} The words, such as "time range page" or "motion (line 2)".
  */
 const undeclaredWords = (line: string): string =>
 {
   // every key such a line has is one its reader built, so it always reads.
   const [ , name, ordinal ] = UNDECLARED_KEY.exec(line) as RegExpExecArray;
+  const words = spokenTagName(name);
   return ordinal === undefined
-    ? `${name} comment`
-    : `${name} comment ${ordinal}`;
+    ? words
+    : `${words} (line ${ordinal})`;
 };
 
 /**

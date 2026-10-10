@@ -173,8 +173,8 @@ describe('CopyPanel', () =>
         'Copy of "Needler nest" (event 2)',
         '1 field set by hand, 1 pinned, 1 at an offset.',
         [
-          'Speed | Pinned at 5',
-          'Frequency | Follows the blueprint',
+          'Movement speed | Pinned at 5',
+          'Movement frequency | Follows the blueprint',
           'Trigger | Set by hand',
           'Sight | Follows the blueprint, +2',
           'Light 1 radius | Follows the blueprint',
@@ -197,7 +197,7 @@ describe('CopyPanel', () =>
 
     // Assert: with nothing of the event's own apart, its group goes once the rest are hidden.
     expect([ every.length, every.slice(0, 3), own, rows().length, screen.queryByRole('group', { name: 'This event' }) ])
-      .toStrictEqual([ 22, [ 'Name | Follows the blueprint', 'Note | Follows the blueprint', 'Speed | Pinned at 5' ], 2, 6, null ]);
+      .toStrictEqual([ 22, [ 'Name | Follows the blueprint', 'Note | Follows the blueprint', 'Movement speed | Pinned at 5' ], 2, 6, null ]);
   });
 
   it('pins, unpins and follows from a field\'s row, each one step in the event\'s own history, never the map\'s', () =>
@@ -206,18 +206,18 @@ describe('CopyPanel', () =>
     const { hub } = renderCopy();
 
     // Act.
-    fireEvent.click(screen.getByRole('button', { name: 'Pin frequency' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Unpin speed' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Pin movement frequency' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Unpin movement speed' }));
     fireEvent.click(screen.getByRole('button', { name: 'Follow trigger' }));
 
     // Assert: the trigger, following again, goes behind the toggle.
     expect([ steps(hub), hub.history(mapHistoryKey(MAP_ID)).rows.length, copyIn(hub).note, copyIn(hub).pages[0].trigger, rows().slice(0, 3) ])
       .toStrictEqual([
-        [ 'Pin frequency (page 1)', 'Unpin speed (page 1)', 'Follow the blueprint\'s trigger (page 1)' ],
+        [ 'Pin movement frequency (page 1)', 'Unpin movement speed (page 1)', 'Follow the blueprint\'s trigger (page 1)' ],
         0,
         '<blueprint:[k3x9q2mf, 2, p1.speed+2, p1.sight+2, p1.frequency=3]>',
         0,
-        [ 'Speed | Follows the blueprint, +2', 'Frequency | Pinned at 3', 'Sight | Follows the blueprint, +2' ],
+        [ 'Movement speed | Follows the blueprint, +2', 'Movement frequency | Pinned at 3', 'Sight | Follows the blueprint, +2' ],
       ]);
   });
 

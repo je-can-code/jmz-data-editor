@@ -314,9 +314,10 @@ const JABS_TAGS: readonly BattlerTag[] = [
   rangeTag('alertedSightBoost', 'alerted sight boost', wholeRead),
   rangeTag('guardRange', 'guard range', wholeRead),
 
-  // AlertedPursuitBoost and MoveSpeed, each read with parseFloat: fractions too, from 0, with no top.
+  // AlertedPursuitBoost and MoveSpeed, each read with parseFloat: fractions too, from 0, with no top. The move speed is
+  // the battler's, never to be taken for the page's own movement speed beside it.
   rangeTag('alertedPursuitBoost', 'alerted pursuit boost', fractionRead),
-  rangeTag('moveSpeed', 'move speed', fractionRead),
+  rangeTag('moveSpeed', 'battler move speed', fractionRead),
 
   // AlertDuration, digits read with parseInt: whole frames from 0, with no top.
   { name: 'alertDuration', words: 'alert duration', kind: FROM_ZERO, pattern: linePattern('alertDuration', '\\d+'), read: wholeRead, text: plainText },

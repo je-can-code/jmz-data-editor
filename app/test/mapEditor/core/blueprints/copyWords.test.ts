@@ -77,7 +77,27 @@ describe('copy words', () =>
 
       // Assert.
       expect(words)
-        .toStrictEqual([ 'sight (line 2)', 'motion comment 2', 'glow1.radius' ]);
+        .toStrictEqual([ 'sight (line 2)', 'motion (line 2)', 'glow1.radius' ]);
+    });
+
+    it('names the page\'s movement speed and a battler\'s move speed so neither is taken for the other', () =>
+    {
+      // Arrange: the page's speed and frequency, and J-ABS's move speed.
+      const speed = PAGE_FIELDS.find(field => field.name === 'speed') as (typeof PAGE_FIELDS)[number];
+      const frequency = PAGE_FIELDS.find(field => field.name === 'frequency') as (typeof PAGE_FIELDS)[number];
+      const moveSpeed = battlerTagFields(false).find(tag => tag.id === 'jabs.moveSpeed') as CommentTagDefinition;
+      const places: FieldPlace[] = [
+        { kind: 'page', page: 0, field: speed },
+        { kind: 'page', page: 0, field: frequency },
+        { kind: 'tag', page: 0, tag: moveSpeed, line: 'moveSpeed', field: '' },
+      ];
+
+      // Act.
+      const words = places.map(fieldWords);
+
+      // Assert.
+      expect(words)
+        .toStrictEqual([ 'movement speed', 'movement frequency', 'battler move speed' ]);
     });
   });
 

@@ -118,7 +118,7 @@ describe('copy edits', () =>
 
     // Assert.
     expect([ outcome.ok && outcome.step?.label, copyIn(hub).note, undone === before, mapText(hub) === unpinned ])
-      .toStrictEqual([ 'Unpin speed (page 1)', '<blueprint:[k3x9q2mf, 2, p1.speed+2]>', true, true ]);
+      .toStrictEqual([ 'Unpin movement speed (page 1)', '<blueprint:[k3x9q2mf, 2, p1.speed+2]>', true, true ]);
   });
 
   it('has one field follow the blueprint as one step, undone byte for byte', () =>

@@ -509,17 +509,18 @@ describe('blueprintFields', () =>
         .toThrow('a tag line no plugin reads can only be written as another line of the same tag'));
     });
 
-    it('names a line as the comment it is, by its tag, and by which line of the tag it is past the first', () =>
+    it('names a line by its tag said as words, and by which line of the tag it is past the first', () =>
     {
-      // Arrange: the first motion line, the second, and a mark holding no value.
-      const keys = [ '<motion>', '<motion>#2', '<noRespawn>#12' ];
+      // Arrange: the first motion line, the second, a mark holding no value, a name of several words, one with a name in
+      // capitals inside it and one ending on a capital, one parted by hyphens, and one with no word in it at all.
+      const keys = [ '<motion>', '<motion>#2', '<noRespawn>#12', '<timeRangePage>', '<noAIRole>', '<visOffsetU>', '<no-rng-passives>', '<>' ];
 
       // Act.
       const words = keys.map(key => UNDECLARED_TAG.words?.(key, LINE_VALUE));
 
       // Assert.
       expect(words)
-        .toStrictEqual([ 'motion comment', 'motion comment 2', 'noRespawn comment 12' ]);
+        .toStrictEqual([ 'motion', 'motion (line 2)', 'no respawn (line 12)', 'time range page', 'no AI role', 'vis offset U', 'no rng passives', 'comment' ]);
     });
   });
 
