@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { MapEditorApiError, type BlueprintWrite } from '../../../../src/mapEditor/core/api/MapEditorApi.ts';
-import { withBlueprintLink } from '../../../../src/mapEditor/core/blueprints/blueprintLink.ts';
+import { blueprintLinkOf, withBlueprintLink } from '../../../../src/mapEditor/core/blueprints/blueprintLink.ts';
 import { BLUEPRINTS_DOCUMENT, blueprintIn } from '../../../../src/mapEditor/core/blueprints/blueprints.ts';
 import { BlueprintWriter, isWrittenAtOnce } from '../../../../src/mapEditor/core/blueprints/blueprintWriter.ts';
 import { DocumentHub } from '../../../../src/mapEditor/core/history/DocumentHub.ts';
-import { blueprintHistoryKey, mapHistoryKey } from '../../../../src/mapEditor/core/history/historyKeys.ts';
+import { blueprintHistoryKey, eventHistoryKey, mapHistoryKey } from '../../../../src/mapEditor/core/history/historyKeys.ts';
 import type { HistoryStep } from '../../../../src/mapEditor/core/history/HistoryStep.ts';
+import { createDocument } from '../../../../src/mapEditor/core/model/createDocument.ts';
 import { mapDocumentKey } from '../../../../src/mapEditor/core/model/documentKeys.ts';
 import { createMapEvent } from '../../../../src/mapEditor/core/model/eventModel.ts';
 import type { JsonValue } from '../../../../src/mapEditor/core/model/json.ts';
@@ -807,6 +808,158 @@ describe('BlueprintWriter', () =>
     // Assert.
     expect([ window.acts.map(act => act.maps.length), (renamed as { data: { blueprints: Record<string, { name: string }> } }).data.blueprints[BLUEPRINT].name, window.blueprintsOnDisk() ])
       .toStrictEqual([ [ 0, 0 ], 'Fort', window.hub.committedContent(BLUEPRINTS_DOCUMENT) ]);
+  });
+
+  /*
+   * A map reads as saved exactly when it holds what its file holds, and the writer is what keeps the window knowing what a
+   * file holds once a change to a blueprint is written to it at once, by the very patches the file took. Where a change
+   * reaches a map's copies and its file apart, the map's own unsaved edits keeping a copy out, the map and its file can come
+   * to hold the same, or come apart, by undoing those edits alone; where the map's history stands tells neither. A map
+   * reading as saved while its file held something else would lose work with nobody warned, and the next change would be
+   * planned against the map itself, leaving the copy behind on disk, out of step with its blueprint.
+   */
+  describe('a map\'s saved state as changes are written over the author\'s own edits', () =>
+  {
+    /**
+     * Renames the blueprint's guard, as its event's window does.
+     * @param {WrittenWindow} window The window.
+     * @param {string} name The new name.
+     * @returns {HistoryStep | null} The step.
+     */
+    const renameGuard = (window: WrittenWindow, name: string): HistoryStep | null =>
+    {
+      return window.hub.edit('Rename event', [ blueprintHistoryKey(BLUEPRINT) ], tx => tx.set(window.blueprintKey, [ 'events', 1, 'name' ], name));
+    };
+
+    /**
+     * Renames map 1's copy of the guard by hand, in its own window, and leaves it unsaved.
+     * @param {WrittenWindow} window The window.
+     * @param {string} name The new name.
+     * @returns {HistoryStep | null} The step.
+     */
+    const renameCopy = (window: WrittenWindow, name: string): HistoryStep | null =>
+    {
+      return window.hub.edit('Rename event', [ eventHistoryKey(1, 5) ], tx => tx.set('map:1', [ 'events', 5, 'name' ], name));
+    };
+
+    /**
+     * Reads the name of map 1's copy of the guard, in the window and on disk.
+     * @param {WrittenWindow} window The window.
+     * @returns {[ string, string ]} The name in the window, then on disk.
+     */
+    const copyNames = (window: WrittenWindow): [ string, string ] =>
+    {
+      return [ eventOf(window.hub.map('map:1'), 5).name, eventOf(window.disk.get(1) as RmmzMap, 5).name ];
+    };
+
+    /**
+     * Reads the guard's name in the blueprints on disk.
+     * @param {WrittenWindow} window The window.
+     * @returns {string | undefined} The name.
+     */
+    const guardOnDisk = (window: WrittenWindow): string | undefined =>
+    {
+      const document = createDocument(BLUEPRINTS_DOCUMENT, window.blueprintsOnDisk() as JsonValue);
+      return blueprintIn(document, BLUEPRINT)?.stamp.events.find(event => event.id === 1)?.name;
+    };
+
+    it('keeps a map unsaved once a rename by hand is undone over a redo its file took alone, and carries the copy\'s file with the next change', async () =>
+    {
+      // Arrange: the guard renamed in the blueprint and undone; map 1's copy of it renamed by hand and left unsaved; the
+      // blueprint's rename redone, which the copy keeps out of the map but its file takes; then the hand's rename undone.
+      const window = await writtenWindow();
+      renameGuard(window, 'Captain');
+      await settle();
+      window.hub.undo(blueprintHistoryKey(BLUEPRINT));
+      await settle();
+      renameCopy(window, 'Sentry');
+      window.hub.redo(blueprintHistoryKey(BLUEPRINT));
+      await settle();
+      window.hub.undo(eventHistoryKey(1, 5));
+      const before = [ copyNames(window), window.hub.isDirty('map:1') ];
+
+      // Act: the guard renamed in the blueprint again.
+      renameGuard(window, 'Major');
+      await settle();
+
+      // Assert: the map read as unsaved while its copy held the old name and its file the blueprint's; the next rename
+      // reached the copy's file, which holds the blueprint's name as the blueprints on disk do, and the map still reads
+      // unsaved, its copy keeping the name it shows.
+      expect([ before, copyNames(window), guardOnDisk(window), window.hub.isDirty('map:1'), window.problems ])
+        .toStrictEqual([ [ [ 'Guard', 'Captain' ], true ], [ 'Guard', 'Major' ], 'Major', true, [] ]);
+    });
+
+    it('keeps a map unsaved once a change made over a rename by hand is redone after that rename was undone', async () =>
+    {
+      // Arrange: map 1's copy of the guard renamed by hand and left unsaved; the guard renamed in the blueprint over it, and
+      // undone; then the hand's rename undone, so the map holds just what its file holds.
+      const window = await writtenWindow();
+      renameCopy(window, 'Sentry');
+      renameGuard(window, 'Captain');
+      await settle();
+      window.hub.undo(blueprintHistoryKey(BLUEPRINT));
+      await settle();
+      window.hub.undo(eventHistoryKey(1, 5));
+      const between = [ copyNames(window), window.hub.isDirty('map:1') ];
+
+      // Act: the blueprint's rename redone, which the map's copy, never reached by it, does not take, and its file does.
+      window.hub.redo(blueprintHistoryKey(BLUEPRINT));
+      await settle();
+      const afterRedo = [ copyNames(window), window.hub.isDirty('map:1') ];
+      renameGuard(window, 'Major');
+      await settle();
+
+      // Assert: saved while the map and its file agreed, and unsaved from the redo on, the file following the blueprint.
+      expect([ between, afterRedo, copyNames(window), guardOnDisk(window), window.hub.isDirty('map:1'), window.problems ])
+        .toStrictEqual([ [ [ 'Guard', 'Guard' ], false ], [ [ 'Guard', 'Captain' ], true ], [ 'Guard', 'Major' ], 'Major', true, [] ]);
+    });
+
+    it('reads as saved once the map comes to hold what its file took, by an undo of the author\'s own edit alone', async () =>
+    {
+      // Arrange: map 1's copy of the guard sped up by hand and left unsaved; the guard renamed in the blueprint, which the
+      // copy and its file both take.
+      const window = await writtenWindow();
+      window.hub.edit('Change movement', [ eventHistoryKey(1, 5) ], tx => tx.set('map:1', [ 'events', 5, 'pages', 0, 'moveSpeed' ], 5));
+      renameGuard(window, 'Captain');
+      await settle();
+      const before = window.hub.isDirty('map:1');
+
+      // Act.
+      window.hub.undo(eventHistoryKey(1, 5));
+
+      // Assert: the map holds just what its file holds, though no save ever named the blueprint's change.
+      expect([ before, copyNames(window), window.hub.isDirty('map:1'), window.hub.committedContent('map:1') ])
+        .toStrictEqual([ true, [ 'Captain', 'Captain' ], false, window.disk.get(1) ]);
+    });
+
+    it('reads a copy\'s link afresh at the next change once a redo put back an offset its speed by hand gave, though the speed was undone', async () =>
+    {
+      // Arrange: map 1's copy of the guard sped up by hand to 5, unsaved; the guard sped up to 4 in the blueprint over it,
+      // which reads the copy's link afresh as 2 above; that change undone, the hand's speed undone, and the change redone,
+      // which puts the link back but not the speed, the hand's undo standing in its way.
+      const window = await writtenWindow();
+      window.hub.edit('Change movement', [ eventHistoryKey(1, 5) ], tx => tx.set('map:1', [ 'events', 5, 'pages', 0, 'moveSpeed' ], 5));
+      speedGuard(window, 4);
+      await settle();
+      window.hub.undo(blueprintHistoryKey(BLUEPRINT));
+      await settle();
+      window.hub.undo(eventHistoryKey(1, 5));
+      window.hub.redo(blueprintHistoryKey(BLUEPRINT));
+      await settle();
+      const copy = () => eventOf(window.hub.map('map:1'), 5);
+      const onDisk = () => eventOf(window.disk.get(1) as RmmzMap, 5);
+      const replayed = [ copy().pages[0].moveSpeed, blueprintLinkOf(copy().note)?.differences, onDisk().pages[0].moveSpeed, blueprintLinkOf(onDisk().note)?.differences, window.hub.isDirty('map:1') ];
+
+      // Act: the guard sped up to 5 in the blueprint.
+      speedGuard(window, 5);
+      await settle();
+
+      // Assert: after the redo the copy's link says 2 above the blueprint's 4 while the copy holds 3, and its file follows
+      // the blueprint; the next change reads the link afresh from what the copy holds, 1 below, and moves it by that, so the
+      // two agree again, while the file follows the blueprint once more.
+      expect([ replayed, copy().pages[0].moveSpeed, blueprintLinkOf(copy().note)?.differences, onDisk().pages[0].moveSpeed, blueprintLinkOf(onDisk().note)?.differences, window.problems ])
+        .toStrictEqual([ [ 3, [ 'p1.speed+2' ], 4, [], true ], 4, [ 'p1.speed-1' ], 5, [], [] ]);
+    });
   });
 
   describe('isWrittenAtOnce', () =>
