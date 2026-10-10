@@ -770,7 +770,7 @@ describe('EventWindowView', () =>
       fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
       await Promise.resolve();
     });
-    const told = screen.queryByText('"Rename event" cannot be undone: "Rename on the map" later changed what "Rename event" changed.') !== null;
+    const told = screen.queryByText('"Rename event" cannot be undone: "Rename on the map" later changed what "Rename event" changed, on Map 1. Undo "Rename on the map" there first.') !== null;
     fireEvent.click(screen.getByRole('button', { name: 'Forget it' }));
 
     // Assert: the name stays as the map left it, and the step is gone from the event's history.
