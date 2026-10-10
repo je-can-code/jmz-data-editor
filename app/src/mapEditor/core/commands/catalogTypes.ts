@@ -209,6 +209,12 @@ type CommandPlace = {
   readonly map: string;
   readonly x: string;
   readonly y: string;
+
+  /**
+   * Whether the player lands on the place, as on Transfer Player's destination, so its picker refuses the tiles the
+   * player cannot stand on. Left out, any tile can be picked, as for a ship, which stands on water.
+   */
+  readonly landing?: boolean;
 };
 
 /**

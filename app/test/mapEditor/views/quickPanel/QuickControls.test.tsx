@@ -15,25 +15,27 @@ import { QuickControl } from '../../../../src/mapEditor/views/quickPanel/QuickCo
 import type { QuickResources } from '../../../../src/mapEditor/views/quickPanel/quickResources.ts';
 
 /**
- * Where the stand-in location picker was asked to start.
+ * Where the stand-in location picker was asked to start, and whether each ask was for where the player lands.
  */
 const picker = vi.hoisted(() => ({
   starts: [] as unknown[],
+  landings: [] as unknown[],
 }));
 
 // the location picker is proved in its own tests; here it stands in as one button picking tile 4, 3 on map 5, and
-// notes where it was asked to start.
+// notes where it was asked to start and whether the player lands there.
 vi.mock('../../../../src/mapEditor/views/locationPicker/LocationPickerDialog.tsx', () =>
 {
   /**
    * Stands in for the location picker.
-   * @param {LocationPickerDialogProps} props Where it starts, and who hears how it ends.
+   * @param {LocationPickerDialogProps} props Where it starts, whether the player lands there, and who hears how it ends.
    * @returns {React.JSX.Element} A button picking a tile.
    */
   const LocationPickerDialog = (props: LocationPickerDialogProps) =>
   {
-    const { start, onClose } = props;
+    const { start, landing, onClose } = props;
     picker.starts.push(start);
+    picker.landings.push(landing);
     return <button type={'button'} onClick={() => onClose({ mapId: 5, x: 4, y: 3 })}>Pick tile 4, 3 on map 5</button>;
   };
 
@@ -49,7 +51,8 @@ vi.mock('../../../../src/mapEditor/views/locationPicker/LocationPickerDialog.tsx
  * picker lists the character sheets, picks one of a sheet's eight characters unless it holds one alone, reads a
  * tile as a tile, and previews the frame the engine would cut from the sheet. The place control picks a map and a
  * tile together by clicking the tile on the map, starting from the place the events share, waiting while they go to
- * different places, and offering nothing without a server to read maps from.
+ * different places, and offering nothing without a server to read maps from; a place the player lands on asks the
+ * picker to judge every tile as a landing, and any other place asks for any tile at all.
  *
  * A slider and a colour picker are chosen over time, so they show each value as it is chosen (a preview) and hand on
  * only the value chosen, once: the slider's when it stops moving, never for a press that moved nothing; the picker's
@@ -322,15 +325,30 @@ describe('QuickControl', () =>
   {
     // Arrange: the selected doors all lead to map 20 at 14, 7.
     picker.starts.splice(0);
-    const { onChange } = renderControl(fieldOf({ kind: 'place' }, { mapId: 20, x: 14, y: 7 }, 'Pick on the map'), { api: {} as MapEditorApi });
+    picker.landings.splice(0);
+    const { onChange } = renderControl(fieldOf({ kind: 'place', landing: true }, { mapId: 20, x: 14, y: 7 }, 'Pick on the map'), { api: {} as MapEditorApi });
 
     // Act.
     fireEvent.click(screen.getByRole('button', { name: 'Pick on the map' }));
     fireEvent.click(screen.getByRole('button', { name: 'Pick tile 4, 3 on map 5' }));
 
+    // Assert: the picker was asked for where the player lands, since the doors send the player there.
+    expect([ picker.starts, picker.landings, onChange.mock.calls ])
+      .toStrictEqual([ [ { mapId: 20, x: 14, y: 7 } ], [ true ], [ [ { mapId: 5, x: 4, y: 3 } ] ] ]);
+  });
+
+  it('asks the picker for any tile at all for a place the player does not land on', () =>
+  {
+    // Arrange: a place for something other than the player.
+    picker.landings.splice(0);
+    renderControl(fieldOf({ kind: 'place', landing: false }, { mapId: 20, x: 14, y: 7 }, 'Pick on the map'), { api: {} as MapEditorApi });
+
+    // Act.
+    fireEvent.click(screen.getByRole('button', { name: 'Pick on the map' }));
+
     // Assert.
-    expect([ picker.starts, onChange.mock.calls ])
-      .toStrictEqual([ [ { mapId: 20, x: 14, y: 7 } ], [ [ { mapId: 5, x: 4, y: 3 } ] ] ]);
+    expect(picker.landings)
+      .toStrictEqual([ false ]);
   });
 
   it('waits to pick while the selected events go to different places', () =>
@@ -338,7 +356,7 @@ describe('QuickControl', () =>
     // Arrange: nothing beyond the control, its events disagreeing.
 
     // Act.
-    renderControl(fieldOf({ kind: 'place' }, null, 'Pick on the map'), { api: {} as MapEditorApi });
+    renderControl(fieldOf({ kind: 'place', landing: true }, null, 'Pick on the map'), { api: {} as MapEditorApi });
 
     // Assert.
     expect(screen.getByRole('button', { name: 'Pick on the map' }))
@@ -350,7 +368,7 @@ describe('QuickControl', () =>
     // Arrange: nothing beyond the control, over no server.
 
     // Act.
-    renderControl(fieldOf({ kind: 'place' }, { mapId: 20, x: 14, y: 7 }, 'Pick on the map'), { api: null });
+    renderControl(fieldOf({ kind: 'place', landing: true }, { mapId: 20, x: 14, y: 7 }, 'Pick on the map'), { api: null });
 
     // Assert.
     expect(screen.queryByRole('button', { name: 'Pick on the map' }))

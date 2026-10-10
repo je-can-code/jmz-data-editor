@@ -13,18 +13,24 @@ import { MapEditorServicesProvider } from '../../../../src/mapEditor/services/Ma
 import { LocationPickerHost } from '../../../../src/mapEditor/views/locationPicker/LocationPickerHost.tsx';
 import type { LocationPickerMapProps } from '../../../../src/mapEditor/views/locationPicker/LocationPickerMap.tsx';
 
-// the map itself is the renderer's, proved in its own tests; here it stands in as one button clicking tile 4, 2.
+// the map itself is the renderer's, proved in its own tests; here it stands in as one button clicking tile 4, 2, and a
+// line saying whether it judges landings.
 vi.mock('../../../../src/mapEditor/views/locationPicker/LocationPickerMap.tsx', () =>
 {
   /**
    * Stands in for the picker's map.
-   * @param {LocationPickerMapProps} props Who hears the click.
-   * @returns {React.JSX.Element} A button standing for a click on the map.
+   * @param {LocationPickerMapProps} props Who hears the click, and whether to judge landings.
+   * @returns {React.JSX.Element} A button standing for a click on the map, and what it judges.
    */
   const LocationPickerMap = (props: LocationPickerMapProps) =>
   {
-    const { onPick } = props;
-    return <button type={'button'} onClick={() => onPick({ x: 4, y: 2 })}>Click tile 4, 2</button>;
+    const { onPick, landing } = props;
+    return (
+      <div>
+        <button type={'button'} onClick={() => onPick({ x: 4, y: 2 })}>Click tile 4, 2</button>
+        <span>{landing === true ? 'Judging landings' : 'Judging nothing'}</span>
+      </div>
+    );
   };
 
   return { LocationPickerMap };
@@ -35,7 +41,8 @@ vi.mock('../../../../src/mapEditor/views/locationPicker/LocationPickerMap.tsx', 
  * author can see. It owes the window nothing on screen while no ask is open; a picker for each ask, starting where that
  * ask starts; and the ask settled with however the picker ended, the place picked or null, so the editor waiting on it
  * hears. A new ask while a picker shows starts a fresh picker from the new ask's place, never carrying over the tile
- * clicked for the old one, whose editor hears that nothing was picked.
+ * clicked for the old one, whose editor hears that nothing was picked. An ask for where the player lands has its picker
+ * judge every tile as a landing.
  */
 describe('LocationPickerHost', () =>
 {
@@ -65,14 +72,15 @@ describe('LocationPickerHost', () =>
    * Makes an ask, letting the picker show and its map tree arrive.
    * @param {LocationPicks} picks The window's asks.
    * @param {MapLocation} start Where it starts.
+   * @param {boolean} landing Whether the player lands on the place picked.
    * @returns {Promise<{ answer: Promise<MapLocation | null> }>} The editor's answer, once given.
    */
-  const ask = async (picks: LocationPicks, start: MapLocation) =>
+  const ask = async (picks: LocationPicks, start: MapLocation, landing = false) =>
   {
     let answer: Promise<MapLocation | null> = Promise.resolve(null);
     await act(async () =>
     {
-      answer = picks.pick(start);
+      answer = picks.pick(start, { landing });
       await new Promise(resolve =>
       {
         setTimeout(resolve, 0);
@@ -136,5 +144,20 @@ describe('LocationPickerHost', () =>
     // Assert.
     expect([ await first.answer, screen.getByTestId('location-picker-readout').textContent, screen.getAllByRole('dialog').length ])
       .toStrictEqual([ null, 'Lands on 1, 3', 1 ]);
+  });
+
+  it('has the picker judge every tile as a landing for an ask for where the player lands, and none for another', async () =>
+  {
+    // Arrange: an ask for any place.
+    const { picks } = renderHost();
+    await ask(picks, START);
+    const before = screen.queryByText('Judging nothing') !== null;
+
+    // Act: an ask for where the player lands takes over.
+    await ask(picks, START, true);
+
+    // Assert.
+    expect([ before, screen.queryByText('Judging landings') !== null ])
+      .toStrictEqual([ true, true ]);
   });
 });

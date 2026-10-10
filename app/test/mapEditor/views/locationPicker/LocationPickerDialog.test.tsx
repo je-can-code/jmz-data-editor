@@ -3,11 +3,13 @@
  */
 import React from 'react';
 import { describe, expect, it, vi } from 'vitest';
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import type { MapEditorApi } from '../../../../src/mapEditor/core/api/MapEditorApi.ts';
 import { PluginHeaderStore } from '../../../../src/mapEditor/core/commands/pluginHeaders/PluginHeaderLibrary.ts';
+import type { LandingGround } from '../../../../src/mapEditor/core/locations/landingCheck.ts';
 import type { MapLocation } from '../../../../src/mapEditor/core/locations/LocationPicks.ts';
+import type { MapDocument } from '../../../../src/mapEditor/core/model/MapDocument.ts';
 import type { RmmzMapInfo } from '../../../../src/mapEditor/core/model/rmmzTypes.ts';
 import type { MapCell } from '../../../../src/mapEditor/core/renderer/camera.ts';
 import type { MapEditorServices } from '../../../../src/mapEditor/services/MapEditorServices.ts';
@@ -16,29 +18,35 @@ import { LocationPickerDialog } from '../../../../src/mapEditor/views/locationPi
 import type { LocationPickerMapProps } from '../../../../src/mapEditor/views/locationPicker/LocationPickerMap.tsx';
 
 /**
- * What the stand-in map was last asked to show.
+ * What the stand-in map was last asked to show, whether it was asked to judge landings, and who hears the map it judged.
  */
 const stand = vi.hoisted(() => ({
   shown: null as { mapId: number; picked: MapCell | null; focus: MapCell | null } | null,
+  landing: undefined as boolean | undefined,
+  onGround: undefined as ((ground: LandingGround | null) => void) | undefined,
 }));
 
-// the map itself is the renderer's, proved in its own tests; here it stands in as two buttons, one clicking tile 4, 2
-// and one double-clicking tile 6, 1, and notes what it was asked to show.
+// the map itself is the renderer's, proved in its own tests; here it stands in as three buttons, one clicking tile 4, 2,
+// one double-clicking tile 6, 1, and one clicking tile 1, 1, which it refuses as blocked; and it notes what it was asked
+// to show, whether to judge landings, and who hears the map it judged.
 vi.mock('../../../../src/mapEditor/views/locationPicker/LocationPickerMap.tsx', () =>
 {
   /**
    * Stands in for the picker's map.
    * @param {LocationPickerMapProps} props The map to show, the tile picked, where to centre, and who hears clicks.
-   * @returns {React.JSX.Element} Two buttons standing for clicks on the map.
+   * @returns {React.JSX.Element} Three buttons standing for clicks on the map.
    */
   const LocationPickerMap = (props: LocationPickerMapProps) =>
   {
-    const { mapId, picked, focus, onPick, onConfirm } = props;
+    const { mapId, picked, focus, landing, onPick, onConfirm, onRefuse, onGround } = props;
     stand.shown = { mapId, picked, focus };
+    stand.landing = landing;
+    stand.onGround = onGround;
     return (
       <div>
         <button type={'button'} onClick={() => onPick({ x: 4, y: 2 })}>Click tile 4, 2</button>
         <button type={'button'} onClick={() => onConfirm({ x: 6, y: 1 })}>Double-click tile 6, 1</button>
+        <button type={'button'} onClick={() => onRefuse?.({ x: 1, y: 1 }, { kind: 'blocked' })}>Click blocked tile 1, 1</button>
       </div>
     );
   };
@@ -54,6 +62,11 @@ vi.mock('../../../../src/mapEditor/views/locationPicker/LocationPickerMap.tsx', 
  * picked; coming back to the first map brings its tile back. Cancel and Escape give up, and a click outside the picker
  * does nothing, so a careful pick is never lost to a stray click. Enter finishes too, but not from the map field, where
  * it chooses the map typed, nor on a button, which Enter presses itself.
+ *
+ * Choosing where the player lands, it has its map judge every tile, and a tile the map refuses is said why under the
+ * map, the tile picked before staying picked, until a tile is taken or another map shown. A transfer landing now where
+ * the player cannot stand opens with that tile picked and the reason shown, judged by the map shown and no other, and
+ * neither OK nor Enter finishes on it.
  */
 describe('LocationPickerDialog', () =>
 {
@@ -77,16 +90,17 @@ describe('LocationPickerDialog', () =>
 
   /**
    * Renders the picker starting from where the transfer lands now, and lets the map tree arrive.
+   * @param {boolean} landing Whether the player lands on the place picked; left out, the picker is asked for any tile.
    * @returns {Promise<{ onClose: ReturnType<typeof vi.fn> }>} Who hears how it ends.
    */
-  const renderPicker = async () =>
+  const renderPicker = async (landing?: boolean) =>
   {
     const onClose = vi.fn();
     const api = { loadMapInfos: async () => buildInfos() } as unknown as MapEditorApi;
     const services = { api, pluginHeaders: new PluginHeaderStore() } as unknown as MapEditorServices;
     render(
       <MapEditorServicesProvider services={services}>
-        <LocationPickerDialog start={START} onClose={onClose}/>
+        <LocationPickerDialog start={START} landing={landing} onClose={onClose}/>
       </MapEditorServicesProvider>
     );
     await act(async () =>
@@ -319,5 +333,84 @@ describe('LocationPickerDialog', () =>
     // Assert: a tile is picked, so only the key kept it from finishing.
     expect([ onClose.mock.calls, readout() ])
       .toStrictEqual([ [], 'Lands on 22, 13' ]);
+  });
+
+  it('has its map judge every tile as a landing when the player lands there, and no tile otherwise', async () =>
+  {
+    // Arrange: a picker for where the player lands, then one for any place.
+    await renderPicker(true);
+    const { landing } = stand;
+    cleanup();
+
+    // Act.
+    await renderPicker();
+
+    // Assert.
+    expect([ landing, stand.landing ])
+      .toStrictEqual([ true, false ]);
+  });
+
+  it('says why its map refused a tile, keeping the tile picked before, until a tile is taken', async () =>
+  {
+    // Arrange.
+    const { onClose } = await renderPicker(true);
+
+    // Act: the blocked tile, then a tile the map takes.
+    fireEvent.click(screen.getByRole('button', { name: 'Click blocked tile 1, 1' }));
+    const refused = [ readout(), stand.shown?.picked ];
+    fireEvent.click(screen.getByRole('button', { name: 'Click tile 4, 2' }));
+
+    // Assert: nothing finished along the way.
+    expect([ refused, readout(), onClose.mock.calls ])
+      .toStrictEqual([
+        [ 'The player cannot land on 1, 1. The tiles there let no one through.', { x: 22, y: 13 } ],
+        'Lands on 4, 2',
+        [],
+      ]);
+  });
+
+  it('stops saying why a tile was refused once another map is shown', async () =>
+  {
+    // Arrange: the blocked tile was clicked.
+    await renderPicker(true);
+    fireEvent.click(screen.getByRole('button', { name: 'Click blocked tile 1, 1' }));
+
+    // Act.
+    chooseMap('005 Cave');
+
+    // Assert.
+    expect(readout())
+      .toBe('No tile picked on this map yet.');
+  });
+
+  it('says why the player cannot stand where the transfer lands now, and finishes nothing on it', async () =>
+  {
+    // Arrange: the map judged, refusing the landing tile at 22, 13.
+    const { onClose } = await renderPicker(true);
+    const ground = { map: { mapId: 322 } as MapDocument, problemAt: (x: number, y: number) => (x === 22 && y === 13 ? { kind: 'blocked' } : null) };
+
+    // Act.
+    act(() => stand.onGround?.(ground as LandingGround));
+    fireEvent.click(screen.getByRole('button', { name: 'OK' }));
+    fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Enter' });
+
+    // Assert.
+    expect([ readout(), (screen.getByRole('button', { name: 'OK' }) as HTMLButtonElement).disabled, onClose.mock.calls ])
+      .toStrictEqual([ 'Lands on 22, 13, where the player cannot stand. The tiles there let no one through.', true, [] ]);
+  });
+
+  it('judges the tile picked by the map shown, never by another map judged before it', async () =>
+  {
+    // Arrange: a judgement of another map, refusing every tile.
+    const { onClose } = await renderPicker(true);
+    const elsewhere = { map: { mapId: 5 } as MapDocument, problemAt: () => ({ kind: 'blocked' }) };
+
+    // Act.
+    act(() => stand.onGround?.(elsewhere as LandingGround));
+    fireEvent.click(screen.getByRole('button', { name: 'OK' }));
+
+    // Assert.
+    expect([ readout(), onClose.mock.calls ])
+      .toStrictEqual([ 'Lands on 22, 13', [ [ START ] ] ]);
   });
 });

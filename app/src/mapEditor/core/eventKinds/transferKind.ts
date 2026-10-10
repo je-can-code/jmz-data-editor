@@ -175,7 +175,7 @@ const transferFields = (event: RmmzMapEvent, spot: TransferSpot, ordinal: number
     { key: `${key}.map`, label: 'Map', section, control: { kind: 'map' }, value: model.mapId, step: 'Change transfer destination', write: value => write({ mapId: value as number }) },
     { key: `${key}.x`, label: 'X', section, control: coordinate, value: model.x, step: 'Change transfer destination', write: value => write({ x: value as number }) },
     { key: `${key}.y`, label: 'Y', section, control: coordinate, value: model.y, step: 'Change transfer destination', write: value => write({ y: value as number }) },
-    { key: `${key}.place`, label: 'Pick on the map', section, control: { kind: 'place' }, value: place, step: 'Change transfer destination', write: value => write(value as unknown as MapLocation) },
+    { key: `${key}.place`, label: 'Pick on the map', section, control: { kind: 'place', landing: true }, value: place, step: 'Change transfer destination', write: value => write(value as unknown as MapLocation) },
     { key: `${key}.direction`, label: 'Facing', section, control: { kind: 'select', options: TRANSFER_DIRECTIONS }, value: model.direction, step: 'Change transfer facing', write: value => write({ direction: value as number }) },
     { key: `${key}.fade`, label: 'Fade', section, control: { kind: 'select', options: TRANSFER_FADES }, value: model.fade, step: 'Change transfer fade', write: value => write({ fade: value as number }) },
   ];

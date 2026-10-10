@@ -1,5 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { Box, Button, Dialog, DialogActions, DialogContent, DialogTitle, Typography } from '@mui/material';
+import type { LandingGround } from '../../core/locations/landingCheck.ts';
+import { pickProblem, pickReadout, refusalWords } from '../../core/locations/landingPicker.ts';
 import { startingCell, type MapLocation } from '../../core/locations/LocationPicks.ts';
 import type { MapCell } from '../../core/renderer/camera.ts';
 import { isTextEntry } from '../../core/workspace/shortcuts.ts';
@@ -24,6 +26,12 @@ type LocationPickerDialogProps = {
    * Where the picker starts: where the transfer goes now.
    */
   readonly start: MapLocation;
+
+  /**
+   * Whether the player lands on the place picked, as on a transfer's destination: the picker then shades the tiles the
+   * player cannot stand on and refuses them, saying why. Left out, any tile can be picked.
+   */
+  readonly landing?: boolean;
 
   /**
    * Hears how it ends.
@@ -52,26 +60,37 @@ const finishesPicker = (event: React.KeyboardEvent): boolean =>
  *
  * A double-click picks and finishes, and OK or Enter finish with the tile picked; Cancel or Escape give up. A click
  * outside the picker does nothing, so a careful pick is never lost to a stray click.
- * @param {LocationPickerDialogProps} props Where to start, and who hears how it ends.
+ *
+ * Choosing where the player lands, the tiles the player cannot stand on are shaded, and a click on one is refused, the
+ * tile picked before staying picked, with the reason under the map. A transfer landing on such a tile now opens with it
+ * picked and the reason shown, and nothing finishes the picker on it.
+ * @param {LocationPickerDialogProps} props Where to start, whether the player lands there, and who hears how it ends.
  * @returns {React.JSX.Element} The picker.
  */
 const LocationPickerDialog = (props: LocationPickerDialogProps) =>
 {
-  const { start, onClose } = props;
+  const { start, landing = false, onClose } = props;
   const { api, pluginHeaders } = useMapEditorServices();
   const [ shown, setShown ] = useState<ShownPick>(() => ({ mapId: start.mapId, cell: startingCell(start, start.mapId) }));
+  const [ ground, setGround ] = useState<LandingGround | null>(null);
+  const [ refusal, setRefusal ] = useState<string | null>(null);
 
   // the map field reads the map tree through the editors' environment, as it does in the transfer editor.
   const environment = useMemo<HandBuiltEditorEnvironment>(() => ({ api, headers: pluginHeaders }), [ api, pluginHeaders ]);
   const { mapId, cell } = shown;
   const picked: MapLocation | null = cell === null ? null : { mapId, x: cell.x, y: cell.y };
 
+  // the judgement is of the map shown, never of the one before it while the next opens.
+  const shownGround = ground !== null && ground.map.mapId === mapId ? ground : null;
+  const problem = cell === null ? null : pickProblem(shownGround, cell);
+
   /**
-   * Finishes with the tile picked; with none picked on the map shown, there is nothing to finish with.
+   * Finishes with the tile picked; with none picked on the map shown, or one the player cannot land on, there is nothing
+   * to finish with.
    */
   const confirm = () =>
   {
-    if (picked !== null)
+    if (picked !== null && problem === null)
     {
       onClose(picked);
     }
@@ -98,11 +117,16 @@ const LocationPickerDialog = (props: LocationPickerDialogProps) =>
       <DialogContent sx={{ display: 'flex', flexDirection: 'column', gap: 1.5, overflow: 'hidden' }}>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, pt: 1 }}>
           <EditorEnvironmentProvider environment={environment}>
-            <MapPicker label={'Map'} value={mapId} onChange={next => setShown({ mapId: next, cell: startingCell(start, next) })}/>
+            <MapPicker label={'Map'} value={mapId} onChange={next =>
+            {
+              setRefusal(null);
+              setShown({ mapId: next, cell: startingCell(start, next) });
+            }}/>
           </EditorEnvironmentProvider>
           <Typography variant={'body2'} color={'text.secondary'}>
-            Click the tile to land on, or double-click it to land there and close. The wheel zooms and the right button
-            pans.
+            {landing
+              ? 'Click the tile to land on, or double-click it to land there and close; the player cannot stand on a shaded tile. The wheel zooms and the right button pans.'
+              : 'Click the tile to land on, or double-click it to land there and close. The wheel zooms and the right button pans.'}
           </Typography>
         </Box>
         <Box sx={{ flex: 1, minHeight: 0, position: 'relative', border: 1, borderColor: 'divider' }}>
@@ -110,19 +134,31 @@ const LocationPickerDialog = (props: LocationPickerDialogProps) =>
             mapId={mapId}
             picked={cell}
             focus={startingCell(start, mapId)}
-            onPick={next => setShown({ mapId, cell: next })}
+            landing={landing}
+            onPick={next =>
+            {
+              setRefusal(null);
+              setShown({ mapId, cell: next });
+            }}
             onConfirm={next => onClose({ mapId, x: next.x, y: next.y })}
+            onRefuse={(refused, why) => setRefusal(refusalWords(refused, why))}
+            onGround={setGround}
           />
         </Box>
       </DialogContent>
       <DialogActions>
-        <Typography variant={'body2'} color={'text.secondary'} sx={{ flex: 1, pl: 2 }} data-testid={'location-picker-readout'}>
-          {picked === null ? 'No tile picked on this map yet.' : `Lands on ${picked.x}, ${picked.y}`}
+        <Typography
+          variant={'body2'}
+          color={refusal !== null || problem !== null ? 'error' : 'text.secondary'}
+          sx={{ flex: 1, pl: 2 }}
+          data-testid={'location-picker-readout'}
+        >
+          {pickReadout(cell, problem, refusal)}
         </Typography>
         <Button onClick={() => onClose(null)}>
           Cancel
         </Button>
-        <Button variant={'contained'} disabled={picked === null} onClick={confirm}>
+        <Button variant={'contained'} disabled={picked === null || problem !== null} onClick={confirm}>
           OK
         </Button>
       </DialogActions>

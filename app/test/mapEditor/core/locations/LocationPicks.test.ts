@@ -6,7 +6,8 @@ import { LocationPicks, startingCell, type LocationPickRequest, type MapLocation
  * three things. Every ask is answered exactly once: with the place picked, with null when the author gives up, or with
  * null when a newer ask takes over, so no editor is ever left waiting on a picker that has gone. Only the open ask can
  * be settled, by its number, so a picker closing late can never answer the ask that replaced it. And the open ask is
- * the same object until it changes, which is what lets React read it straight through useSyncExternalStore.
+ * the same object until it changes, which is what lets React read it straight through useSyncExternalStore. An ask
+ * says whether the player lands on the place picked, so the picker knows whether to judge every tile as a landing.
  *
  * Where a picker starts on each map it shows matters as much: on the map the transfer goes to now it starts on the
  * landing tile, and on any other map with nothing, since the same numbers name an unrelated spot there.
@@ -62,7 +63,7 @@ describe('LocationPicks', () =>
       .toBeNull();
   });
 
-  it('opens an ask numbered from one with where it starts, the same object until it changes', () =>
+  it('opens an ask numbered from one with where it starts, for any tile unless told, the same object until it changes', () =>
   {
     // Arrange.
     const picks = new LocationPicks();
@@ -72,7 +73,20 @@ describe('LocationPicks', () =>
 
     // Assert.
     expect([ picks.current(), picks.current() === picks.current() ])
-      .toStrictEqual([ { id: 1, start: START }, true ]);
+      .toStrictEqual([ { id: 1, start: START, landing: false }, true ]);
+  });
+
+  it('opens an ask for where the player lands when told so', () =>
+  {
+    // Arrange.
+    const picks = new LocationPicks();
+
+    // Act.
+    picks.pick(START, { landing: true }).catch(() => undefined);
+
+    // Assert.
+    expect(picks.current())
+      .toStrictEqual({ id: 1, start: START, landing: true });
   });
 
   it('answers the editor with the place picked, and closes the ask', async () =>
@@ -116,7 +130,7 @@ describe('LocationPicks', () =>
 
     // Assert.
     expect([ first.value, second.value, picks.current() ])
-      .toStrictEqual([ null, 'waiting', { id: 2, start: CAVE } ]);
+      .toStrictEqual([ null, 'waiting', { id: 2, start: CAVE, landing: false } ]);
   });
 
   it('leaves the open ask alone when an ask it took over from is settled late', async () =>
@@ -132,7 +146,7 @@ describe('LocationPicks', () =>
 
     // Assert.
     expect([ second.value, picks.current() ])
-      .toStrictEqual([ 'waiting', { id: 2, start: CAVE } ]);
+      .toStrictEqual([ 'waiting', { id: 2, start: CAVE, landing: false } ]);
   });
 
   it('answers an ask once, ignoring a second settle after it closed', async () =>

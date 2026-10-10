@@ -20,10 +20,11 @@ vi.mock('../../../../src/mapEditor/views/locationPicker/LocationPickerDialog.tsx
    */
   const LocationPickerDialog = (props: LocationPickerDialogProps) =>
   {
-    const { start, onClose } = props;
+    const { start, landing, onClose } = props;
     return (
       <div role={'dialog'}>
         <span>{`Started on map ${start.mapId} at ${start.x}, ${start.y}`}</span>
+        <span>{landing === true ? 'Judging landings' : 'Judging nothing'}</span>
         <button type={'button'} onClick={() => onClose({ mapId: 5, x: 4, y: 2 })}>Pick tile 4, 2 on map 5</button>
         <button type={'button'} onClick={() => onClose(null)}>Give up</button>
       </div>
@@ -37,7 +38,8 @@ vi.mock('../../../../src/mapEditor/views/locationPicker/LocationPickerDialog.tsx
  * The button is how anything rendered in place, a command's form or a quick panel, offers the location picker, and it
  * owes its owner three things. The picker opens on the place the setting holds now, and only when there is one place
  * to start from: several settings holding different places leave the button unavailable. A place picked is handed
- * over once and closes the picker; giving up closes it and hands over nothing.
+ * over once and closes the picker; giving up closes it and hands over nothing. And the picker judges every tile as a
+ * landing only for a place the player lands on.
  */
 describe('PickOnMapButton', () =>
 {
@@ -58,7 +60,7 @@ describe('PickOnMapButton', () =>
       .toStrictEqual([ true, null ]);
   });
 
-  it('opens the picker on the place the setting holds now', () =>
+  it('opens the picker on the place the setting holds now, judging nothing unless told', () =>
   {
     // Arrange.
     render(<PickOnMapButton start={START} onPick={vi.fn()}/>);
@@ -67,7 +69,20 @@ describe('PickOnMapButton', () =>
     fireEvent.click(screen.getByRole('button', { name: 'Pick on the map' }));
 
     // Assert.
-    expect(screen.getByText('Started on map 322 at 22, 13'))
+    expect([ screen.queryByText('Started on map 322 at 22, 13') !== null, screen.queryByText('Judging nothing') !== null ])
+      .toStrictEqual([ true, true ]);
+  });
+
+  it('opens the picker judging every tile as a landing for a place the player lands on', () =>
+  {
+    // Arrange.
+    render(<PickOnMapButton start={START} landing onPick={vi.fn()}/>);
+
+    // Act.
+    fireEvent.click(screen.getByRole('button', { name: 'Pick on the map' }));
+
+    // Assert.
+    expect(screen.getByText('Judging landings'))
       .toBeInTheDocument();
   });
 

@@ -410,7 +410,7 @@ describe('wireCommandEditing', () =>
       return { editing, onChange };
     };
 
-    it('asks from where the transfer lands now, and writes the place picked as its map and tile', async () =>
+    it('asks from where the transfer lands now, for where the player lands, and writes the place picked as its map and tile', async () =>
     {
       // Arrange.
       const { editing, onChange } = await renderTransfer(true);
@@ -425,7 +425,7 @@ describe('wireCommandEditing', () =>
 
       // Assert: the map and tile change; how it names its place, the facing and the fade stay.
       expect([ asked, onChange.mock.calls ])
-        .toStrictEqual([ { id: 1, start: { mapId: 322, x: 22, y: 13 } }, [ [ cmd(201, 0, [ 0, 5, 4, 2, 2, 0 ]), [] ] ] ]);
+        .toStrictEqual([ { id: 1, start: { mapId: 322, x: 22, y: 13 }, landing: true }, [ [ cmd(201, 0, [ 0, 5, 4, 2, 2, 0 ]), [] ] ] ]);
     });
 
     it('writes nothing when the author gives up', async () =>

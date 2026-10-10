@@ -10,19 +10,37 @@ type MapLocation = {
 };
 
 /**
+ * What a pick is for.
+ */
+type PickOptions = {
+  /**
+   * Whether the player lands on the place picked, as on a transfer's destination: the picker then marks the tiles the
+   * player cannot stand on and refuses them, saying why. A place for anything else, such as a ship's, which stands on
+   * water the player never could, is judged by nothing.
+   */
+  readonly landing: boolean;
+};
+
+/**
  * Lets the author pick a place by clicking it on a map, starting from where a transfer goes now. It settles on
  * the place picked, or null when the author gives up.
  */
-type LocationPicker = (current: MapLocation) => Promise<MapLocation | null>;
+type LocationPicker = (current: MapLocation, options?: PickOptions) => Promise<MapLocation | null>;
 
 /**
- * One ask to pick a place: its number, which tells it from every ask before and after it, and where the picker
- * starts.
+ * One ask to pick a place: its number, which tells it from every ask before and after it, where the picker starts, and
+ * whether the player lands there.
  */
 type LocationPickRequest = {
   readonly id: number;
   readonly start: MapLocation;
+  readonly landing: boolean;
 };
+
+/**
+ * A pick for anything but the player's landing, which the picker judges by nothing.
+ */
+const ANY_PLACE: PickOptions = { landing: false };
 
 /**
  * Hears every ask opened and every ask settled.
@@ -100,13 +118,14 @@ class LocationPicks
   /**
    * Asks for a place to be picked, starting from one, taking over from any ask still open.
    * @param {MapLocation} start Where the picker starts: where the transfer goes now.
+   * @param {PickOptions} options What the pick is for; anything but the player's landing unless said.
    * @returns {Promise<MapLocation | null>} The place picked, or null when the author gave up or another ask took over.
    */
-  pick = (start: MapLocation): Promise<MapLocation | null> =>
+  pick = (start: MapLocation, options: PickOptions = ANY_PLACE): Promise<MapLocation | null> =>
   {
     const previous = this.#open;
     this.#count += 1;
-    const request: LocationPickRequest = { id: this.#count, start };
+    const request: LocationPickRequest = { id: this.#count, start, landing: options.landing };
     const answered = new Promise<MapLocation | null>(answer =>
     {
       this.#open = { request, answer };
@@ -151,4 +170,4 @@ class LocationPicks
 }
 
 export { LocationPicks, startingCell };
-export type { LocationPicker, LocationPickRequest, MapLocation };
+export type { LocationPicker, LocationPickRequest, MapLocation, PickOptions };

@@ -603,13 +603,14 @@ const MapControl = (props: ControlProps) =>
 /**
  * Picks a map and a tile together by clicking the tile on the map, starting from the place the field holds. Several
  * events going to different places have no one place to start from, so the button waits until they agree; without a
- * server there are no maps to pick from, so there is no button at all.
- * @param {ControlProps} props The field.
+ * server there are no maps to pick from, so there is no button at all. A place where the player lands has the picker
+ * refuse the tiles the player cannot stand on.
+ * @param {ControlProps & { landing: boolean }} props The field, and whether the player lands on the place.
  * @returns {React.JSX.Element | null} The button, or nothing without a server.
  */
-const PlaceControl = (props: ControlProps) =>
+const PlaceControl = (props: ControlProps & { readonly landing: boolean }) =>
 {
-  const { field, resources, onChange } = props;
+  const { field, resources, landing, onChange } = props;
   if (resources.api === null)
   {
     return null;
@@ -620,6 +621,7 @@ const PlaceControl = (props: ControlProps) =>
     <Box sx={{ minHeight: 40, display: 'flex', alignItems: 'center' }}>
       <PickOnMapButton
         start={field.value as unknown as MapLocation | null}
+        landing={landing}
         onPick={location => onChange(location as unknown as JsonValue)}
       />
     </Box>
@@ -777,7 +779,7 @@ const QuickControl = (props: ControlProps) =>
     case 'graphic':
       return <GraphicControl {...props}/>;
     case 'place':
-      return <PlaceControl {...props}/>;
+      return <PlaceControl {...props} landing={control.landing}/>;
     case 'slider':
       return <SliderControl {...props} control={control}/>;
     case 'color':

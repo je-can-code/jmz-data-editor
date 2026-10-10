@@ -89,7 +89,8 @@ type ColorControl = {
  * - {@code row}: the id of an item, weapon or armor, picked by name;
  * - {@code map}: a map id, picked from the map tree;
  * - {@code graphic}: a page's picture, as {@link GraphicValue};
- * - {@code place}: a map and a tile on it, as {@code { mapId, x, y }}, picked by clicking the tile on the map;
+ * - {@code place}: a map and a tile on it, as {@code { mapId, x, y }}, picked by clicking the tile on the map; where the
+ *   player lands, as on a transfer's destination, the picker refuses the tiles the player cannot stand on;
  * - {@code slider}: a number, dragged or typed, as {@link SliderControl} describes;
  * - {@code color}: a colour as {@code #rrggbb}, picked, or chosen from the swatches the kind offers, or empty once
  *   unset, as {@link ColorControl} describes;
@@ -102,7 +103,7 @@ type QuickControl =
   | { readonly kind: 'row'; readonly list: 'item' | 'weapon' | 'armor' }
   | { readonly kind: 'map' }
   | { readonly kind: 'graphic' }
-  | { readonly kind: 'place' }
+  | { readonly kind: 'place'; readonly landing: boolean }
   | SliderControl
   | ColorControl
   | { readonly kind: 'check' };

@@ -15,8 +15,11 @@ import { registerBuiltInCommands } from '../core/commands/builtin/builtInCommand
 import { CommandCatalog } from '../core/commands/CommandCatalog.ts';
 import { CommandEditorRegistry } from '../core/commands/CommandEditorRegistry.ts';
 import type { PluginHeaderStore } from '../core/commands/pluginHeaders/PluginHeaderLibrary.ts';
+import { TRANSFER_KIND_ID } from '../core/eventKinds/transferKind.ts';
 import { DocumentHub } from '../core/history/DocumentHub.ts';
+import { freshSavePages } from '../core/locations/landingCheck.ts';
 import type { LocationPicks } from '../core/locations/LocationPicks.ts';
+import { TransferLandings } from '../core/locations/TransferLandings.ts';
 import { parseDocumentKey, projectPathForDocument, SYSTEM_KEY, type DocumentKey } from '../core/model/documentKeys.ts';
 import type { EditorDocument } from '../core/model/EditorDocument.ts';
 import { PluginModuleRegistry } from '../core/modules/PluginModuleRegistry.ts';
@@ -28,6 +31,7 @@ import { WindowClock } from '../core/time/WindowClock.ts';
 import { WindowPaints } from '../core/tools/WindowPaint.ts';
 import { FileChangeFeed, openEventSource, type EventSourceFactory } from '../core/sync/FileChangeFeed.ts';
 import { FileChangeRouter } from '../core/sync/fileChangeRouting.ts';
+import { lookAtDocument } from '../core/sync/lookAtDocument.ts';
 import { SharedFileChangeFeed, type LockManagerLike } from '../core/sync/SharedFileChangeFeed.ts';
 import { SyncPeer } from '../core/sync/SyncPeer.ts';
 import { SystemNamesFollower } from '../core/sync/SystemNamesFollower.ts';
@@ -165,6 +169,15 @@ type MapEditorServices = {
    * and shared live by every window.
    */
   readonly preview: WindowPreview;
+
+  /**
+   * Where the transfers in the window land, and whether the player could stand there: judged by the tiles, by the events
+   * a fresh save shows at the window's clock, and by the plugin modules' rules, and judged again whenever the rules, the
+   * page rule or the clock change. The maps transfers land on are looked at, never held. Every map marks its transfers
+   * whose landing fails, each transfer's quick panel says why, and a location picker choosing where the player lands
+   * judges every tile by the same check.
+   */
+  readonly landings: TransferLandings;
 
   /**
    * Reads what command editing needs from the server, once per window however often it is asked: the plugin
@@ -335,7 +348,6 @@ const createMapEditorServices = (environment: MapEditorEnvironment): MapEditorSe
   const commandEditors = new CommandEditorRegistry();
   const commandEditing = wireCommandEditing(api, catalog, commandEditors);
   const modules = new PluginModuleRegistry(catalog);
-  registerCoreEventKinds(modules);
 
   // the modules switch on from what the server reads, and switch on afresh when a config they read changes on disk.
   const activation = api === null
@@ -358,6 +370,17 @@ const createMapEditorServices = (environment: MapEditorEnvironment): MapEditorSe
   const pages = new WindowPageRule(modules);
   const preview = new WindowPreview();
   const remembered = new RememberedView(clock, preview);
+
+  // a landing is judged on a fresh save at the window's clock, by the rules and the kinds the modules have on, from the
+  // maps as this window holds them or else as they stand elsewhere.
+  const landings = new TransferLandings({
+    hub,
+    look: key => lookAtDocument({ hub, sync }, key),
+    rules: () => modules.passabilityRules(),
+    pages: () => freshSavePages(pages.rule(), clock.time(), clock.season()),
+    claims: (event, mapId) => modules.kindOf(event, mapId)?.id === TRANSFER_KIND_ID,
+  });
+  registerCoreEventKinds(modules);
 
   // the switch and variable names every list and picker shows follow System.json wherever it is being renamed.
   const names = api === null
@@ -522,6 +545,7 @@ const createMapEditorServices = (environment: MapEditorEnvironment): MapEditorSe
     clock,
     pages,
     preview,
+    landings,
     loadCommandResources: commandEditing.load,
     openDocument,
     resolveConflict: (key: DocumentKey, choice: 'mine' | 'theirs') =>
@@ -578,6 +602,14 @@ const createMapEditorServices = (environment: MapEditorEnvironment): MapEditorSe
           clock.startAt(offer.startsAt);
         }
       }));
+
+      // every landing is judged afresh once the rules, the kinds, the page rule or the clock it was judged by change.
+      stops.push(
+        modules.subscribe(() => landings.refresh()),
+        pages.subscribe(() => landings.refresh()),
+        clock.subscribe(() => landings.refresh()),
+        () => landings.stop(),
+      );
 
       // the plugin modules switch on once js/plugins.js says which plugins are enabled, and the page rule reads the party
       // a new game seats.
