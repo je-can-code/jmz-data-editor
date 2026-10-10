@@ -77,9 +77,17 @@ const TILESET_MARKS: EditorDataDefinition = { name: 'tileset-marks', schemaVersi
 const LAYOUTS: EditorDataDefinition = { name: 'layouts', schemaVersion: 1, createEmpty: () => ({ layouts: {} }), keptAlongside: false };
 
 /**
+ * The level each map's new battlers start at, set in Map Properties while J-ABS's module offers it: per map, keyed by map
+ * id, the level J-ABS's battler brush gives every battler it places there, whatever its enemy. A map with none set has no
+ * entry. The game never reads it, so it lives here rather than in the map's own file (see
+ * modules/jabs/battlerLevelSetting.ts).
+ */
+const NEW_BATTLER_LEVELS: EditorDataDefinition = { name: 'new-battler-levels', schemaVersion: 1, createEmpty: () => ({ maps: {} }), keptAlongside: false };
+
+/**
  * Every editor-only document the map editor knows.
  */
-const EDITOR_DATA_DEFINITIONS: readonly EditorDataDefinition[] = [ BLUEPRINTS, BLUEPRINT_USES, TILESET_MARKS, LAYOUTS ];
+const EDITOR_DATA_DEFINITIONS: readonly EditorDataDefinition[] = [ BLUEPRINTS, BLUEPRINT_USES, TILESET_MARKS, LAYOUTS, NEW_BATTLER_LEVELS ];
 
 /**
  * Builds the stored form of an empty document.
@@ -225,6 +233,7 @@ export {
   emptyEditorData,
   isKeptAlongside,
   LAYOUTS,
+  NEW_BATTLER_LEVELS,
   requireReadable,
   saveEditorDocument,
   TILESET_MARKS,

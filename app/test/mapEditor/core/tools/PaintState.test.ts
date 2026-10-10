@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { singleTileBrush } from '../../../../src/mapEditor/core/tools/brush.ts';
-import { INITIAL_PAINT_SETTINGS, isPaintingTool, PAINT_TOOLS, PaintState, type PaintSettings } from '../../../../src/mapEditor/core/tools/PaintState.ts';
+import { INITIAL_PAINT_SETTINGS, isPaintingTool, PAINT_TOOLS, PaintState, type PaintSettings, type StampFit } from '../../../../src/mapEditor/core/tools/PaintState.ts';
 import { stampOf } from '../../support/stampFixtures.ts';
 
 /*
@@ -13,7 +13,9 @@ import { stampOf } from '../../support/stampFixtures.ts';
  * layer stays a held key away; until one is picked the override paints layer 3. Taking up a stamp makes the stamp tool
  * the tool, and putting it down goes back to whichever tool was in hand before it, however the stamp tool was taken up;
  * the stamp stays picked. A blueprint is taken up the same way, as its stamp, with which blueprint it is and its name,
- * which follows a rename; a plain stamp taken up after it is no blueprint. A change that changes nothing tells nobody.
+ * which follows a rename; a plain stamp taken up after it is no blueprint. A brush whose stamp depends on the map it
+ * lands on takes it up with its fit, which only that stamp keeps: a stamp or a blueprint taken up after it has none. A
+ * change that changes nothing tells nobody.
  */
 describe('PaintState', () =>
 {
@@ -27,7 +29,27 @@ describe('PaintState', () =>
 
     // Assert.
     expect(settings)
-      .toEqual({ tool: 'events', brush: null, strip: 'auto', overrideLayer: 2, stamp: null, blueprint: null });
+      .toStrictEqual({ tool: 'events', brush: null, strip: 'auto', overrideLayer: 2, stamp: null, blueprint: null, fit: null });
+  });
+
+  it('takes up a stamp with the fit its brush gives, and a plain stamp or a blueprint after it with none', () =>
+  {
+    // Arrange: a brush's stamp and its fit, a plain stamp, and a blueprint.
+    const state = new PaintState();
+    const fitted = stampOf({ id: 'test:1' });
+    const fit: StampFit = () => ({ stamp: fitted, words: 'Level 12 · this map\'s setting' });
+
+    // Act.
+    state.takeUpStamp(fitted, fit);
+    const brushed = state.settings.fit;
+    state.takeUpStamp(stampOf({ id: 'test:2' }));
+    const plain = state.settings.fit;
+    state.takeUpStamp(fitted, fit);
+    state.takeUpBlueprint({ id: 'k3x9q2mf', name: 'Goblin', stamp: stampOf({ id: 'blueprint:k3x9q2mf' }) });
+
+    // Assert.
+    expect([ brushed, plain, state.settings.fit, state.settings.stamp?.id ])
+      .toStrictEqual([ fit, null, null, 'blueprint:k3x9q2mf' ]);
   });
 
   it('counts every tool but the events as painting', () =>

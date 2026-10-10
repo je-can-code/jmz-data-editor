@@ -535,14 +535,15 @@ class ToolSession
   /**
    * Places the stamp in hand with its top-left corner on the cell clicked, as one step of the map's history, and tells
    * the host what came of it: the events it placed, or why it was refused. A blueprint's stamp places copies linked to
-   * the blueprint. With no stamp in hand nothing happens.
+   * the blueprint, and a stamp a brush took up with a fit goes down as it fits this map at the moment of the click. With
+   * no stamp in hand nothing happens.
    * @param {MapDocument} map The map.
    * @param {MapCell} cell The cell clicked.
    * @param {Shaping} shaping Whether the tiles go down exactly as copied (Shift held).
    */
   #stamp(map: MapDocument, cell: MapCell, shaping: Shaping): void
   {
-    const { stamp, blueprint } = this.#host.settings();
+    const { stamp, blueprint, fit } = this.#host.settings();
     if (stamp === null)
     {
       return;
@@ -550,8 +551,9 @@ class ToolSession
 
     const { mode } = this.#host.layering(map);
     const placement = { at: cell, shaping, mode, linkRefusal: this.#host.linkRefusal(map.mapId) };
+    const placing = fit === null ? stamp : fit(map).stamp;
     const outcome = blueprint === null
-      ? placeStamp(this.#host.hub, map.mapId, stamp, placement, 'Stamp')
+      ? placeStamp(this.#host.hub, map.mapId, placing, placement, 'Stamp')
       : placeBlueprint(this.#host.hub, map.mapId, blueprint.id, placement);
     this.#host.stamped?.(outcome);
   }
@@ -882,7 +884,8 @@ class ToolSession
    * Works out the overlay while the stamp tool is in hand: the stamp's footprint with its corner under the pointer, its
    * tiles and events where a click would put them, and in red the tiles another event holds in their way. Over a map that
    * may hold no copy of a blueprint, a blueprint in hand, or a stamp carrying copies of one, in its events or in tiles
-   * holding a placement, says so beside the footprint. With no stamp picked, only the cell under the pointer.
+   * holding a placement, says so beside the footprint. A stamp a brush took up with a fit shows as it fits this map, and
+   * says what fitting it came to. With no stamp picked, only the cell under the pointer.
    * @param {MapDocument} map The map.
    * @param {ToolPointer} pointer The pointer and keys.
    * @param {MapCell} cell The cell under it.
@@ -890,11 +893,15 @@ class ToolSession
    */
   #stampOverlay(map: MapDocument, pointer: ToolPointer, cell: MapCell): ToolOverlay
   {
-    const { stamp, blueprint } = this.#host.settings();
-    if (stamp === null)
+    const { stamp: held, blueprint, fit } = this.#host.settings();
+    if (held === null)
     {
       return { ...NO_TOOL_OVERLAY, hover: { x: cell.x, y: cell.y, width: 1, height: 1 } };
     }
+
+    // a stamp fitted to the map is shown as a click here would place it, with what fitting it came to.
+    const fitted = fit === null ? null : fit(map);
+    const stamp = fitted === null ? held : fitted.stamp;
 
     // a map that may hold no link says so before the click that would be refused; a copy of a blueprint gone goes down
     // plain, so it is no copy here, and tiles of another tileset are left out, placements and all.
@@ -908,7 +915,8 @@ class ToolSession
     const placedTiles = stamp.tilesetId === map.tilesetId && (stamp.spots ?? []).some(spot => isLive(spot.blueprintId));
     const linked = blueprint !== null || linkedEvents || placedTiles;
     const refused = linked && this.#host.linkRefusal(map.mapId) !== null;
-    const preview = previewStamp(map, stamp, cell, pointer.shift ? 'exact' : 'auto', blueprint === null ? 'stamp' : 'blueprint');
+    const words = fitted === null ? null : fitted.words;
+    const preview = previewStamp(map, stamp, cell, pointer.shift ? 'exact' : 'auto', blueprint === null ? 'stamp' : 'blueprint', words);
     return {
       hover: preview.hover,
       hoverLabel: refused ? LINKS_REFUSED_LABEL : preview.label,

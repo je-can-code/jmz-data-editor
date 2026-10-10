@@ -24,7 +24,7 @@ const PalettePickers = (props: { readonly painting: PaintState; readonly pickedI
           : (
             <Picker
               key={entry.id}
-              takeUp={stamp => painting.takeUpStamp(stamp)}
+              takeUp={(stamp, fit) => painting.takeUpStamp(stamp, fit)}
               putDown={() => painting.putDownStamp()}
               inHand={pickedId}
               newStampId={() => stamps.nextId()}

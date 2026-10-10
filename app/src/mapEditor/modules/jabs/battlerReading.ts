@@ -662,6 +662,17 @@ const pageEnemyId = (page: RmmzEventPage): number | null =>
 };
 
 /**
+ * Reads the level a page gives its battler, as J-LevelMaster reads it (Game_Event#getLevelOverrides): the last of its
+ * level lines, under any of the tag's three names, among the lines J-Base offers.
+ * @param {RmmzEventPage} page The page.
+ * @returns {number | null} The level, or null for a page giving none, whose battler fights at its enemy's own level.
+ */
+const pageLevelOf = (page: RmmzEventPage): number | null =>
+{
+  return pageLevel(linesTagged(taggedLines(page), 'level', 'lv', 'lvl'));
+};
+
+/**
  * Reads a battler page as J-ABS builds its battler (Game_Event#parseEnemyComments), with the enemy's note read as
  * J-ABS's Game_Enemy and RPG_Enemy readers read it, J-LevelMaster's level and J-Passive's passives beside them.
  *
@@ -750,6 +761,7 @@ export {
   LEVEL_PATTERN,
   PASSIVE_PATTERN,
   pageEnemyId,
+  pageLevelOf,
   readBattlerPage,
   ROLES,
   TEAMS,

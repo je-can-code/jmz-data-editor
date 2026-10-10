@@ -7,8 +7,8 @@ import { command, page } from '../../support/eventKindFixtures.ts';
 /*
  * The battler brush places, with each click, a battler shaped like most of the picked enemy's battlers already placed:
  * the whole of the most common page among them, its picture, settings and comments alike, but for its level, which is
- * where a battler stands in the game and so is left to the enemy until the author gives one; named as most of them are
- * named. An enemy placed nowhere yet gets the game's most common battler, named for the enemy as most battlers are, with
+ * where a battler stands in the game and so is the map's to give, wherever the battlers it is shaped like stand; named
+ * as most of them are named. An enemy placed nowhere yet gets the game's most common battler, named for the enemy as most battlers are, with
  * no picture, since only the enemy's own battlers could say what it looks like. Each placement is a stamp of one event on
  * one tile, so it goes down on any map and any tileset.
  */
@@ -59,23 +59,9 @@ describe('battlerLooks', () =>
       // Act.
       const look = battlerLookOf(5, 'Cave Bat', battlers);
 
-      // Assert: the three bats differing only in level are one look, and say their levels were left out.
-      expect([ look.name, look.copies, look.of, look.page.image.characterName, look.page.list.map(each => each.parameters[0]), look.levelLeft ])
-        .toStrictEqual([ 'bat', 3, 4, 'm_bats', [ '<motion:[float]>', '<enemyId:5>', '<moveSpeed:4.1>', undefined ], true ]);
-    });
-
-    it('says a level was left out only when the battlers it copies give one, not when others do', () =>
-    {
-      // Arrange: two plain bats giving no level, the look; beside them one red bat giving a level of its own.
-      const plain = page([ command(108, [ '<enemyId:5>' ]), command(408, [ '<moveSpeed:4.1>' ]) ]);
-      const battlers = [ placed('bat', plain), placed('bat', plain), placed('red bat', bat(9, 'm_bats_red')) ];
-
-      // Act.
-      const look = battlerLookOf(5, 'Cave Bat', battlers);
-
-      // Assert.
-      expect([ look.copies, look.of, look.page.list.map(each => each.parameters[0]), look.levelLeft ])
-        .toStrictEqual([ 2, 3, [ '<enemyId:5>', '<moveSpeed:4.1>', undefined ], false ]);
+      // Assert: the three bats differing only in level are one look, at no level.
+      expect([ look.name, look.copies, look.of, look.page.image.characterName, look.page.list.map(each => each.parameters[0]) ])
+        .toStrictEqual([ 'bat', 3, 4, 'm_bats', [ '<motion:[float]>', '<enemyId:5>', '<moveSpeed:4.1>', undefined ] ]);
     });
 
     it('takes the first seen of looks placed as often as each other', () =>
@@ -99,8 +85,8 @@ describe('battlerLooks', () =>
       const look = battlerLookOf(7, '*Cave Bat', []);
 
       // Assert.
-      expect([ look.name, look.copies, look.of, look.page, look.levelLeft ])
-        .toStrictEqual([ 'cave bat', 0, 0, commonPage(7), false ]);
+      expect([ look.name, look.copies, look.of, look.page ])
+        .toStrictEqual([ 'cave bat', 0, 0, commonPage(7) ]);
     });
   });
 

@@ -7,19 +7,15 @@ import type { Stamp } from '../../core/stamps/stamp.ts';
 import { LEVEL_TAG } from './battlerFields.ts';
 
 /**
- * What a battler brush places for an enemy: the event's name and its one page, and how many of the enemy's battlers
- * already placed it copies, of how many; none for an enemy placed nowhere yet, which takes the game's most common battler.
+ * What a battler brush places for an enemy: the event's name and its one page, at no level, and how many of the enemy's
+ * battlers already placed it copies, of how many; none for an enemy placed nowhere yet, which takes the game's most common
+ * battler. The level each battler starts at is the map's to say, where it lands (see battlerLevelFit).
  */
 type BattlerLook = {
   readonly name: string;
   readonly page: RmmzEventPage;
   readonly copies: number;
   readonly of: number;
-
-  /**
-   * Whether any of the battlers it copies gives a level of its own, which the battler placed leaves to its enemy.
-   */
-  readonly levelLeft: boolean;
 };
 
 /**
@@ -78,7 +74,8 @@ const commonPage = (enemyId: number): RmmzEventPage =>
 
 /**
  * Takes a page's level lines out, a comment's first line handing its place to the line after it: a battler's level is
- * where it stands in the game, which a new battler is left to its enemy's until the author gives it one.
+ * where it stands in the game, which a new battler takes from the map it lands on rather than from the battlers it is
+ * shaped like, wherever those stand.
  * @param {RmmzEventPage} page The page.
  * @returns {RmmzEventPage} A copy of the page without its level.
  */
@@ -135,8 +132,8 @@ const battlerName = (enemyName: string): string =>
 
 /**
  * Works out what a battler brush places for an enemy: a copy of the most common of its battlers already placed, page and
- * all, but for its level, which is left to the enemy; and the name most of them carry. An enemy placed nowhere yet gets
- * the game's most common battler (see {@link commonPage}), named for the enemy.
+ * all, but for its level, which the map it lands on gives; and the name most of them carry. An enemy placed nowhere yet
+ * gets the game's most common battler (see {@link commonPage}), named for the enemy.
  * @param {number} enemyId The enemy.
  * @param {string} enemyName The enemy's name, or empty when the database has none by that id.
  * @param {readonly EnemyBattlerPage[]} battlers The enemy's battlers already placed, each with its page naming it.
@@ -144,22 +141,16 @@ const battlerName = (enemyName: string): string =>
  */
 const battlerLookOf = (enemyId: number, enemyName: string, battlers: readonly EnemyBattlerPage[]): BattlerLook =>
 {
+  // battlers differing in their level alone are one look.
   const looks = battlers.map(battler => withoutLevel(battler.page));
   const look = mostCommon(looks, page => JSON.stringify(page));
   const name = mostCommon(battlers.map(battler => battler.eventName), each => each);
   if (look === null || name === null)
   {
-    return { name: battlerName(enemyName), page: commonPage(enemyId), copies: 0, of: 0, levelLeft: false };
+    return { name: battlerName(enemyName), page: commonPage(enemyId), copies: 0, of: 0 };
   }
 
-  // the battlers copied are those shaped like the look, a level aside; any of them giving one has it left out.
-  const key = JSON.stringify(look.value);
-  const levelLeft = battlers.some((battler, index) =>
-  {
-    const levelled = parsableCommentLines(battler.page).some(line => LEVEL_TAG.pattern.test(line.text));
-    return levelled && JSON.stringify(looks[index]) === key;
-  });
-  return { name: name.value, page: look.value, copies: look.count, of: battlers.length, levelLeft };
+  return { name: name.value, page: look.value, copies: look.count, of: battlers.length };
 };
 
 /**

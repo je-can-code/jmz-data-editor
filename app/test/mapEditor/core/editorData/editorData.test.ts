@@ -8,6 +8,7 @@ import {
   editorDataDefinition,
   isKeptAlongside,
   LAYOUTS,
+  NEW_BATTLER_LEVELS,
   saveEditorDocument,
   TILESET_MARKS,
 } from '../../../../src/mapEditor/core/editorData/editorData.ts';
@@ -16,10 +17,11 @@ import { editorDataDocumentKey, isEditorDataName } from '../../../../src/mapEdit
 import type { JsonValue } from '../../../../src/mapEditor/core/model/json.ts';
 
 /*
- * Blueprints, "goes on top" marks and saved layouts live inside the project, beside the game's data, so they are
- * versioned with it; the game never reads them. Each is stored with its shape's version, so an older editor meets
- * a newer document with a refusal instead of rewriting what it does not understand, and a project that has never
- * saved one reads the empty document, so nothing downstream has to tell "absent" from "empty".
+ * Blueprints, "goes on top" marks, saved layouts and the level each map's new battlers start at live inside the project,
+ * beside the game's data, so they are versioned with it; the game never reads them. Each is stored with its shape's
+ * version, so an older editor meets a newer document with a refusal instead of rewriting what it does not understand,
+ * and a project that has never saved one reads the empty document, so nothing downstream has to tell "absent" from
+ * "empty".
  */
 describe('editorData', () =>
 {
@@ -33,7 +35,7 @@ describe('editorData', () =>
     saveEditorData: vi.fn(async () => undefined),
   }) as unknown as MapEditorApi;
 
-  it('names four documents, each with a key the server accepts', () =>
+  it('names five documents, each with a key the server accepts', () =>
   {
     // Arrange: the definitions.
 
@@ -42,7 +44,20 @@ describe('editorData', () =>
 
     // Assert.
     expect(names)
-      .toStrictEqual([ [ 'blueprints', true ], [ 'blueprint-uses', true ], [ 'tileset-marks', true ], [ 'layouts', true ] ]);
+      .toStrictEqual([ [ 'blueprints', true ], [ 'blueprint-uses', true ], [ 'tileset-marks', true ], [ 'layouts', true ], [ 'new-battler-levels', true ] ]);
+  });
+
+  it('starts a project that never set a level for new battlers with no map named', async () =>
+  {
+    // Arrange: a project holding no file of levels.
+    const client = new EditorDataClient(buildApi(null));
+
+    // Act.
+    const loaded = await client.load(NEW_BATTLER_LEVELS);
+
+    // Assert.
+    expect(loaded)
+      .toStrictEqual({ schemaVersion: 1, data: { maps: {} } });
   });
 
   it('keeps the record of where blueprints are placed alongside the maps, and no other document', () =>
@@ -61,6 +76,7 @@ describe('editorData', () =>
           [ 'editor-data:blueprint-uses', true ],
           [ 'editor-data:tileset-marks', false ],
           [ 'editor-data:layouts', false ],
+          [ 'editor-data:new-battler-levels', false ],
           [ 'map:16', false ],
           [ 'editor-data:misc', false ],
         ],
@@ -158,7 +174,7 @@ describe('editorData', () =>
 
     // Assert.
     expect(keys)
-      .toStrictEqual([ 'editor-data:blueprints', 'editor-data:blueprint-uses', 'editor-data:tileset-marks', 'editor-data:layouts' ]);
+      .toStrictEqual([ 'editor-data:blueprints', 'editor-data:blueprint-uses', 'editor-data:tileset-marks', 'editor-data:layouts', 'editor-data:new-battler-levels' ]);
   });
 
   /*

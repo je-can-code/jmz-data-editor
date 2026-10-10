@@ -14,7 +14,7 @@ import { stampOf, tiledMap } from '../../support/stampFixtures.ts';
  * were copied, empty cells and the shadow and region layers showing nothing, and nothing of tiles from another tileset;
  * its events as they look on their first page, keeping the page's own picture so a ghost moved a tile is moved rather
  * than drawn afresh, and none for an event past the edge; in red, every tile where another event already stands; and
- * a few words saying what a click would do.
+ * a few words saying what a click would do, which for a stamp a brush fitted to the map say what fitting it came to.
  *
  * The map is 4x3, drawn with tileset 4, with event 1 at 3, 2. The stamp is 2 by 2: grass in its top row and a tree on
  * layer 4 of its bottom-right cell, a shadow and a region under its top-left, and events at its top-right (a character)
@@ -133,5 +133,24 @@ describe('previewStamp', () =>
     // Assert.
     expect(labels)
       .toStrictEqual([ 'Blueprint', 'Blueprint (exact)' ]);
+  });
+
+  it('says what fitting the stamp to the map came to, Shift held or not, unless something stands in its way', () =>
+  {
+    // Arrange: a stamp the brush fitted to the map, clear of event 1, landing on it, and from another tileset.
+    const held = stamp();
+    const fitted = 'Level 12 · this map\'s setting';
+
+    // Act.
+    const labels = [
+      previewStamp(map(), held, { x: 0, y: 0 }, 'auto', 'stamp', fitted).label,
+      previewStamp(map(), held, { x: 0, y: 0 }, 'exact', 'stamp', fitted).label,
+      previewStamp(map(), held, { x: 2, y: 2 }, 'auto', 'stamp', fitted).label,
+      previewStamp(map(), stamp(9), { x: 0, y: 0 }, 'auto', 'stamp', fitted).label,
+    ];
+
+    // Assert.
+    expect(labels)
+      .toStrictEqual([ fitted, fitted, 'Another event is in the way', 'Another tileset: events only' ]);
   });
 });

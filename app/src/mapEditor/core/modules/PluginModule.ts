@@ -19,6 +19,7 @@ import type { OverlayDefinition } from '../renderer/MapRenderer.ts';
 import type { SkyWeather, WeatherLayerDefinition } from '../renderer/weatherLayer.ts';
 import type { Stamp } from '../stamps/stamp.ts';
 import type { SkyPick } from '../time/WindowClock.ts';
+import type { StampFit } from '../tools/PaintState.ts';
 
 /**
  * What a quick panel is handed: the map and the selected events, all of one kind.
@@ -41,7 +42,11 @@ type PageSectionProps = {
  * a map places it, how to put it down, the stamp in hand, and how to name a new stamp.
  */
 type PalettePickerProps = {
-  readonly takeUp: (stamp: Stamp) => void;
+  /**
+   * Takes up a stamp as the brush, with how it fits itself to each map it lands on (see StampFit), or null to place it
+   * as it is.
+   */
+  readonly takeUp: (stamp: Stamp, fit: StampFit | null) => void;
   readonly putDown: () => void;
 
   /**
@@ -205,6 +210,15 @@ type EventAreaReader = {
 };
 
 /**
+ * What the part of a Map Properties section that draws itself is handed: the map the properties show, by id and as the
+ * window holds it.
+ */
+type MapPropertiesBodyProps = {
+  readonly mapId: number;
+  readonly map: MapDocument;
+};
+
+/**
  * A section a module adds to Map Properties, such as J-Lighting's darkness: settings of the map itself rather than of
  * anything on it, each change one step in the map's history like any other property's.
  */
@@ -230,6 +244,14 @@ type MapPropertiesSection = {
    * Left out, the settings read the map alone.
    */
   readonly config?: OnDemandConfig;
+
+  /**
+   * A part of the section that draws itself, below its settings, for a setting of the map that the map's own file never
+   * holds, such as J-ABS's level for new battlers, kept in the editor's own data: it reads and changes that setting with
+   * the window's services, each change one step in the map's history like the rest. Left out, the section shows its
+   * settings alone.
+   */
+  readonly body?: ComponentType<MapPropertiesBodyProps>;
 };
 
 /**
@@ -760,6 +782,7 @@ export type {
   EventKindDefinition,
   ExtensionConfig,
   LiveNotice,
+  MapPropertiesBodyProps,
   MapPropertiesSection,
   ModuleContext,
   ModuleContributions,

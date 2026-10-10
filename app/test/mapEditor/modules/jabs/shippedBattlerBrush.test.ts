@@ -108,7 +108,7 @@ const placeWithBrush = (brushPage: RmmzEventPage, name: string): { placed: RmmzM
   hub.adopt('map:2', buildMapJson() as unknown as JsonValue);
   const before = JSON.stringify(hub.map('map:2').toJson());
   const slots = hub.map('map:2').events.length;
-  const stamp = battlerStamp('window-a:1', { name, page: brushPage, copies: 0, of: 0, levelLeft: false });
+  const stamp = battlerStamp('window-a:1', { name, page: brushPage, copies: 0, of: 0 });
   const outcome = placeStamp(hub, 2, stamp, { at: { x: 1, y: 1 }, shaping: 'auto', mode: TilesetMode.area, linkRefusal: null }, 'Stamp');
   const ids = outcome.ok ? outcome.eventIds : [];
   const placed = ids.length === 1 ? hub.map('map:2').event(ids[0]) : null;

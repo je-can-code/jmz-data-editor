@@ -2,20 +2,17 @@ import type { PluginsJsEntry } from '../../../services/plugins/PluginsJsReader.t
 import { pageCommentText } from '../../core/model/eventModel.ts';
 import type { RmmzMapEvent } from '../../core/model/rmmzTypes.ts';
 import type { PluginModule } from '../../core/modules/PluginModule.ts';
+import type { MapPropertiesModel } from '../../core/properties/moduleProperties.ts';
 import { battlerBrushFor } from './BattlerBrush.tsx';
 import { battlerTagFields } from './battlerFields.ts';
 import { battlerPageSectionFor, battlerQuickPanelFor } from './BattlerQuickPanel.tsx';
 import { battlerSetupOf, MOTION_CONFIG, MOTION_PLUGIN } from './battlerSetup.ts';
+import { newBattlerLevelPropertyFor } from './NewBattlerLevelProperty.tsx';
 
 /**
  * J-ABS's file name, as js/plugins.js lists it.
  */
 const JABS_PLUGIN = 'J-ABS';
-
-/**
- * J-LevelMaster's file name, as js/plugins.js lists it: the plugin that reads a J-ABS battler's level off its page.
- */
-const LEVEL_PLUGIN = 'J-LevelMaster';
 
 /**
  * The id J-ABS's module registers battlers under.
@@ -26,6 +23,21 @@ const BATTLER_KIND_ID = 'jabs.battler';
  * The id of the battler brush J-ABS's module offers to place with.
  */
 const BATTLER_BRUSH_ID = 'jabs.battlers';
+
+/**
+ * The id of J-ABS's section of Map Properties, which holds the level a map's new battlers start at.
+ */
+const MAP_BATTLERS_ID = 'jabs.map';
+
+/**
+ * A section of Map Properties with no settings read from the map itself: J-ABS's holds one setting the map's own file
+ * never does, which draws itself.
+ * @returns {MapPropertiesModel} Nothing to say of the map, and no settings.
+ */
+const NO_MAP_SETTINGS = (): MapPropertiesModel =>
+{
+  return { note: null, fields: [] };
+};
 
 /**
  * The tag that makes an event a J-ABS battler, as J-ABS itself reads it from a page's comments: the enemy it fights as,
@@ -84,6 +96,10 @@ const isBattler = (event: RmmzMapEvent): boolean =>
  * while J-Passive and its affix extension are, and its motions while J-Motion is, with J-Motion's config filling in what
  * a motion leaves out. At the top of the Stamps panel, the battler brush places a battler of the enemy picked with each
  * click, shaped like most of that enemy's battlers already placed.
+ *
+ * While J-LevelMaster is on too, each battler the brush places starts at the level its map calls for: the level set for
+ * the map in Map Properties, where J-ABS's section offers it, kept in the editor's own data and never in the map's file;
+ * else the level that enemy already carries on the map; else the map's level; else the enemy's own (see newBattlerLevel).
  */
 const jabsModule: PluginModule = {
   id: 'jabs',
@@ -103,11 +119,17 @@ const jabsModule: PluginModule = {
       quickPanel: battlerQuickPanelFor(setup),
       pageSection: battlerPageSectionFor(setup),
     });
-    contributions.paletteEntry({ id: BATTLER_BRUSH_ID, title: 'Battlers', kind: BATTLER_KIND_ID, picker: battlerBrushFor() });
+    contributions.paletteEntry({ id: BATTLER_BRUSH_ID, title: 'Battlers', kind: BATTLER_KIND_ID, picker: battlerBrushFor(setup) });
 
     // a copy of a blueprint follows each of a battler's tags on its own, and its level only while the plugin reading it is
     // on too.
-    battlerTagFields(context.plugins.has(LEVEL_PLUGIN)).forEach(tag => contributions.commentTag(tag));
+    battlerTagFields(setup.levels).forEach(tag => contributions.commentTag(tag));
+
+    // the level new battlers start at is set per map only while the plugin reading a battler's level is on.
+    if (setup.levels)
+    {
+      contributions.mapProperties({ id: MAP_BATTLERS_ID, title: 'Battlers', source: NO_MAP_SETTINGS, body: newBattlerLevelPropertyFor() });
+    }
 
     // the registry switches this module on only while J-ABS is enabled, so the plugin is always listed here.
     const actionMapId = actionMapIdOf(context.plugins.get(JABS_PLUGIN) as PluginsJsEntry);
@@ -118,4 +140,4 @@ const jabsModule: PluginModule = {
   },
 };
 
-export { actionMapIdOf, BATTLER_BRUSH_ID, BATTLER_KIND_ID, isBattler, jabsModule };
+export { actionMapIdOf, BATTLER_BRUSH_ID, BATTLER_KIND_ID, isBattler, jabsModule, MAP_BATTLERS_ID };

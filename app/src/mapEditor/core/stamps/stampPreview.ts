@@ -35,15 +35,17 @@ const tileGhosts = (map: StampTarget, stamp: Stamp, at: MapCell): GhostTile[] =>
 };
 
 /**
- * Words what a click would do, beside the stamp's footprint, naming a blueprint as a blueprint.
+ * Words what a click would do, beside the stamp's footprint, naming a blueprint as a blueprint; a stamp fitted to the map
+ * by the brush that took it up says what fitting it came to instead, unless something stands in its way.
  * @param {number} blocked How many tiles another event holds where the stamp's events would land.
  * @param {boolean} tilesLeftOut Whether the stamp's tiles belong to another tileset.
  * @param {number} events How many of the stamp's events land on the map.
  * @param {Shaping} shaping Whether the tiles go down exactly as copied.
  * @param {PlacedKind} kind What a click places, a stamp or a blueprint.
+ * @param {string | null} fitted What fitting the stamp to the map came to, or null for a stamp placed as it is.
  * @returns {string} The words.
  */
-const previewLabel = (blocked: number, tilesLeftOut: boolean, events: number, shaping: Shaping, kind: PlacedKind): string =>
+const previewLabel = (blocked: number, tilesLeftOut: boolean, events: number, shaping: Shaping, kind: PlacedKind, fitted: string | null): string =>
 {
   if (blocked > 0)
   {
@@ -53,6 +55,12 @@ const previewLabel = (blocked: number, tilesLeftOut: boolean, events: number, sh
   if (tilesLeftOut)
   {
     return events === 0 ? 'Another tileset: nothing to place' : 'Another tileset: events only';
+  }
+
+  // a stamp the brush fitted to the map is named by what it fitted, such as the level a battler starts at.
+  if (fitted !== null)
+  {
+    return fitted;
   }
 
   const name = kind === 'blueprint' ? 'Blueprint' : 'Stamp';
@@ -69,9 +77,11 @@ const previewLabel = (blocked: number, tilesLeftOut: boolean, events: number, sh
  * @param {MapCell} at Where its corner would land.
  * @param {Shaping} shaping Whether the tiles would go down exactly as copied (Shift held).
  * @param {PlacedKind} kind What a click places, a stamp or a blueprint, which the words beside it name.
+ * @param {string | null} fitted What fitting the stamp to the map came to, which the words beside it say when nothing
+ * stands in the way; null for a stamp placed as it is.
  * @returns {StampPreview} The preview.
  */
-const previewStamp = (map: StampTarget, stamp: Stamp, at: MapCell, shaping: Shaping, kind: PlacedKind = 'stamp'): StampPreview =>
+const previewStamp = (map: StampTarget, stamp: Stamp, at: MapCell, shaping: Shaping, kind: PlacedKind = 'stamp', fitted: string | null = null): StampPreview =>
 {
   const tilesFit = stamp.tiles !== null && stamp.tilesetId === map.tilesetId;
   const ghostEvents: GhostEvent[] = [];
@@ -95,7 +105,7 @@ const previewStamp = (map: StampTarget, stamp: Stamp, at: MapCell, shaping: Shap
     ghostTiles: tilesFit ? tileGhosts(map, stamp, at) : [],
     ghostEvents,
     blockedCells: blocked,
-    label: previewLabel(blocked.length, stamp.tiles !== null && tilesFit === false, ghostEvents.length, shaping, kind),
+    label: previewLabel(blocked.length, stamp.tiles !== null && tilesFit === false, ghostEvents.length, shaping, kind, fitted),
   };
 };
 

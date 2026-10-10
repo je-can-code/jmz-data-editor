@@ -10,6 +10,7 @@ const EDITOR_DATA_LABELS: Readonly<Record<string, string>> = {
   'blueprint-uses': 'Blueprint placements',
   'tileset-marks': 'Tileset marks',
   'layouts': 'Saved layouts',
+  'new-battler-levels': 'New battler levels',
 };
 
 /**

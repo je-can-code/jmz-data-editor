@@ -1,3 +1,4 @@
+import type { MapDocument } from '../model/MapDocument.ts';
 import type { Stamp } from '../stamps/stamp.ts';
 import type { LayerChoice } from '../tiles/layering.ts';
 import type { TileLayerIndex } from '../tiles/tileGrid.ts';
@@ -27,6 +28,23 @@ const isPaintingTool = (tool: PaintTool): boolean =>
 {
   return tool !== 'events';
 };
+
+/**
+ * A stamp fitted to the map it is about to land on: what goes down there, and a few words on what fitting it came to,
+ * which the preview shows beside the pointer in place of the stamp's own name, such as "Level 12 · this map's setting";
+ * null to say nothing of it.
+ */
+type FittedStamp = {
+  readonly stamp: Stamp;
+  readonly words: string | null;
+};
+
+/**
+ * Fits the stamp in hand to the map it lands on, for a brush whose stamp depends on that map, as J-ABS's battler brush
+ * gives each battler the level its map calls for: each click places, and the preview under the pointer shows, what this
+ * makes of the stamp for that map as the map stands at that moment.
+ */
+type StampFit = (map: MapDocument) => FittedStamp;
 
 /**
  * What the tools paint with, shared by every map view in the window.
@@ -64,6 +82,13 @@ type PaintSettings = {
    * places linked copies of it. Null for a plain stamp, or none.
    */
   readonly blueprint: BlueprintInHand | null;
+
+  /**
+   * How the stamp in hand fits itself to each map it lands on, for one a brush took up with a fit (see
+   * {@link StampFit}); null for a stamp placed as it is, as every stamp picked in the Stamps panel's list and every
+   * blueprint is.
+   */
+  readonly fit: StampFit | null;
 };
 
 /**
@@ -84,7 +109,7 @@ type PaintSettingsListener = (settings: PaintSettings) => void;
  * Where a window starts: the events in hand, so a click on the map selects as it always has, nothing picked, automatic
  * layering, layer 3 for the override, and no stamp or blueprint.
  */
-const INITIAL_PAINT_SETTINGS: PaintSettings = { tool: 'events', brush: null, strip: 'auto', overrideLayer: 2, stamp: null, blueprint: null };
+const INITIAL_PAINT_SETTINGS: PaintSettings = { tool: 'events', brush: null, strip: 'auto', overrideLayer: 2, stamp: null, blueprint: null, fit: null };
 
 /**
  * The window's painting settings: the tool, the brush, the layer strip's choice, the override's layer and the stamp.
@@ -160,21 +185,22 @@ class PaintState
    * Takes up a stamp: it becomes the stamp in hand, and the stamp tool the tool, so the next click on a map places it.
    * The tool in hand before is remembered for {@link putDownStamp}.
    * @param {Stamp} stamp The stamp.
+   * @param {StampFit | null} fit How it fits itself to each map it lands on, or null to place it as it is.
    */
-  takeUpStamp(stamp: Stamp): void
+  takeUpStamp(stamp: Stamp, fit: StampFit | null = null): void
   {
-    this.#update({ stamp, blueprint: null, tool: 'stamp' });
+    this.#update({ stamp, blueprint: null, fit, tool: 'stamp' });
   }
 
   /**
    * Takes up a blueprint: its stamp becomes the stamp in hand, placed as linked copies of it, and the stamp tool the
-   * tool, as {@link takeUpStamp} does for a plain stamp.
+   * tool, as {@link takeUpStamp} does for a plain stamp. A blueprint's copies go down as it holds them, fitted to nothing.
    * @param {{ id: string, name: string, stamp: Stamp }} blueprint The blueprint: its id, its name and its stamp.
    */
   takeUpBlueprint(blueprint: BlueprintInHand & { readonly stamp: Stamp }): void
   {
     const { id, name, stamp } = blueprint;
-    this.#update({ stamp, blueprint: { id, name }, tool: 'stamp' });
+    this.#update({ stamp, blueprint: { id, name }, fit: null, tool: 'stamp' });
   }
 
   /**
@@ -243,4 +269,4 @@ class PaintState
 }
 
 export { INITIAL_PAINT_SETTINGS, isPaintingTool, PAINT_TOOLS, PaintState };
-export type { BlueprintInHand, PaintSettings, PaintSettingsListener, PaintTool };
+export type { BlueprintInHand, FittedStamp, PaintSettings, PaintSettingsListener, PaintTool, StampFit };

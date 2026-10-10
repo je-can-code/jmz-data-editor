@@ -117,13 +117,16 @@ const sharedOf = (field: MapPropertyField): SharedField =>
  * on the map as it goes and becomes one step when it is chosen; one still showing when the section goes, as when another
  * map is picked, is kept as that step. A change the map cannot take is refused, saying why. The section follows changes
  * to the map's own properties, and sits still while a brush paints or an event moves. A config its settings read only
- * once something needs it is asked for as the section shows, and each read of it shows the settings afresh.
+ * once something needs it is asked for as the section shows, and each read of it shows the settings afresh. A part of the
+ * section that draws itself, for a setting the map's own file never holds, shows below the settings, and follows what it
+ * reads on its own.
  * @param {{ mapId: number, map: MapDocument, section: MapPropertiesSection }} props The map and the section.
  * @returns {React.JSX.Element} The section.
  */
 const ModulePropertiesSection = (props: { mapId: number; map: MapDocument; section: MapPropertiesSection }) =>
 {
   const { mapId, map, section } = props;
+  const Body = section.body;
   const { hub } = useWorkspace().services;
   const [ failure, setFailure ] = useState<string | null>(null);
   const drag = useRef<ModulePropertyDrag | null>(null);
@@ -211,6 +214,7 @@ const ModulePropertiesSection = (props: { mapId: number; map: MapDocument; secti
             />
           </Box>
         ))}
+        {Body !== undefined && <Body mapId={mapId} map={map}/>}
         {failure !== null && (
           <Alert severity={'error'} sx={{ py: 0 }} onClose={() => setFailure(null)}>
             {`That change could not be made: ${failure}`}

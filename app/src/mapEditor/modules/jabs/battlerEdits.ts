@@ -690,5 +690,21 @@ const planBattlerChange = (page: RmmzEventPage, pageIndex: number, change: Battl
   return draft.edits;
 };
 
-export { planBattlerChange, SWITCH_WORDS };
+/**
+ * Gives a page a level the way the panel's level row writes one: over the last level line the page has, which the game
+ * reads, or as a new {@code <level:N>} line at the end of the comment holding the enemy. What the battler brush writes
+ * into each battler it places at a level, so a battler placed reads exactly as one given that level in the panel.
+ * @param {RmmzEventPage} page The page, which names an enemy.
+ * @param {number} level The level, a whole number.
+ * @returns {RmmzEventPage} A copy of the page at that level.
+ * @throws {Error} When the page names no enemy, which no battler page lacks.
+ */
+const pageAtLevel = (page: RmmzEventPage, level: number): RmmzEventPage =>
+{
+  const draft = new ListDraft(page, 0);
+  setNumber(draft, 'level', level);
+  return cloneJson(draft.pageOf(page));
+};
+
+export { pageAtLevel, planBattlerChange, SWITCH_WORDS };
 export type { BattlerChange, BattlerContext, NumberRow, SwitchRow };

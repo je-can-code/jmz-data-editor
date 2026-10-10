@@ -7,7 +7,7 @@ import type { StampOutcome } from '../../../../src/mapEditor/core/stamps/stampPl
 import type { TilesetLayering } from '../../../../src/mapEditor/core/tiles/layering.ts';
 import { makeAutotileId, TileId } from '../../../../src/mapEditor/core/tiles/tileIds.ts';
 import { regionBrush, SHADOW_BRUSH, singleTileBrush, tileBrush, type Brush } from '../../../../src/mapEditor/core/tools/brush.ts';
-import { INITIAL_PAINT_SETTINGS, PaintState, type BlueprintInHand, type PaintSettings } from '../../../../src/mapEditor/core/tools/PaintState.ts';
+import { INITIAL_PAINT_SETTINGS, PaintState, type BlueprintInHand, type PaintSettings, type StampFit } from '../../../../src/mapEditor/core/tools/PaintState.ts';
 import { ToolSession, type ToolPointer } from '../../../../src/mapEditor/core/tools/ToolSession.ts';
 import { holdBlueprints, holdBlueprintUses } from '../../support/blueprintFixtures.ts';
 import { stampOf } from '../../support/stampFixtures.ts';
@@ -966,23 +966,24 @@ describe('ToolSession: the stamp', () =>
 
   /**
    * Builds a session with a stamp in hand on the bench, hearing every outcome: a plain stamp, or a blueprint's stamp when
-   * a blueprint is named, the window then holding that blueprint under its id and an empty record of placements.
+   * a blueprint is named, the window then holding that blueprint under its id and an empty record of placements; or a
+   * stamp a brush took up with a fit.
    * @param {Stamp | null} stamp The stamp, or null for none picked.
-   * @param {{ blueprint?: BlueprintInHand, refusal?: string }} options The blueprint in hand, if any, and why the map may
-   * hold no links, if it may not.
+   * @param {{ blueprint?: BlueprintInHand, refusal?: string, fit?: StampFit }} options The blueprint in hand, if any, why
+   * the map may hold no links, if it may not, and how the stamp fits itself to the map, if it does.
    * @returns {{ bench: SessionBench, heard: StampOutcome[] }} The session and what it heard.
    */
-  const stamping = (stamp: Stamp | null, options: { readonly blueprint?: BlueprintInHand; readonly refusal?: string } = {}) =>
+  const stamping = (stamp: Stamp | null, options: { readonly blueprint?: BlueprintInHand; readonly refusal?: string; readonly fit?: StampFit } = {}) =>
   {
     const bench = benchWith(4, 3, meadow);
-    const { blueprint = null, refusal = null } = options;
+    const { blueprint = null, refusal = null, fit = null } = options;
     if (blueprint !== null)
     {
       holdBlueprints(bench.hub, { [blueprint.id]: { name: blueprint.name, stamp: stamp as Stamp } });
       holdBlueprintUses(bench.hub);
     }
 
-    const state = new PaintState({ ...INITIAL_PAINT_SETTINGS, tool: 'stamp', stamp, blueprint });
+    const state = new PaintState({ ...INITIAL_PAINT_SETTINGS, tool: 'stamp', stamp, blueprint, fit });
     const heard: StampOutcome[] = [];
     const session = new ToolSession({
       hub: bench.hub,
@@ -1090,6 +1091,45 @@ describe('ToolSession: the stamp', () =>
         'k18',
         [ 'Place blueprint "Dirt patch"' ],
       ]);
+  });
+
+  it('places a stamp a brush fitted to the map as it fits the map at each click, and says what fitting it came to', () =>
+  {
+    // Arrange: a brush whose stamp's event notes how many events the map held as it was fitted, beside the stamp it holds.
+    const held = stampOf({ events: [ { ...createMapEvent(1, 0, 0), note: 'held' } ] });
+    const fit: StampFit = map => ({
+      stamp: stampOf({ events: [ { ...createMapEvent(1, 0, 0), note: `fitted to ${map.eventIds().length}` } ] }),
+      words: `Level ${map.eventIds().length + 10} · this map's level`,
+    });
+    const { bench, heard } = stamping(held, { fit });
+
+    // Act: the preview over an empty map, then two clicks, each fitted to the map as it stood.
+    bench.session.move(at(1, 1));
+    const overlay = bench.session.overlay();
+    drag(bench.session, [ at(0, 1) ]);
+    drag(bench.session, [ at(2, 1) ]);
+
+    // Assert.
+    expect([ overlay.hoverLabel, overlay.ghostEvents.map(ghost => [ ghost.x, ghost.y ]), bench.map.event(1)?.note, bench.map.event(2)?.note, heard.map(outcome => outcome.ok) ])
+      .toStrictEqual([ 'Level 10 · this map\'s level', [ [ 1, 1 ] ], 'fitted to 0', 'fitted to 1', [ true, true ] ]);
+  });
+
+  it('says what stands in the way of a fitted stamp rather than what fitting it came to', () =>
+  {
+    // Arrange: a fitted stamp, one placed already where the pointer then rests.
+    const fit: StampFit = () => ({ stamp: stampOf({ events: [ createMapEvent(1, 0, 0) ] }), words: 'Level 12 · this map\'s setting' });
+    const { bench } = stamping(stampOf({ events: [ createMapEvent(1, 0, 0) ] }), { fit });
+    drag(bench.session, [ at(1, 1) ]);
+
+    // Act.
+    bench.session.move(at(1, 1));
+    const blocked = bench.session.overlay();
+    bench.session.move(at(2, 1));
+    const clear = bench.session.overlay();
+
+    // Assert.
+    expect([ blocked.hoverLabel, clear.hoverLabel ])
+      .toStrictEqual([ 'Another event is in the way', 'Level 12 · this map\'s setting' ]);
   });
 
   it('names a blueprint in hand as a blueprint beside its footprint, where a plain stamp is named a stamp', () =>

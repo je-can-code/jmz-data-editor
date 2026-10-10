@@ -3,7 +3,10 @@ import { Autocomplete, Box, Button, TextField, Typography } from '@mui/material'
 import type { EnemyBattlerPage } from '../../core/api/MapEditorApi.ts';
 import type { PalettePickerProps } from '../../core/modules/PluginModule.ts';
 import { useMapEditorServices } from '../../services/MapEditorServicesContext.tsx';
+import { battlerLevelFit } from './battlerLevelFit.ts';
+import { NEW_BATTLER_LEVELS_DOCUMENT } from './battlerLevelSetting.ts';
 import { battlerLookOf, battlerStamp, type BattlerLook } from './battlerLooks.ts';
+import type { BattlerSetup } from './battlerSetup.ts';
 import { enemyOptions, useEnemies, type EnemyOption } from './enemyBook.ts';
 
 /**
@@ -16,9 +19,21 @@ type HeldBattler = {
 };
 
 /**
- * Words what the brush places for the enemy picked: a copy of the most common of the enemy's battlers already placed,
- * at the enemy's own level where those give one of their own, or the game's most common battler for an enemy placed
- * nowhere yet.
+ * What reading an enemy's battlers came to: the battlers, none when they could not be read, and why not, or null.
+ */
+type BattlersRead = {
+  readonly found: readonly EnemyBattlerPage[];
+  readonly problem: string | null;
+};
+
+/**
+ * What the brush says of a battler's level while J-LevelMaster is on: each map gives its own, which the pointer shows.
+ */
+const LEVEL_WORDS = 'Its level follows the map it lands on, shown beside the pointer.';
+
+/**
+ * Words what the brush places for the enemy picked: a copy of the most common of the enemy's battlers already placed, or
+ * the game's most common battler for an enemy placed nowhere yet.
  * @param {BattlerLook} look What it places.
  * @returns {string} The line.
  */
@@ -29,25 +44,34 @@ const lookWords = (look: BattlerLook): string =>
     return 'No battler of this enemy stands on any saved map yet, so each click places the game\'s most common battler, with no picture.';
   }
 
-  const like = look.of === 1
-    ? 'Each click places a battler like the one this enemy already has'
-    : `Each click places a battler like ${look.copies} of the ${look.of} this enemy already has`;
-  return look.levelLeft
-    ? `${like}, but at the enemy's own level.`
-    : `${like}.`;
+  return look.of === 1
+    ? 'Each click places a battler like the one this enemy already has.'
+    : `Each click places a battler like ${look.copies} of the ${look.of} this enemy already has.`;
+};
+
+/**
+ * Words why something the brush reads could not be read.
+ * @param {unknown} error What went wrong.
+ * @returns {string} The reason, as the error gives it.
+ */
+const reasonOf = (error: unknown): string =>
+{
+  return error instanceof Error ? error.message : String(error);
 };
 
 /**
  * The battler brush, at the top of the Stamps panel: pick an enemy by name, and each click on a map places a battler of
- * it, shaped like most of its battlers already placed, as one step. Esc, or picking the stamp tool's tool again, puts it
- * down; picking the same enemy again puts it down too.
- * @param {PalettePickerProps} props How to take up a stamp, and the stamp in hand.
+ * it, shaped like most of its battlers already placed, as one step. While J-LevelMaster is on, each battler starts at the
+ * level its map calls for (see battlerLevelFit), which the pointer says before the click. Esc, or picking the stamp tool's
+ * tool again, puts it down; picking the same enemy again puts it down too.
+ * @param {PalettePickerProps & { setup: BattlerSetup }} props How to take up a stamp, the stamp in hand, and what the
+ * brush reads battlers with.
  * @returns {React.JSX.Element} The brush.
  */
-const BattlerBrush = (props: PalettePickerProps) =>
+const BattlerBrush = (props: PalettePickerProps & { readonly setup: BattlerSetup }) =>
 {
-  const { takeUp, putDown, inHand, newStampId } = props;
-  const { api } = useMapEditorServices();
+  const { takeUp, putDown, inHand, newStampId, setup } = props;
+  const { api, hub, openDocument } = useMapEditorServices();
   const enemies = useEnemies(api);
   const [ held, setHeld ] = useState<HeldBattler | null>(null);
   const [ reading, setReading ] = useState(false);
@@ -58,7 +82,26 @@ const BattlerBrush = (props: PalettePickerProps) =>
   const holding = held !== null && inHand === held.stampId;
 
   /**
-   * Takes up a battler of an enemy as the brush, once its battlers already placed are read.
+   * Holds the levels set for each map in Map Properties, which every battler placed reads, while J-LevelMaster is on to
+   * read a battler's level at all. Levels that cannot be read leave each map with the level its battlers already use, and
+   * the brush says why.
+   * @returns {Promise<string | null>} Settles once they are held, with null, or with why they could not be read.
+   */
+  const holdLevels = (): Promise<string | null> =>
+  {
+    if (setup.levels === false)
+    {
+      return Promise.resolve(null);
+    }
+
+    return openDocument(NEW_BATTLER_LEVELS_DOCUMENT)
+      .then(() => null)
+      .catch((error: unknown) => `The levels set for each map could not be read (${reasonOf(error)}), so each map's battlers alone say which level a battler takes.`);
+  };
+
+  /**
+   * Takes up a battler of an enemy as the brush, once its battlers already placed, and the levels set for each map, are
+   * read.
    * @param {EnemyOption | null} option The enemy, or null for none.
    */
   const pick = (option: EnemyOption | null) =>
@@ -72,17 +115,16 @@ const BattlerBrush = (props: PalettePickerProps) =>
     const ask = latest.current;
     const name = enemies[option.id]?.name ?? '';
     const load = api?.loadEnemyBattlerPages;
-    const battlers: Promise<EnemyBattlerPage[]> = load === undefined ? Promise.resolve([]) : load.call(api, option.id);
+    const read: Promise<EnemyBattlerPage[]> = load === undefined ? Promise.resolve([]) : load.call(api, option.id);
     setReading(true);
     setProblem(null);
-    battlers
-      .catch((error: unknown) =>
-      {
-        // a project whose battlers cannot be read still places the game's most common battler, and says why.
-        setProblem(`The enemy's battlers could not be read (${error instanceof Error ? error.message : String(error)}), so this is the game's most common battler.`);
-        return [];
-      })
-      .then(found =>
+
+    // a project whose battlers cannot be read still places the game's most common battler, and says why.
+    const battlers: Promise<BattlersRead> = read
+      .then(found => ({ found, problem: null }))
+      .catch((error: unknown) => ({ found: [], problem: `The enemy's battlers could not be read (${reasonOf(error)}), so this is the game's most common battler.` }));
+    Promise.all([ battlers, holdLevels() ])
+      .then(([ { found, problem: unread }, unheld ]) =>
       {
         if (ask !== latest.current)
         {
@@ -91,8 +133,9 @@ const BattlerBrush = (props: PalettePickerProps) =>
 
         const look = battlerLookOf(option.id, name, found);
         const stamp = battlerStamp(newStampId(), look);
-        takeUp(stamp);
+        takeUp(stamp, setup.levels ? battlerLevelFit(hub, stamp, option.id) : null);
         setHeld({ stampId: stamp.id, enemyId: option.id, look });
+        setProblem(unread ?? unheld);
       })
       .finally(() =>
       {
@@ -132,6 +175,11 @@ const BattlerBrush = (props: PalettePickerProps) =>
           <Typography variant={'caption'} color={'text.secondary'} sx={{ display: 'block' }} data-testid={'battler-brush-look'}>
             {problem ?? lookWords(held.look)}
           </Typography>
+          {setup.levels && (
+            <Typography variant={'caption'} color={'text.secondary'} sx={{ display: 'block' }} data-testid={'battler-brush-level'}>
+              {LEVEL_WORDS}
+            </Typography>
+          )}
           <Button size={'small'} onClick={putDown}>
             Put it down
           </Button>
@@ -143,13 +191,14 @@ const BattlerBrush = (props: PalettePickerProps) =>
 
 /**
  * Makes the battler brush's picker.
+ * @param {BattlerSetup} setup What the brush reads battlers with: whether J-LevelMaster is on, among the rest.
  * @returns {ComponentType<PalettePickerProps>} The picker.
  */
-const battlerBrushFor = (): ComponentType<PalettePickerProps> =>
+const battlerBrushFor = (setup: BattlerSetup): ComponentType<PalettePickerProps> =>
 {
-  const Picker = (props: PalettePickerProps) => <BattlerBrush {...props}/>;
+  const Picker = (props: PalettePickerProps) => <BattlerBrush {...props} setup={setup}/>;
   Picker.displayName = 'Palette(jabs.battlers)';
   return Picker;
 };
 
-export { BattlerBrush, battlerBrushFor, lookWords };
+export { BattlerBrush, battlerBrushFor, LEVEL_WORDS, lookWords };
