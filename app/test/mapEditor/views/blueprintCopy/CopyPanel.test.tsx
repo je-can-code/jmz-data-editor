@@ -40,7 +40,8 @@ vi.mock('../../../../src/mapEditor/views/moveRoute/RoutePreview.tsx', () => ({ R
  *
  * From the panel a number is pinned or unpinned, any field follows the blueprint again, the whole copy follows it again,
  * and the copy is unlinked, each one step in the event's own history, never the map's. Its Note box shows the note's own
- * text, the link kept out of the way, and what is typed there goes back before the link, never losing it. A copy drifted
+ * text, the link kept out of the way, and what is typed there goes back before the link, never losing it; what it
+ * refuses stays in the box as typed, with why beneath it, until it is mended or Escape puts the note back. A copy drifted
  * too far for a change to reach it, or whose blueprint is gone, says so and offers what can still be done; and until the
  * project's plugins are read, nothing is told, since a module's numbers would read as comments set by hand.
  */
@@ -142,6 +143,17 @@ describe('CopyPanel', () =>
    * @returns {string[]} The steps' names.
    */
   const steps = (hub: DocumentHub): string[] => hub.history(HISTORY).rows.map(row => row.label);
+
+  /**
+   * Reads what a field says beneath it, as the words it is described by.
+   * @param {HTMLElement} field The field.
+   * @returns {string | null} The words, or null when it says nothing beneath it.
+   */
+  const describedBy = (field: HTMLElement): string | null =>
+  {
+    const id = field.getAttribute('aria-describedby');
+    return id === null ? null : document.getElementById(id)?.textContent ?? null;
+  };
 
   it('says what the copy copies, how it stands as a whole, and where its numbers and the fields standing apart stand', () =>
   {
@@ -277,19 +289,70 @@ describe('CopyPanel', () =>
       ]);
   });
 
-  it('refuses a second link typed in the Note box, saying why, and keeps the note', () =>
+  it('refuses a second link typed in the Note box, keeping what was typed there with why beneath it, and the note', () =>
   {
     // Arrange.
     const { hub } = renderCopy({ copy: copyOf(needler()) });
-    const note = screen.getByLabelText('Note');
+    const note = screen.getByLabelText('Note') as HTMLInputElement;
 
     // Act.
-    fireEvent.change(note, { target: { value: '<blueprint:[aa22, 1]>' } });
+    fireEvent.change(note, { target: { value: 'Guards the gate\n<blueprint:[aa22, 1]>' } });
+    fireEvent.blur(note);
+
+    // Assert: the refusal sits beside the box, never in a passing notice.
+    expect([ copyIn(hub).note, steps(hub), note.value, describedBy(note), note.getAttribute('aria-invalid'), screen.queryByRole('alert') ])
+      .toStrictEqual([
+        '<blueprint:[k3x9q2mf, 2]>',
+        [],
+        'Guards the gate\n<blueprint:[aa22, 1]>',
+        'This event\'s link to its blueprint is kept for you, so the note can\'t hold a second one.',
+        'true',
+        null,
+      ]);
+  });
+
+  it('keeps a stray < typed in the Note box with why beneath it, and puts the note\'s own text back on Escape', () =>
+  {
+    // Arrange: a copy noting "Guards the gate", the stray < typed and refused.
+    const { hub } = renderCopy({ copy: copyOf({ ...needler(), note: 'Guards the gate' }) });
+    const note = screen.getByLabelText('Note') as HTMLInputElement;
+    fireEvent.change(note, { target: { value: 'Guards the <north gate' } });
+    fireEvent.blur(note);
+    const refused = [ note.value, describedBy(note) ];
+
+    // Act.
+    fireEvent.keyDown(note, { key: 'Escape' });
+
+    // Assert.
+    expect([ refused, note.value, describedBy(note), note.getAttribute('aria-invalid'), copyIn(hub).note, steps(hub) ])
+      .toStrictEqual([
+        [
+          'Guards the <north gate',
+          'The note can\'t be written: a stray < in it gets mixed up with the blueprint link; take that < out, or finish its tag with a >, then try again.',
+        ],
+        'Guards the gate',
+        null,
+        'false',
+        'Guards the gate\n<blueprint:[k3x9q2mf, 2]>',
+        [],
+      ]);
+  });
+
+  it('writes the Note box once the refused text is mended, and the refusal goes', () =>
+  {
+    // Arrange: a second link typed and refused.
+    const { hub } = renderCopy({ copy: copyOf(needler()) });
+    const note = screen.getByLabelText('Note') as HTMLInputElement;
+    fireEvent.change(note, { target: { value: 'Guards the gate <blueprint:[aa22, 1]>' } });
+    fireEvent.blur(note);
+
+    // Act: the link taken out again, and the box left.
+    fireEvent.change(note, { target: { value: 'Guards the gate' } });
     fireEvent.blur(note);
 
     // Assert.
-    expect([ copyIn(hub).note, steps(hub), screen.getByText('This event\'s link to its blueprint is kept for you, so the note can\'t hold a second one.') !== null ])
-      .toStrictEqual([ '<blueprint:[k3x9q2mf, 2]>', [], true ]);
+    expect([ copyIn(hub).note, steps(hub), note.value, describedBy(note) ])
+      .toStrictEqual([ 'Guards the gate\n<blueprint:[k3x9q2mf, 2]>', [ 'Edit event note' ], 'Guards the gate', null ]);
   });
 
   it('opens the event of the blueprint the copy was made from in its own window', () =>

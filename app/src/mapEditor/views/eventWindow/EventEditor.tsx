@@ -240,6 +240,25 @@ const EventEditor = (props: { readonly target: EventWindowTarget }) =>
   };
 
   /**
+   * Writes what the author typed in the Note box, handing back why when it is refused, for the box to show beneath what
+   * was typed, which it keeps; an unexpected failure is handed back the same way rather than lost.
+   * @param {string} note The note as the box holds it.
+   * @returns {string | null} Why it was refused, or null when it was written.
+   */
+  const writeNote = (note: string): string | null =>
+  {
+    try
+    {
+      const outcome = setEventNote(hub, target, note);
+      return outcome.ok ? null : outcome.message;
+    }
+    catch (error)
+    {
+      return (error as Error).message;
+    }
+  };
+
+  /**
    * Tells the author when an undo, a redo or a jump stopped short, or moved leaving copies of a blueprint changed since as
    * they stand; an empty history says nothing.
    * @param {HistoryOutcome} outcome What it came to.
@@ -332,7 +351,7 @@ const EventEditor = (props: { readonly target: EventWindowTarget }) =>
         dirty={hub.isDirty(key)}
         saving={saving}
         onRename={name => run(() => renameEvent(hub, target, name))}
-        onNote={note => run(() => setEventNote(hub, target, note))}
+        onNote={writeNote}
         onUndo={undo}
         onRedo={redo}
         onJump={stepId => router.jumpTo(history, stepId).then(takeHistory).catch(() => undefined)}

@@ -29,7 +29,12 @@ type EventHeaderProps = {
   readonly saving: boolean;
 
   readonly onRename: (name: string) => void;
-  readonly onNote: (note: string) => void;
+
+  /**
+   * Writes what the author typed in the Note box, handing back why when it was refused, which the box shows beneath
+   * what was typed, keeping it; null when it was written.
+   */
+  readonly onNote: (note: string) => string | null;
   readonly onUndo: () => void;
   readonly onRedo: () => void;
   readonly onJump: (stepId: string | null) => void;
@@ -39,7 +44,8 @@ type EventHeaderProps = {
 /**
  * The top of an event window: the event's name and note, undo and redo of its own history (each naming the step it
  * would move), the whole history to jump through, and saving the map. The note is the editor's own; anything the
- * author writes there is kept exactly, and a copy's link to its blueprint stays out of the box, kept for them.
+ * author writes there is kept exactly, and a copy's link to its blueprint stays out of the box, kept for them. A note
+ * refused, such as one holding a second link, stays in the box as typed, with why beneath it.
  * @param {EventHeaderProps} props The event, what its Note box shows, its history and save state, and where each choice
  * goes.
  * @returns {React.JSX.Element} The header.
