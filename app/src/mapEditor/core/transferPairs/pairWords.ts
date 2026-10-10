@@ -1,6 +1,7 @@
 import { landingWords, type LandingProblem } from '../locations/landingCheck.ts';
 import type { MapCell } from '../renderer/camera.ts';
 import type { PairMap, PairPicks, PairPlan } from './pairPlans.ts';
+import type { EdgeStrip } from './pairShapes.ts';
 
 /**
  * What placing transfers says under the two maps: what to do next, or what the picks place, and whether that is a
@@ -69,21 +70,19 @@ const landsWords = (plan: PairPlan, index: number, mapName: (mapId: number) => s
 };
 
 /**
- * Names the end a transfer leaves by, as the readout starts with it: the door, or the strip along an edge.
- * @param {PairPicks} picks What the author picked.
+ * Names the end a planned transfer leaves by, as the readout starts with it: the door, or the strip along an edge.
+ * @param {PairPicks} picks What the author picked, which a plan was made from, so the door or the strip is picked.
  * @returns {string} The words, such as "The door on 14, 6".
  */
 const startWords = (picks: PairPicks): string =>
 {
-  const { kind, door, strip } = picks;
-  if (kind === 'door' && door !== null)
+  if (picks.kind === 'door')
   {
-    return `The door on ${tileWords(door)}`;
+    return `The door on ${tileWords(picks.door as MapCell)}`;
   }
 
-  return strip === null
-    ? 'The transfer'
-    : `The ${strip.length}-tile strip along the ${strip.edge} edge`;
+  const strip = picks.strip as EdgeStrip;
+  return `The ${strip.length}-tile strip along the ${strip.edge} edge`;
 };
 
 /**
@@ -102,8 +101,9 @@ const planWords = (picks: PairPicks, plan: PairPlan, mapName: (mapId: number) =>
     return `${there}. No way back is placed.`;
   }
 
-  const back = kind === 'door' && exit !== null
-    ? `the way out on ${tileWords(exit)}`
+  // a door planned both ways has its way out picked.
+  const back = kind === 'door'
+    ? `the way out on ${tileWords(exit as MapCell)}`
     : 'the strip on the other edge';
   return `${there}; ${back} ${landsWords(plan, 1, mapName)}.`;
 };
@@ -140,19 +140,21 @@ const pairReadout = (
 ): PairReadout =>
 {
   const next = nextPickWords(picks, far);
-  if (next !== null || plan === null)
+  if (next !== null)
   {
-    return { text: next ?? '', problem: false };
+    return { text: next, problem: false };
   }
 
-  const failing = plan.ends.findIndex((_end, index) => (problems[index] ?? null) !== null);
+  // with every pick its kind needs made, the picks always plan something.
+  const planned = plan as PairPlan;
+  const failing = planned.ends.findIndex((_end, index) => (problems[index] ?? null) !== null);
   if (failing >= 0)
   {
-    const { destination } = plan.ends[failing];
+    const { destination } = planned.ends[failing];
     return { text: landingRefusalWords(destination, mapName(destination.mapId), problems[failing] as LandingProblem), problem: true };
   }
 
-  return { text: planWords(picks, plan, mapName), problem: false };
+  return { text: planWords(picks, planned, mapName), problem: false };
 };
 
 /**

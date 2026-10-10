@@ -217,6 +217,54 @@ describe('placeTransfers', () =>
       .toStrictEqual([ 'Transfer (Elsewhere) (event 1) already covers some of those tiles in Northeast Section.', true ]);
   });
 
+  it('refuses two ends on the same tile of one map, and an unnamed edge exit\'s tiles, saying so', async () =>
+  {
+    // Arrange: a door and its way out on one tile; and an unnamed strip along the inside map's top.
+    const disk = pairDisk();
+    const inside = disk.get(INSIDE) as RmmzMap;
+    disk.set(INSIDE, { ...inside, events: [ null, stripEvent(1, { x: 3, y: 7, width: 4, height: 1 }, '', '', { mapId: 5, x: 3, y: 1, facing: 2 }) ] });
+    const window = pairWindow({ disk });
+
+    // Act.
+    const stacked = await placeTransfers(window.sources, planOn(window, { ...DOOR_PAIR, exit: { x: 5, y: 3 } }, OUTSIDE));
+    const overStrip = await placeTransfers(window.sources, planOn(window, DOOR_PAIR));
+
+    // Assert.
+    expect([ refusalOf(stacked), refusalOf(overStrip) ])
+      .toStrictEqual([ 'Both ends would stand on the same tiles in Northeast Section.', 'An event (event 1) already covers some of those tiles in Entrance.' ]);
+  });
+
+  it('refuses when the map a transfer lands on has no tileset to judge it by', async () =>
+  {
+    // Arrange: a window that can judge no map.
+    const window = pairWindow();
+
+    // Act.
+    const outcome = await placeTransfers({ ...window.sources, groundOf: () => null }, planOn(window, DOOR_PAIR));
+
+    // Assert.
+    expect(refusalOf(outcome))
+      .toBe('Entrance\'s tileset can\'t be read, so where the player lands there can\'t be checked.');
+  });
+
+  it('reads the file of a held map with unsaved edits again when the window lost track of it, to plan what it takes', async () =>
+  {
+    // Arrange: the outside map holding an unsaved event, and the window no longer knowing what its file holds.
+    const window = pairWindow({ held: [ OUTSIDE, INSIDE ] });
+    createEvent(window.hub, OUTSIDE, { x: 2, y: 2 });
+    window.hub.notePatched(mapDocumentKey(OUTSIDE), [ { kind: 'set', path: [ 'note' ], before: 'not what it holds', after: 'x' } ]);
+    const lost = window.hub.fileContent(mapDocumentKey(OUTSIDE));
+
+    // Act.
+    const outcome = await placeTransfers(window.sources, planOn(window, DOOR_PAIR));
+
+    // Assert: the file, read again, takes the door behind an empty slot, as it would had the window known it.
+    const version = outcome.ok ? outcome.step.fileVersions?.[0] : undefined;
+    const patch = version?.patches[0];
+    expect([ lost, version?.document, patch?.kind === 'splice' && [ patch.index, patch.inserted.length ] ])
+      .toStrictEqual([ null, mapDocumentKey(OUTSIDE), [ 1, 2 ] ]);
+  });
+
   it('refuses a strip running off the map it is planned for', async () =>
   {
     // Arrange: a strip planned for a map wider than the outside map really is.
@@ -317,6 +365,37 @@ describe('placeTransfers', () =>
     // Assert.
     expect([ undone, events() ])
       .toStrictEqual([ [ null, null ], [ 'Transfer (Entrance)', 'Transfer (Northeast Section)' ] ]);
+  });
+
+  it('waits for an edit under way to end, and refuses a map let go of while the other was read, placing nothing', async () =>
+  {
+    // Arrange: a stroke open on the outside map; and a window letting the outside map go while it reads the inside one.
+    const busy = pairWindow({ held: [ OUTSIDE, INSIDE ] });
+    const stroke = busy.hub.begin('Paint', [ mapHistoryKey(OUTSIDE) ]);
+    const letGo = pairWindow();
+    const before = structuredClone(letGo.disk.get(INSIDE));
+    const sources = {
+      ...letGo.sources,
+      readMap: async (mapId: number) =>
+      {
+        letGo.hub.release(mapDocumentKey(OUTSIDE));
+        return structuredClone(letGo.disk.get(mapId) as RmmzMap);
+      },
+    };
+
+    // Act.
+    const during = await placeTransfers(busy.sources, planOn(busy, DOOR_PAIR));
+    stroke.cancel();
+    const lost = await placeTransfers(sources, planOn(letGo, DOOR_PAIR));
+
+    // Assert.
+    expect([ refusalOf(during), busy.hub.map(mapDocumentKey(OUTSIDE)).event(1), refusalOf(lost), letGo.disk.get(INSIDE) ])
+      .toStrictEqual([
+        'Finish what is under way on the map first, then place the transfer.',
+        null,
+        'A map was closed while the transfer was being placed; place it again.',
+        before,
+      ]);
   });
 
   it('says why one of the window\'s checks refused the step, placing nothing', async () =>

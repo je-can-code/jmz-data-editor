@@ -154,9 +154,9 @@ type PairWindow = {
   readonly brought: DocumentKey[];
 
   /**
-   * Fails the next act with an error, as a refused write does.
+   * Fails the next act with what it is given, as a refused write does.
    */
-  readonly failNextWrite: (error: Error) => void;
+  readonly failNextWrite: (error: unknown) => void;
 
   /**
    * Holds the next act on its way until the function handed back is called, as a slow disk would.
@@ -234,7 +234,7 @@ const pairWindow = (setUp: PairWindowSetUp = {}): PairWindow =>
   const acts: MapChangesWrite[] = [];
   const problems: { message: string; alarm: boolean }[] = [];
   const brought: DocumentKey[] = [];
-  let failure: Error | null = null;
+  let failure: { readonly error: unknown } | null = null;
   let holding: Promise<void> | null = null;
   const write = async (act: MapChangesWrite): Promise<void> =>
   {
@@ -250,7 +250,7 @@ const pairWindow = (setUp: PairWindowSetUp = {}): PairWindow =>
 
     if (failure !== null)
     {
-      const error = failure;
+      const { error } = failure;
       failure = null;
       throw error;
     }
@@ -296,9 +296,9 @@ const pairWindow = (setUp: PairWindowSetUp = {}): PairWindow =>
     problems,
     sources,
     brought,
-    failNextWrite: (error: Error) =>
+    failNextWrite: (error: unknown) =>
     {
-      failure = error;
+      failure = { error };
     },
     holdNextWrite: () =>
     {

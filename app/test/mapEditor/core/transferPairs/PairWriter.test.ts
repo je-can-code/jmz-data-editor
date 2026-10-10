@@ -290,6 +290,98 @@ describe('PairWriter', () =>
       .toStrictEqual([ [ false, true ], true, false, 'Transfer (Northeast Section)' ]);
   });
 
+  it('waits for an edit under way to end before taking a refused pair back, nothing moving under the stroke', async () =>
+  {
+    // Arrange: the placing act held on its way and then refused, and a stroke opened on the inside map meanwhile.
+    const window = pairWindow({ held: [ OUTSIDE, INSIDE ] });
+    const release = window.holdNextWrite();
+    window.failNextWrite(new Error('the disk is full'));
+    const plan = pairPlanOf(DOOR_PAIR, pairMapOf(window.disk, OUTSIDE), pairMapOf(window.disk, INSIDE), PAIR_LOOKS) as PairPlan;
+    await placeTransfers(window.sources, plan);
+    const stroke = window.hub.begin('Paint', [ mapHistoryKey(INSIDE) ]);
+
+    // Act.
+    release();
+    await settlePairs();
+    const duringStroke = window.hub.map(mapDocumentKey(OUTSIDE)).event(1)?.name ?? null;
+    stroke.cancel();
+    await new Promise(resolve =>
+    {
+      setTimeout(resolve, 80);
+    });
+
+    // Assert: the door stood while the stroke was open, and went once it ended.
+    expect([ duringStroke, window.hub.map(mapDocumentKey(OUTSIDE)).event(1), window.problems.length, window.writer.hasUnwritten() ])
+      .toStrictEqual([ 'Transfer (Entrance)', null, 1, false ]);
+  });
+
+  it('alarms over a refused pair no history can take back any more, forgotten while it was on its way', async () =>
+  {
+    // Arrange: the placing act held on its way and then refused with something that is no error.
+    const window = pairWindow({ held: [ OUTSIDE, INSIDE ] });
+    const release = window.holdNextWrite();
+    window.failNextWrite('the server went away');
+    const plan = pairPlanOf(DOOR_PAIR, pairMapOf(window.disk, OUTSIDE), pairMapOf(window.disk, INSIDE), PAIR_LOOKS) as PairPlan;
+    const outcome = await placeTransfers(window.sources, plan);
+
+    // Act.
+    window.hub.forgetStep(outcome.ok ? outcome.step.id : '');
+    release();
+    await settlePairs();
+
+    // Assert.
+    expect([ window.problems, window.writer.hasUnwritten() ])
+      .toStrictEqual([ [ { message: 'The transfer pair could not be written (the server went away), and "Place door pair" could not be taken back: undo it by hand.', alarm: true } ], true ]);
+  });
+
+  it('tells a listener added later of a problem until it stops listening, and writes nothing once stopped', async () =>
+  {
+    // Arrange: a listener of its own, and a refused act.
+    const window = pairWindow({ held: [ OUTSIDE, INSIDE ] });
+    const heard: string[] = [];
+    const stopListening = window.writer.onProblem(message => heard.push(message));
+    window.failNextWrite(new Error('first'));
+    await placeDoorPair(window);
+
+    // Act: the listener gone, a second refused act, then the writer stopped and the pair placed again.
+    stopListening();
+    window.failNextWrite(new Error('second'));
+    await placeDoorPair(window);
+    window.writer.stop();
+    await placeDoorPair(window);
+
+    // Assert: the listener heard the first alone; the window's own heard both; the last pair went nowhere.
+    expect([ heard, window.problems.length, window.acts.length, onDisk(window, OUTSIDE, 1) ])
+      .toStrictEqual([ [ 'The transfer pair could not be written, so it was taken back: first.' ], 2, 2, null ]);
+  });
+
+  it('writes whatever patches a pair holds, its maps alone, and cannot tell a map\'s file a move on its way no longer fits', async () =>
+  {
+    // Arrange: a pair renaming both maps and one in the map tree, its act held on its way.
+    const window = pairWindow({ held: [ OUTSIDE, INSIDE ] });
+    window.hub.adopt('mapinfos', [ null, { id: 1, name: 'Old' } ]);
+    const release = window.holdNextWrite();
+    const step = window.hub.edit('Rename both', [ mapHistoryKey(OUTSIDE) ], tx =>
+    {
+      tx.set(mapDocumentKey(OUTSIDE), [ 'displayName' ], 'Outside');
+      tx.set(mapDocumentKey(INSIDE), [ 'displayName' ], 'Inside');
+      tx.set('mapinfos', [ 1, 'name' ], 'New');
+      tx.join([ mapHistoryKey(INSIDE) ]);
+    }) as HistoryStep;
+
+    // Act: the outside map's file found renamed otherwise while the act is on its way, then the act let go.
+    const renamed = structuredClone(window.disk.get(OUTSIDE)) as RmmzMap;
+    renamed.displayName = 'Elsewhere';
+    window.hub.noteWritten(mapDocumentKey(OUTSIDE), renamed as unknown as JsonValue);
+    const guarded = window.writer.guard(step, 'backward');
+    release();
+    await settlePairs();
+
+    // Assert: one act naming both maps alone; the file on its way could not be told apart, so nothing was named.
+    expect([ isPairStep(step), window.acts.map(act => act.maps.map(each => [ each.map, each.patches.length ])), guarded, (window.disk.get(INSIDE) as RmmzMap).displayName ])
+      .toStrictEqual([ true, [ [ [ OUTSIDE, 1 ], [ INSIDE, 1 ] ] ], null, 'Inside' ]);
+  });
+
   describe('isPairStep', () =>
   {
     it('reads a step changing two maps as a pair, and neither a step on one map nor a blueprint\'s change', () =>

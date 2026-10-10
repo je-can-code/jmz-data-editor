@@ -461,11 +461,16 @@ const placeTransfers = async (sources: PlacementSources, plan: PairPlan): Promis
     return refused(gathered);
   }
 
-  // whatever changed while the files were read, the maps are taken as they stand now.
-  const maps = endMaps.map(mapId => endMapOf(hub, mapId, gathered.files));
-  if (maps.some(side => side === null) || hub.isEditing())
+  // whatever changed while the files were read, the maps are taken as they stand now, and nothing moves under a stroke.
+  if (hub.isEditing())
   {
-    return refused('A map changed while the transfer was being placed; place it again.');
+    return refused('Finish what is under way on the map first, then place the transfer.');
+  }
+
+  const maps = endMaps.map(mapId => endMapOf(hub, mapId, gathered.files));
+  if (maps.some(side => side === null))
+  {
+    return refused('A map was closed while the transfer was being placed; place it again.');
   }
 
   const sides = maps as EndMap[];
@@ -489,10 +494,11 @@ const placeTransfers = async (sources: PlacementSources, plan: PairPlan): Promis
     }
   }
 
+  // every placement changes its maps, so a step the hub did not record is one a check refused, saying why.
   const { step, refusal } = commit(hub, plan, sides, events);
   if (step === null)
   {
-    return refused(refusal ?? 'Nothing was placed.');
+    return refused(refusal as string);
   }
 
   return { ok: true, step, placed: plan.ends.map(end => ({ mapId: end.mapId, eventId: (events.get(end) as RmmzMapEvent).id })) };

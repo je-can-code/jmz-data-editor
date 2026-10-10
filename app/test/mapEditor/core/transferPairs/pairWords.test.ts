@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { NO_PICKS, pairPlanOf, type PairLooks, type PairMap, type PairPicks } from '../../../../src/mapEditor/core/transferPairs/pairPlans.ts';
-import { landingRefusalWords, pairReadout } from '../../../../src/mapEditor/core/transferPairs/pairWords.ts';
+import { landingRefusalWords, pairReadout, placedWords } from '../../../../src/mapEditor/core/transferPairs/pairWords.ts';
 
 /*
  * Under the two maps, placing transfers says one thing at a time, in words for an author: what to pick next, in the order
@@ -99,6 +99,27 @@ describe('pairWords', () =>
       // Assert.
       expect(readout)
         .toStrictEqual({ text: 'The player can\'t land on 14, 7 in Northeast Section. The tiles there let no one through.', problem: true });
+    });
+  });
+
+  describe('placedWords', () =>
+  {
+    it('says what was placed, by kind and by ways', () =>
+    {
+      // Arrange: each kind both ways and one way.
+      const all = [
+        picked({ kind: 'door', ways: 'both' }),
+        picked({ kind: 'edge', ways: 'both' }),
+        picked({ kind: 'door', ways: 'one' }),
+        picked({ kind: 'edge', ways: 'one' }),
+      ];
+
+      // Act.
+      const words = all.map(placedWords);
+
+      // Assert.
+      expect(words)
+        .toStrictEqual([ 'Door pair placed.', 'Edge pair placed.', 'One-way door placed.', 'One-way edge placed.' ]);
     });
   });
 
