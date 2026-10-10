@@ -5,6 +5,7 @@ import { FrameTimeRecorder, type FrameTimings } from './FrameTimeRecorder.ts';
 import {
   GAME_LOOK,
   NO_OVERLAY_STATE,
+  type FootprintReader,
   type LayerVisibility,
   type MapContextMenu,
   type MapRenderer,
@@ -45,6 +46,8 @@ class HeadlessMapRenderer implements MapRenderer
 
   #markerClassifier: MarkerClassifier | null = null;
 
+  #footprintReader: FootprintReader | null = null;
+
   #frames = new FrameTimeRecorder();
 
   #destroyed = false;
@@ -71,6 +74,7 @@ class HeadlessMapRenderer implements MapRenderer
       passabilityRules: this.#rules,
       overlayRefreshes: this.#overlayRefreshes,
       markerClassifier: this.#markerClassifier,
+      footprintReader: this.#footprintReader,
       destroyed: this.#destroyed,
     };
   }
@@ -129,6 +133,11 @@ class HeadlessMapRenderer implements MapRenderer
   setEventMarkers(classify: MarkerClassifier): void
   {
     this.#markerClassifier = classify;
+  }
+
+  setEventFootprints(read: FootprintReader): void
+  {
+    this.#footprintReader = read;
   }
 
   onContextMenu(listener: (menu: MapContextMenu) => void): () => void

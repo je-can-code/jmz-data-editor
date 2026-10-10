@@ -65,21 +65,31 @@ const drawCells = (graphics: Graphics, rect: CellRect, colour: number, washAlpha
 };
 
 /**
- * Draws what is selected: the selected events' tiles and the selected tile area. It is drawn apart from the rest of
- * the pointer overlays, and only when the selection or the events change, since a selection can hold every event on a
- * map (600 on Map361) while the pointer moves every frame.
+ * Finds nothing beyond an event's own tile, for a view whose events show no footprints.
+ * @returns {null} Always.
+ */
+const noFootprint = (): null => null;
+
+/**
+ * Draws what is selected: the selected events' tiles, the footprint of each selected event showing one outlined, so an
+ * exit strip picked at its far end shows the whole strip picked, and the selected tile area. It is drawn apart from the
+ * rest of the pointer overlays, and only when the selection or the events change, since a selection can hold every event
+ * on a map (600 on Map361) while the pointer moves every frame.
  * @param {Graphics} graphics Where to draw.
  * @param {OverlayState} state The tools' state.
  * @param {PointerOverlaysShown} shown Which overlays are on.
  * @param {(eventId: number) => MapCell | null} eventCell Finds where an event stands.
  * @param {number} tileSize The tile size.
+ * @param {(eventId: number) => CellRect | null} eventFootprint Finds the tiles an event's footprint covers on the map, or
+ * null for an event showing none; left out, no event shows one.
  */
 const drawSelection = (
   graphics: Graphics,
   state: OverlayState,
   shown: PointerOverlaysShown,
   eventCell: (eventId: number) => MapCell | null,
-  tileSize: number): void =>
+  tileSize: number,
+  eventFootprint: (eventId: number) => CellRect | null = noFootprint): void =>
 {
   graphics.clear();
   if (shown.selection === false)
@@ -93,6 +103,15 @@ const drawSelection = (
     if (cell !== null)
     {
       drawCells(graphics, { x: cell.x, y: cell.y, width: 1, height: 1 }, OverlayColour.selection, 0.3, tileSize);
+    }
+
+    // the footprint is outlined alone, so the tiles of a long strip stay readable under it.
+    const footprint = eventFootprint(id);
+    if (footprint !== null)
+    {
+      const { x, y, width, height } = footprint;
+      graphics.rect(x * tileSize, y * tileSize, width * tileSize, height * tileSize)
+        .stroke({ color: OverlayColour.selection, alpha: 1, width: 1, pixelLine: true });
     }
   });
 

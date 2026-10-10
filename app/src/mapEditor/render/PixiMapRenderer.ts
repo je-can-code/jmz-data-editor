@@ -12,6 +12,7 @@ import type { LightingLayerDefinition, ScreenTone } from '../core/renderer/light
 import {
   GAME_LOOK,
   NO_OVERLAY_STATE,
+  type FootprintReader,
   type LayerVisibility,
   type MapContextMenu,
   type MapRenderer,
@@ -91,6 +92,11 @@ type RendererStats = {
   readonly eventMarkers: number;
 
   /**
+   * Events showing the area their page covers as a footprint.
+   */
+  readonly eventFootprints: number;
+
+  /**
    * Events no page holds for at the clock's time, drawn faded.
    */
   readonly fadedEvents: number;
@@ -111,8 +117,9 @@ type RendererStats = {
  * The world's layers, bottom to top: what the game itself draws and tones (the engine's black behind the map, the
  * parallax, the tiles below characters, the events in their three priorities around the tiles above characters, and the
  * weather the plugin modules draw over all of them, all held in {@link game}), the lighting the plugin modules draw, then
- * the editor's own: the markers of events that draw no picture, which neither the tiles above characters nor the dark
- * of a lit map may hide, the dimming and highlighted layer, and the overlays, the ghosts and the pointer's own marks,
+ * the editor's own: the markers of events that draw no picture, over the footprints of events whose pages cover more
+ * tiles than their own, which neither the tiles above characters nor the dark of a lit map may hide, the dimming and
+ * highlighted layer, and the overlays, the ghosts and the pointer's own marks,
  * then the selection over them all, so an event shows as selected while the pointer still rests on it after the click
  * that picked it.
  */
@@ -489,7 +496,9 @@ class PixiMapRenderer implements MapRenderer
       slots.pointerLabel,
     );
     slots.ghosts.addChild(this.#events.ghosts);
-    slots.markers.addChild(this.#events.markers);
+
+    // the footprints sit beneath the markers they join, each marker in its footprint's corner.
+    slots.markers.addChild(this.#events.footprints, this.#events.markers);
     this.#stage.addChild(this.#world);
     this.#applyVisibility();
   }
@@ -718,6 +727,7 @@ class PixiMapRenderer implements MapRenderer
       chunks: scene === null ? 0 : scene.grid.columns * scene.grid.rows,
       eventSprites: this.#events.spriteCount,
       eventMarkers: this.#events.markerCount,
+      eventFootprints: this.#events.footprintCount,
       fadedEvents: this.#events.fadedCount,
       eventsFollowingClock: this.#pages.followingClock,
       loadingImages: this.#events.pendingLoads + (this.#parallax.loading ? 1 : 0),
@@ -896,6 +906,14 @@ class PixiMapRenderer implements MapRenderer
   {
     // every event is rebuilt in the next frame, however many times the classifier changes before it.
     this.#events.setMarkerClassifier(classify);
+    this.#eventsDirty = true;
+    this.#selectionDirty = true;
+  }
+
+  setEventFootprints(read: FootprintReader): void
+  {
+    // every event is rebuilt in the next frame, and the selection with it, since a selected event's footprint is outlined.
+    this.#events.setFootprintReader(read);
     this.#eventsDirty = true;
     this.#selectionDirty = true;
   }
@@ -1693,8 +1711,10 @@ class PixiMapRenderer implements MapRenderer
     });
 
     // the markers show the events no picture shows, so they go with the events, and with nothing of the editor's; the
-    // events no page holds for go with them, so with the markers off a map shows only what the game draws.
+    // footprints joined to them and the events no page holds for go with them, so with the markers off a map shows only
+    // what the game draws.
     this.#events.markers.visible = layers.events && this.#isOn('markers');
+    this.#events.footprints.visible = this.#events.markers.visible;
     this.#events.setFadedShown(this.#isOn('markers'));
     const scene = this.#scene;
     if (scene !== null)
@@ -1860,8 +1880,8 @@ class PixiMapRenderer implements MapRenderer
 
   /**
    * Draws again, in the next frame, the events a move of the clock, of its season or of the preview turned to another
-   * page, asking the lighting to draw with them, since their lights may have come or gone; when it turned none, nothing
-   * is asked of anything.
+   * page, asking the lighting to draw with them, since their lights may have come or gone, and the selection, since a
+   * selected event's footprint may have changed with its page; when it turned none, nothing is asked of anything.
    * @param {readonly number[]} turned The ids of the events now showing another page.
    */
   #drawTurned(turned: readonly number[]): void
@@ -1873,6 +1893,7 @@ class PixiMapRenderer implements MapRenderer
 
     turned.forEach(id => this.#events.markChanged(id));
     this.#eventsDirty = true;
+    this.#selectionDirty = true;
     this.#lighting.markStale();
   }
 
@@ -1951,7 +1972,12 @@ class PixiMapRenderer implements MapRenderer
         const event = document?.event(id) ?? null;
         return event === null ? null : { x: event.x, y: event.y };
       };
-      drawSelection(this.#slots.selection, this.#overlayState, shown, eventCell, TILE_SIZE);
+
+      // a selected event's footprint is outlined while footprints show, so picking an exit strip at its far end shows the
+      // whole strip picked.
+      const footprints = this.#events.footprints.visible;
+      const eventFootprint = (id: number) => (footprints ? this.#events.footprintOf(id) : null);
+      drawSelection(this.#slots.selection, this.#overlayState, shown, eventCell, TILE_SIZE, eventFootprint);
       redrew = true;
     }
 

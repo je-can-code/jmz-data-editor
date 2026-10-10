@@ -4,7 +4,7 @@ import { createEventPage, createMapEvent } from '../../../../src/mapEditor/core/
 import { MapDocument } from '../../../../src/mapEditor/core/model/MapDocument.ts';
 import type { RmmzMapEvent } from '../../../../src/mapEditor/core/model/rmmzTypes.ts';
 import type { PageShown, ShownPageReader } from '../../../../src/mapEditor/core/pageRule/ShownPages.ts';
-import type { TextureImage } from '../../../../src/mapEditor/core/renderer/MapRenderer.ts';
+import type { FootprintReader, TextureImage } from '../../../../src/mapEditor/core/renderer/MapRenderer.ts';
 import { EventLayer, FADED_ALPHA, type AlphaReader } from '../../../../src/mapEditor/render/scene/EventLayer.ts';
 import { GHOST_ALPHA } from '../../../../src/mapEditor/render/scene/GhostTiles.ts';
 import { buildMapJson } from '../../support/fixtures.ts';
@@ -758,6 +758,233 @@ describe('EventLayer', () =>
       // Assert: nothing while the sheet loads; then the orc and its ghost drawn from it.
       expect([ loading, layer.spriteCount, layer.ghosts.children.length, layer.markerCount ])
         .toStrictEqual([ [ 0, 0 ], 1, 1, 0 ]);
+    });
+  });
+
+  describe('footprints', () =>
+  {
+    /*
+     * An event whose page covers more tiles than its own shows them as a footprint, read through the reader handed over
+     * from the page it is shown with: the part on the map, joined to its marker, beneath the markers, larger footprints
+     * first. A click anywhere inside one picks its event, after every event standing on the tile clicked, the smaller of
+     * two overlapping footprints first, while footprints show. A footprint fades and hides with its event, and goes with
+     * it; a new reader rebuilds every footprint once flushed; an area wholly off the map shows nothing.
+     */
+    const ATLAS = new TextureSource({ width: 512, height: 512 });
+
+    /**
+     * Reads a footprint from a page's comment written as two sizes, such as "4x1", as an exit pointing up, and none from
+     * a page without such a comment.
+     * @param {RmmzMapEvent} _event The event, which this reader does not need.
+     * @param {number} _mapId The map, likewise.
+     * @param {RmmzEventPage} page The page.
+     * @returns {EventFootprint | null} The footprint.
+     */
+    const bySize: FootprintReader = (_event, _mapId, page) =>
+    {
+      const comment = page.list.find(each => each.code === 108);
+      if (comment === undefined)
+      {
+        return null;
+      }
+
+      const [ width, height ] = String(comment.parameters[0]).split('x').map(Number);
+      return { area: { width, height }, colour: 0x2e7d32, exit: 8 };
+    };
+
+    /**
+     * Builds an event drawing no picture whose first page covers an area, written as a comment.
+     * @param {number} id The event id.
+     * @param {number} x The column.
+     * @param {number} y The row.
+     * @param {string} size The area, such as "4x1".
+     * @returns {RmmzMapEvent} The event.
+     */
+    const areaEvent = (id: number, x: number, y: number, size: string): RmmzMapEvent =>
+    {
+      const event = createMapEvent(id, x, y);
+      event.pages[0].list = [ { code: 108, indent: 0, parameters: [ size ] }, ...event.pages[0].list ];
+      return event;
+    };
+
+    /**
+     * Draws events on an empty 6x6 map, with a marker atlas, the footprint reader given, and the pages given.
+     * @param {RmmzMapEvent[]} events The events, in their slots by id.
+     * @param {ShownPageReader} pages The page each event is shown with; left out, its first.
+     * @returns {EventLayer} The layer, built.
+     */
+    const drawAreas = (events: RmmzMapEvent[], pages?: ShownPageReader): EventLayer =>
+    {
+      const json = buildMapJson();
+      json.width = 6;
+      json.height = 6;
+      json.data = new Array<number>(6 * 6 * 6).fill(0);
+      json.events = Array.from({ length: Math.max(...events.map(each => each.id)) + 1 }, (_, id) => events.find(each => each.id === id) ?? null);
+      const layer = new EventLayer(() => undefined, () => 255);
+      const sheets = [ null, null, null, null, null, new TextureSource({ width: 768, height: 768 }), null, null, null ];
+      layer.setFootprintReader(bySize);
+      layer.setContext({ document: MapDocument.fromJson('map:1', json), flags: [], sheets, images: null, tileSize: 48, markerAtlas: () => ATLAS, pages });
+      return layer;
+    };
+
+    /**
+     * Clicks the middle of each tile at the game's own scale, and reads the event each click picks.
+     * @param {EventLayer} layer The layer.
+     * @param {number[][]} tiles The tiles, column then row.
+     * @returns {(number | null)[]} What each click picks.
+     */
+    const clicks = (layer: EventLayer, tiles: number[][]): (number | null)[] =>
+    {
+      return tiles.map(([ column, row ]) => layer.eventAt(column * 48 + 24, row * 48 + 24, 1));
+    };
+
+    it('shows a footprint for an event whose page covers more than its own tile, and none for one that does not', () =>
+    {
+      // Arrange: a 4 by 1 strip from 1, 2, and an event with no area at 0, 0.
+      const events = [ areaEvent(1, 1, 2, '4x1'), createMapEvent(2, 0, 0) ];
+
+      // Act.
+      const layer = drawAreas(events);
+
+      // Assert: one footprint, its event's, covering 1 to 4 on row 2; a drawing standing for it beneath the markers.
+      expect([ layer.footprintCount, layer.footprintOf(1), layer.footprintOf(2), idsOf(layer.footprints), layer.footprints.children[0].constructor.name ])
+        .toStrictEqual([ 1, { x: 1, y: 2, width: 4, height: 1 }, null, [ 1 ], 'Graphics' ]);
+    });
+
+    it('cuts a footprint at the map\'s edge, and shows nothing of an area wholly off the map', () =>
+    {
+      // Arrange: a 4 by 3 area from 4, 5 on the 6 by 6 map, and a 2 by 1 area from an event at 6, 0, past the right edge.
+      const events = [ areaEvent(1, 4, 5, '4x3'), areaEvent(2, 6, 0, '2x1') ];
+
+      // Act.
+      const layer = drawAreas(events);
+
+      // Assert.
+      expect([ layer.footprintOf(1), layer.footprintOf(2), layer.footprintCount ])
+        .toStrictEqual([ { x: 4, y: 5, width: 2, height: 1 }, null, 1 ]);
+    });
+
+    it('picks the event by a click anywhere inside its footprint, after an event standing on the tile, and nothing beside it', () =>
+    {
+      // Arrange: a 4 by 1 strip from 1, 2, with another event standing on 3, 2 inside it.
+      const layer = drawAreas([ areaEvent(1, 1, 2, '4x1'), createMapEvent(2, 3, 2) ]);
+
+      // Act: its own tile, the next, the other event's, the last, then just past each end, above and below.
+      const picked = clicks(layer, [ [ 1, 2 ], [ 2, 2 ], [ 3, 2 ], [ 4, 2 ], [ 0, 2 ], [ 5, 2 ], [ 2, 1 ], [ 2, 3 ] ]);
+
+      // Assert.
+      expect(picked)
+        .toStrictEqual([ 1, 1, 2, 1, null, null, null, null ]);
+    });
+
+    it('draws the smaller of two overlapping footprints over the larger, and picks it where both cover the tile', () =>
+    {
+      // Arrange: a 5 by 1 strip from 0, 0, and a 2 by 1 strip from 2, 0 inside it; the smaller has the lower id.
+      const layer = drawAreas([ areaEvent(1, 2, 0, '2x1'), areaEvent(2, 0, 0, '5x1') ]);
+
+      // Act.
+      const picked = clicks(layer, [ [ 1, 0 ], [ 3, 0 ], [ 4, 0 ] ]);
+
+      // Assert: the larger drawn first; the smaller found on the tile both cover, the larger on its own.
+      expect([ idsOf(layer.footprints), picked ])
+        .toStrictEqual([ [ 2, 1 ], [ 2, 1, 2 ] ]);
+    });
+
+    it('draws two footprints of one size by id, the later on top and found first where no event stands', () =>
+    {
+      // Arrange: two 3 by 1 strips on row 1, event 1 covering 1 to 3 and event 2 covering 0 to 2, so 2, 1 is covered by
+      // both and stood on by neither.
+      const layer = drawAreas([ areaEvent(1, 1, 1, '3x1'), areaEvent(2, 0, 1, '3x1') ]);
+
+      // Act: the tile both cover, each end, and event 1's own tile, which event 2's footprint covers too.
+      const picked = clicks(layer, [ [ 2, 1 ], [ 3, 1 ], [ 0, 1 ], [ 1, 1 ] ]);
+
+      // Assert.
+      expect([ idsOf(layer.footprints), picked ])
+        .toStrictEqual([ [ 1, 2 ], [ 2, 1, 2, 1 ] ]);
+    });
+
+    it('picks nothing by a footprint while footprints are hidden', () =>
+    {
+      // Arrange: a 4 by 1 strip from 1, 2, its footprints hidden, as with the Events switch off.
+      const layer = drawAreas([ areaEvent(1, 1, 2, '4x1') ]);
+      layer.footprints.visible = false;
+
+      // Act.
+      const picked = clicks(layer, [ [ 3, 2 ] ]);
+
+      // Assert.
+      expect(picked)
+        .toStrictEqual([ null ]);
+    });
+
+    it('fades a footprint with its event, and hides it out of a click\'s reach while faded events are hidden', () =>
+    {
+      // Arrange: a 4 by 1 strip no page holds for, and a 3 by 1 strip shown plainly.
+      const pages: ShownPageReader = { shownPage: shown => ({ index: 0, faded: shown.id === 1 }) };
+      const layer = drawAreas([ areaEvent(1, 1, 2, '4x1'), areaEvent(2, 1, 4, '3x1') ], pages);
+      const [ fadedPrint, plainPrint ] = [ 1, 2 ].map(id => layer.footprints.children.find(child => (child as Container & { eventId?: number }).eventId === id) as Container);
+      const shown = [ fadedPrint.alpha, plainPrint.alpha, clicks(layer, [ [ 3, 2 ] ]) ];
+
+      // Act.
+      layer.setFadedShown(false);
+
+      // Assert: faded and found; then hidden and found by nothing, the plain one still found.
+      expect([ shown, fadedPrint.visible, clicks(layer, [ [ 3, 2 ], [ 2, 4 ] ]) ])
+        .toStrictEqual([ [ FADED_ALPHA, 1, [ 1 ] ], false, [ null, 2 ] ]);
+    });
+
+    it('shows the area of the page each event is shown with', () =>
+    {
+      // Arrange: an event covering 4 by 1 on its first page and 2 by 1 on its second, which it is shown with.
+      const turned = areaEvent(1, 0, 0, '4x1');
+      const second = { ...createEventPage(), list: [ { code: 108, indent: 0, parameters: [ '2x1' ] }, ...createEventPage().list ] };
+      const layer = drawAreas([ { ...turned, pages: [ turned.pages[0], second ] } ], { shownPage: () => ({ index: 1, faded: false }) });
+
+      // Act.
+      const footprint = layer.footprintOf(1);
+
+      // Assert.
+      expect(footprint)
+        .toStrictEqual({ x: 0, y: 0, width: 2, height: 1 });
+    });
+
+    it('lets go of a footprint when its event goes, and rebuilds every footprint with a new reader once flushed', () =>
+    {
+      // Arrange: two strips; the first changed to cover nothing beyond its tile, then a reader making every area 1 by 2.
+      const layer = drawAreas([ areaEvent(1, 1, 2, '4x1'), areaEvent(2, 0, 4, '3x1') ]);
+      const [ first ] = layer.footprints.children;
+      layer.markChanged(1);
+      layer.flushChanges();
+      const rebuilt = [ layer.footprintCount, first.destroyed ];
+
+      // Act.
+      layer.setFootprintReader((event, mapId, page) =>
+      {
+        const read = bySize(event, mapId, page);
+        return read === null ? null : { ...read, area: { width: 1, height: 2 } };
+      });
+      const before = layer.footprintOf(2);
+      layer.flushChanges();
+
+      // Assert: the first rebuilt as it was, its old drawing let go; the new reader's areas only once flushed.
+      expect([ rebuilt, before, layer.footprintOf(1), layer.footprintOf(2) ])
+        .toStrictEqual([ [ 2, true ], { x: 0, y: 4, width: 3, height: 1 }, { x: 1, y: 2, width: 1, height: 2 }, { x: 0, y: 4, width: 1, height: 2 } ]);
+    });
+
+    it('shows no footprint without a reader handed over', () =>
+    {
+      // Arrange: a strip on a layer never handed a reader.
+      const json = buildMapJson();
+      json.events = [ null, areaEvent(1, 0, 0, '3x1') ];
+      const layer = new EventLayer(() => undefined);
+
+      // Act.
+      layer.setContext({ document: MapDocument.fromJson('map:1', json), flags: [], sheets: [], images: null, tileSize: 48 });
+
+      // Assert.
+      expect([ layer.footprintCount, layer.footprintOf(1) ])
+        .toStrictEqual([ 0, null ]);
     });
   });
 });

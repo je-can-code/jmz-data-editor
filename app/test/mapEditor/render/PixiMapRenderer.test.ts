@@ -52,7 +52,8 @@ vi.mock('../../../src/mapEditor/render/scene/ToneFilter.ts', () =>
  *
  * The markers of events that draw no picture sit over every event, the tiles above characters and the lighting, so
  * nothing of the game hides them, and under the dimming and the editor's other overlays; they show only while the
- * events do and the markers overlay is on, which keeps them out of anything drawn as the game would draw it.
+ * events do and the markers overlay is on, which keeps them out of anything drawn as the game would draw it. The
+ * footprints of events whose pages cover more tiles than their own sit just beneath them and show and hide with them.
  *
  * What the plugin modules light the map with draws inside the lighting layer, each module's drawing on a container of
  * its own, made once and let go with the renderer; the whole layer shows only while the layer visibility's lighting is
@@ -103,31 +104,31 @@ describe('PixiMapRenderer', () =>
     const at = world.children.indexOf(slots.lighting);
     const layers = world.children.slice(at, at + 3);
 
-    // Assert: the slot holds the event layer's markers, one group.
+    // Assert: the slot holds the event layer's two groups, the footprints beneath the markers they join.
     expect([ layers, slots.markers.children.length ])
-      .toStrictEqual([ [ slots.lighting, slots.markers, slots.dim ], 1 ]);
+      .toStrictEqual([ [ slots.lighting, slots.markers, slots.dim ], 2 ]);
   });
 
-  it('shows the markers only while the events show and the markers overlay is on', () =>
+  it('shows the markers and the footprints only while the events show and the markers overlay is on', () =>
   {
-    // Arrange: the event layer's markers, inside their slot.
+    // Arrange: the event layer's footprints and markers, inside their slot.
     const renderer = new PixiMapRenderer();
     built.push(renderer);
-    const [ markers ] = renderer.slots.markers.children;
-    const shown: boolean[] = [];
+    const [ footprints, markers ] = renderer.slots.markers.children;
+    const shown: boolean[][] = [];
 
     // Act: the overlay on with the events, the overlay off, then the overlay on with the events hidden.
     renderer.setOverlays({ enabled: new Set([ 'markers' ]), definitions: [] });
-    shown.push(markers.visible);
+    shown.push([ footprints.visible, markers.visible ]);
     renderer.setOverlays({ enabled: new Set([ 'grid' ]), definitions: [] });
-    shown.push(markers.visible);
+    shown.push([ footprints.visible, markers.visible ]);
     renderer.setOverlays({ enabled: new Set([ 'markers' ]), definitions: [] });
     renderer.setLayerVisibility({ ...GAME_LOOK, layers: { ...GAME_LOOK.layers, events: false } });
-    shown.push(markers.visible);
+    shown.push([ footprints.visible, markers.visible ]);
 
     // Assert.
     expect(shown)
-      .toStrictEqual([ true, false, false ]);
+      .toStrictEqual([ [ true, true ], [ false, false ], [ false, false ] ]);
   });
 
   it('makes each module\'s lighting on a container of its own inside the lighting layer, and lets it go with the renderer', () =>

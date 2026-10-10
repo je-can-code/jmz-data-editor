@@ -3,6 +3,7 @@ import type { PluginsJsEntry } from '../../../services/plugins/PluginsJsReader.t
 import type { CommentTagDefinition } from '../blueprints/blueprintFields.ts';
 import type { CommandCatalogEntry } from '../commands/catalogTypes.ts';
 import type { EventMarkerSymbol } from '../eventKinds/eventMarkers.ts';
+import type { AreaReader } from '../events/eventAreas.ts';
 import type { MapDocumentKey } from '../model/documentKeys.ts';
 import type { JsonValue } from '../model/json.ts';
 import type { MapDocument } from '../model/MapDocument.ts';
@@ -141,6 +142,24 @@ type PassabilityRule = {
    * @returns {string | null} Why it is forbidden, in the author's words, or null when this rule allows it.
    */
   readonly deny: (query: PassabilityQuery) => string | null;
+};
+
+/**
+ * A plugin's reading of the tiles an event stands on beyond its own while a page shows, as J-Pixelistics gives a page an
+ * area: every map view draws the area joined to the event's marker, a click anywhere inside it picks the event, and the
+ * event's quick panel says when part of it runs past the map's edge.
+ */
+type EventAreaReader = {
+  /**
+   * Unique, prefixed like event kinds.
+   */
+  readonly id: string;
+
+  /**
+   * Reads the area a page covers, as the plugin reads it: the area the page declares, one tile by one included, or null
+   * for a page declaring none, which covers the event's own tile alone.
+   */
+  readonly read: AreaReader;
 };
 
 /**
@@ -533,6 +552,15 @@ type ModuleContributions = {
    * @param {PassabilityRule} rule The rule.
    */
   passabilityRule(rule: PassabilityRule): void;
+
+  /**
+   * Gives event pages areas, for as long as the module is on: each event shows the area of the page it is shown with,
+   * joined to its marker, in every map view, a click anywhere inside it picks the event, and the event's quick panel says
+   * when part of it runs past the map's edge. Should several modules read an area for one page, the first to read one
+   * counts.
+   * @param {EventAreaReader} reader How the plugin reads a page's area.
+   */
+  eventArea(reader: EventAreaReader): void;
   overlay(overlay: OverlayDefinition): void;
   catalogEntry(entry: CommandCatalogEntry): void;
 
@@ -686,6 +714,7 @@ type PluginModule = {
 export type {
   ClockOffer,
   ConfigRead,
+  EventAreaReader,
   EventKindDefinition,
   ExtensionConfig,
   LiveNotice,

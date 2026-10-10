@@ -14,7 +14,7 @@ import type {
   SkyOffer,
 } from '../../../../src/mapEditor/core/modules/PluginModule.ts';
 import { configNamesOf, enabledPlugins, PluginModuleRegistry } from '../../../../src/mapEditor/core/modules/PluginModuleRegistry.ts';
-import type { RmmzMapEvent } from '../../../../src/mapEditor/core/model/rmmzTypes.ts';
+import type { RmmzEventPage, RmmzMapEvent } from '../../../../src/mapEditor/core/model/rmmzTypes.ts';
 import type { PluginsJsEntry } from '../../../../src/services/plugins/PluginsJsReader.ts';
 
 /*
@@ -57,6 +57,10 @@ import type { PluginsJsEntry } from '../../../../src/services/plugins/PluginsJsR
  * A module may read tags of its own from an event page's comments as fields a blueprint's copies follow, as J-Lighting
  * reads its lights, named under its own id; listed while it is on, in the order the modules added them, and taken back
  * when it switches off.
+ *
+ * A module may give event pages areas, as J-Pixelistics does, named under its own id: a page's area is the first active
+ * module's that reads one for it, none while no module does, and the registry's reading follows the modules as they
+ * stand, so a reader handed on before a module switches off reads nothing of it after.
  */
 describe('PluginModuleRegistry', () =>
 {
@@ -386,6 +390,7 @@ describe('PluginModuleRegistry', () =>
       },
       { id: 'l', title: 'L', plugins: [], register: add => add.skyReader({ id: 'lighting.sky', follows: 'x', does: 'x' }) },
       { id: 'm', title: 'M', plugins: [], register: add => add.commentTag({ id: 'lighting.light', read: () => [], write: text => text }) },
+      { id: 'n', title: 'N', plugins: [], register: add => add.eventArea({ id: 'core.area', read: () => null }) },
     ];
 
     // Act.
@@ -418,6 +423,8 @@ describe('PluginModuleRegistry', () =>
       .toThrow('l can only add sky readers whose id starts with "l.", not lighting.sky');
     expect(failures[12])
       .toThrow('m can only add comment tags whose id starts with "m.", not lighting.light');
+    expect(failures[13])
+      .toThrow('n can only add event areas whose id starts with "n.", not core.area');
   });
 
   describe('configs read on demand', () =>
@@ -981,6 +988,74 @@ describe('PluginModuleRegistry', () =>
       // Assert.
       expect([ listed, registry.commentTags() ])
         .toStrictEqual([ 1, [] ]);
+    });
+  });
+
+  describe('eventAreas', () =>
+  {
+    /**
+     * A module giving pages an area once its plugin is on: the given area for a page whose first command is a comment
+     * naming the module, and none for any other page.
+     * @param {string} id The module.
+     * @param {string} pluginName The plugin it needs.
+     * @param {{ width: number, height: number }} area The area it reads.
+     * @returns {PluginModule} The module.
+     */
+    const areaReading = (id: string, pluginName: string, area: { width: number; height: number }): PluginModule => ({
+      id,
+      title: id,
+      plugins: [ pluginName ],
+      register: contributions => contributions.eventArea({
+        id: `${id}.area`,
+        read: page => (pageCommentText(page).includes(id) ? area : null),
+      }),
+    });
+
+    /**
+     * Builds a page whose comment names some modules.
+     * @param {string} comment The comment.
+     * @returns {RmmzEventPage} The page.
+     */
+    const pageNaming = (comment: string): RmmzEventPage => commentedEvent(comment).pages[0];
+
+    it('reads a page\'s area as the first active module reading one, and none while no module is on', () =>
+    {
+      // Arrange: two modules on; pages naming the first, the second, both, and neither; and a registry where neither is on.
+      const modules = [ areaReading('pixel', 'J-Pixelistics', { width: 5, height: 1 }), areaReading('wide', 'J-Wide', { width: 9, height: 2 }) ];
+      const both = new PluginModuleRegistry(new CommandCatalog());
+      const neither = new PluginModuleRegistry(new CommandCatalog());
+      const pages = [ 'pixel', 'wide', 'pixel wide', 'nobody' ].map(pageNaming);
+
+      // Act.
+      both.activate(modules, [ plugin('j/pixel/J-Pixelistics', true), plugin('j/wide/J-Wide', true) ]);
+      neither.activate(modules, [ plugin('j/pixel/J-Pixelistics', false) ]);
+
+      // Assert.
+      expect([ both.eventAreas().map(reader => reader.id), pages.map(both.areaOf), neither.eventAreas(), neither.areaOf(pages[0]) ])
+        .toStrictEqual([
+          [ 'pixel.area', 'wide.area' ],
+          [ { width: 5, height: 1 }, { width: 9, height: 2 }, { width: 5, height: 1 }, null ],
+          [],
+          null,
+        ]);
+    });
+
+    it('takes a module\'s area reading back once it switches off, its reader handed on before reading none', () =>
+    {
+      // Arrange: the module on, and the registry's reader handed on, as a map view holds it.
+      const pixel = areaReading('pixel', 'J-Pixelistics', { width: 5, height: 1 });
+      const registry = new PluginModuleRegistry(new CommandCatalog());
+      registry.activate([ pixel ], [ plugin('j/pixel/J-Pixelistics', true) ]);
+      const { areaOf } = registry;
+      const page = pageNaming('pixel');
+      const read = areaOf(page);
+
+      // Act.
+      registry.activate([ pixel ], [ plugin('j/pixel/J-Pixelistics', false) ]);
+
+      // Assert.
+      expect([ read, registry.eventAreas(), areaOf(page) ])
+        .toStrictEqual([ { width: 5, height: 1 }, [], null ]);
     });
   });
 
