@@ -155,5 +155,20 @@ const pairReadout = (
   return { text: planWords(picks, plan, mapName), problem: false };
 };
 
-export { landingRefusalWords, pairReadout, tileWords };
+/**
+ * Says what was placed, once it was, for the window's notice.
+ * @param {PairPicks} picks What the author picked.
+ * @returns {string} The words.
+ */
+const placedWords = (picks: PairPicks): string =>
+{
+  if (picks.ways === 'one')
+  {
+    return picks.kind === 'door' ? 'One-way door placed.' : 'One-way edge placed.';
+  }
+
+  return picks.kind === 'door' ? 'Door pair placed.' : 'Edge pair placed.';
+};
+
+export { landingRefusalWords, pairReadout, placedWords, tileWords };
 export type { PairReadout };

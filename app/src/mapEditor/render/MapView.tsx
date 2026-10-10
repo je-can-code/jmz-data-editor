@@ -21,6 +21,7 @@ import { MapEventTools, type EventMenuRequest, type EventNoticeSeverity, type Ev
 import { useMapEditorServices } from '../services/MapEditorServicesContext.tsx';
 import { MapStampTools } from '../stamps/MapStampTools.ts';
 import { openEventWindow, openSwitchesVariablesWindow } from '../views/mapEditorViews.ts';
+import { useTransferPlacer } from '../views/transferPairs/useTransferPlacer.tsx';
 import { ClockChip } from './ClockChip.tsx';
 import type { DrawState } from './ContextKeeper.ts';
 import {
@@ -328,6 +329,9 @@ const MapView = (props: MapViewProps) =>
   // the event tools outlive any one render, so they tell the author through whoever listens now.
   const notifyRef = useRef<(text: string, severity: EventNoticeSeverity) => void>(() => undefined);
   notifyRef.current = onNotice ?? ((text: string) => setStatus(current => ({ ...current, note: text })));
+
+  // the transfer placer the menu opens from a tile, which tells the author what it placed.
+  const placer = useTransferPlacer(mapId, text => notifyRef.current(text, 'info'));
 
   // keep up with whether the view is on screen, for a renderer mounted after this, which must know before it mounts:
   // a view mounted behind another tab makes no GPU context until it shows.
@@ -724,7 +728,9 @@ const MapView = (props: MapViewProps) =>
         tools={toolsRef.current}
         stampTools={stampToolsRef.current}
         onClose={() => setMenu(null)}
+        onNewTransfer={placer.open}
       />
+      {placer.dialog}
     </Box>
   );
 };
