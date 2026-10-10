@@ -908,6 +908,26 @@ describe('StampsPanel: where a blueprint is used', () =>
       ]);
   });
 
+  it('marks under a map\'s copies each one following but for fields set by hand, once the project\'s plugins are read', async () =>
+  {
+    // Arrange: on map 7, a copy of the guard renamed by hand (1) beside one following in everything (2), and the plugins
+    // not yet read.
+    const copyOfGuard = (eventId: number, name: string): RmmzMapEvent => ({ ...createMapEvent(eventId, eventId + 1, 3), name, note: '<blueprint:[aa22, 1]>' });
+    const modules = new PluginModuleRegistry(new CommandCatalog());
+    await renderUses(PLACED, { copiesOnMap7: [ copyOfGuard(1, 'Sentry'), copyOfGuard(2, 'Guard') ], modules });
+    const unread = screen.queryAllByTestId('copy-differs').length;
+
+    // Act.
+    act(() =>
+    {
+      modules.activate([], []);
+    });
+
+    // Assert: the copy that follows in everything says nothing more.
+    expect([ unread, screen.getAllByTestId('copy-differs').map(line => line.textContent), listed()[1] ])
+      .toStrictEqual([ 0, [ 'Event 1: 1 field set by hand.' ], 'Map 7Placed at 2, 2Event 1Event 2Event 1: 1 field set by hand.' ]);
+  });
+
   it('counts the placements apart from the linked events, and refuses to delete a blueprint still placed, in the words the refusal uses', async () =>
   {
     // Arrange.
