@@ -110,3 +110,37 @@ func TestMapChangesRefuseABodyNamingTheBlueprints(t *testing.T) {
 		t.Errorf("something was written")
 	}
 }
+
+func TestMapChangesRefuseWhatNoPairWritesAndWriteNeitherEnd(t *testing.T) {
+	// an end placed on map 1 as a pair places it, beside a second end that cannot go where the body says.
+	firstEnd := `{"map":1,"patches":[{"kind":"splice","path":["events"],"index":2,"removed":[],"inserted":[` + pairEnd(2) + `]}]}`
+	cases := map[string]struct {
+		body     string
+		status   int
+		expected string
+	}{
+		"a map that is gone":             {body: `{"maps":[` + firstEnd + `,{"map":40,"patches":[]}]}`, status: http.StatusNotFound, expected: "data/Map040.json does not exist"},
+		"a body changing nothing":        {body: `{"maps":[]}`, status: http.StatusBadRequest, expected: "the body changes nothing"},
+		"a map named twice":              {body: `{"maps":[` + firstEnd + `,` + firstEnd + `]}`, status: http.StatusBadRequest, expected: "map 1 is named twice"},
+		"no map's id":                    {body: `{"maps":[{"map":0,"patches":[]}]}`, status: http.StatusBadRequest, expected: "maps[0].map must be a map's id"},
+		"an end short of a whole event":  {body: `{"maps":[` + firstEnd + `,{"map":2,"patches":[{"kind":"splice","path":["events"],"index":2,"removed":[],"inserted":[{"id":2,"x":0,"y":0}]}]}]}`, status: http.StatusBadRequest, expected: "the change would leave Map 002 no whole map"},
+		"an end put in short of the end": {body: `{"maps":[` + firstEnd + `,{"map":2,"patches":[{"kind":"splice","path":["events"],"index":1,"removed":[],"inserted":[` + pairEnd(1) + `]}]}]}`, status: http.StatusConflict, expected: "Map 002 no longer holds what the change replaced: its events changed"},
+	}
+
+	for name, testCase := range cases {
+		t.Run(name, func(t *testing.T) {
+			// Arrange.
+			current := newPairProject(t)
+
+			// Act.
+			response := current.call(t, http.MethodPut, mapChangesRoute, testCase.body, "Content-Type", "application/json")
+
+			// Assert: the refusal says why, and map 1, whose end alone would have fitted, was not written either.
+			assertStatus(t, response, testCase.status)
+			assertBodyContains(t, response, testCase.expected)
+			if current.read(t, "data/Map001.json") != mapFixture || current.read(t, "data/Map002.json") != mapFixture {
+				t.Errorf("something was written")
+			}
+		})
+	}
+}
