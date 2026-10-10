@@ -1,7 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Alert, Box, Button, Divider, Snackbar, Stack, Typography } from '@mui/material';
+import { blueprintLinkOf } from '../../core/blueprints/blueprintLink.ts';
 import { BLUEPRINTS_DOCUMENT, blueprintIn } from '../../core/blueprints/blueprints.ts';
 import { copiesLeftWords } from '../../core/blueprints/copiesLeft.ts';
+import { noteBoxOf } from '../../core/blueprints/copyActions.ts';
 import type { DocumentHub } from '../../core/history/DocumentHub.ts';
 import { blueprintIdOfMap } from '../../core/model/documentKeys.ts';
 import {
@@ -26,6 +28,7 @@ import { loadTilesetRow } from '../../core/eventWindow/tilesetRow.ts';
 import type { RmmzEventImage, RmmzTileset } from '../../core/model/rmmzTypes.ts';
 import { HistoryRouter, type HistoryOutcome } from '../../core/workspace/HistoryRouter.ts';
 import { useMapEditorServices } from '../../services/MapEditorServicesContext.tsx';
+import { CopyPanel } from '../blueprintCopy/CopyPanel.tsx';
 import { EditorEnvironmentProvider, type HandBuiltEditorEnvironment } from '../commandEditors/editorEnvironment.tsx';
 import { CommandList } from '../commandList/CommandList.tsx';
 import { useCommandListResources } from '../commandList/commandListResources.ts';
@@ -132,12 +135,13 @@ const mapNameOf = (hub: DocumentHub, mapId: number, mapNames: readonly string[] 
 
 /**
  * The full editor of one event, in its own window: its name and note, its pages as tabs, and on the page shown its
- * conditions, graphic, movement, options, priority, trigger and commands. Every change is one step in the event's own
- * history (Ctrl+Z and Ctrl+Y move it, and the header lists it), lands at once in every other window holding the map,
- * and Ctrl+S saves the map. The page shown is followed by the page itself rather than its place, so pages added or
- * taken away in front of it, in any window, never put another page in its stead. The map must be held by the window's
- * hub; an event that goes from the map while its window is open says so, and comes back if an undo elsewhere brings it
- * back.
+ * conditions, graphic, movement, options, priority, trigger and commands; above them, for a copy of a blueprint, what it
+ * copies and where each of its fields stands against the blueprint (see CopyPanel), its Note box showing the note's own
+ * text, its link kept out of the way. Every change is one step in the event's own history (Ctrl+Z and Ctrl+Y move it,
+ * and the header lists it), lands at once in every other window holding the map, and Ctrl+S saves the map. The page
+ * shown is followed by the page itself rather than its place, so pages added or taken away in front of it, in any window,
+ * never put another page in its stead. The map must be held by the window's hub; an event that goes from the map while
+ * its window is open says so, and comes back if an undo elsewhere brings it back.
  * @param {{ target: EventWindowTarget }} props The event.
  * @returns {React.JSX.Element} The editor.
  */
@@ -238,6 +242,25 @@ const EventEditor = (props: { readonly target: EventWindowTarget }) =>
   };
 
   /**
+   * Writes what the author typed in the Note box, handing back why when it is refused, for the box to show beneath what
+   * was typed, which it keeps; an unexpected failure is handed back the same way rather than lost.
+   * @param {string} note The note as the box holds it.
+   * @returns {string | null} Why it was refused, or null when it was written.
+   */
+  const writeNote = (note: string): string | null =>
+  {
+    try
+    {
+      const outcome = setEventNote(hub, target, note);
+      return outcome.ok ? null : outcome.message;
+    }
+    catch (error)
+    {
+      return (error as Error).message;
+    }
+  };
+
+  /**
    * Tells the author when an undo, a redo or a jump stopped short, or moved leaving copies of a blueprint changed since as
    * they stand; an empty history says nothing.
    * @param {HistoryOutcome} outcome What it came to.
@@ -325,11 +348,12 @@ const EventEditor = (props: { readonly target: EventWindowTarget }) =>
     <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column', bgcolor: 'background.default' }} data-testid={'event-editor'}>
       <EventHeader
         event={event}
+        note={noteBoxOf(event).text}
         history={hub.history(history)}
         dirty={hub.isDirty(key)}
         saving={saving}
         onRename={name => run(() => renameEvent(hub, target, name))}
-        onNote={note => run(() => setEventNote(hub, target, note))}
+        onNote={writeNote}
         onUndo={undo}
         onRedo={redo}
         onJump={stepId => router.jumpTo(history, stepId).then(takeHistory).catch(() => undefined)}
@@ -346,6 +370,20 @@ const EventEditor = (props: { readonly target: EventWindowTarget }) =>
       />
       <Box sx={{ flex: 1, display: 'flex', minHeight: 0 }}>
         <Box key={shownKey} sx={{ width: 420, flex: 'none', overflowY: 'auto', borderRight: 1, borderColor: 'divider' }} data-testid={'page-settings'}>
+          {blueprintLinkOf(event.note) !== null && (
+            <>
+              <Section title={'Blueprint'}>
+                <CopyPanel
+                  target={{ mapId: target.mapId, eventId: target.eventId, history }}
+                  event={event}
+                  pageIndex={pageIndex}
+                  onEdit={edit => run(edit)}
+                  onNotice={message => setNotice({ message, severity: 'error' })}
+                />
+              </Section>
+              <Divider/>
+            </>
+          )}
           <Section title={'Conditions'}>
             <PageConditions
               conditions={page.conditions}

@@ -249,6 +249,7 @@ const currentLink = (field: NumberField, blueprint: number, copy: number, held: 
 };
 
 export {
+  amountText,
   currentLink,
   FIELD_LINK,
   fieldLinksOf,

@@ -1,3 +1,4 @@
+import { noteTextPlan } from '../blueprints/copyActions.ts';
 import type { DocumentHub } from '../history/DocumentHub.ts';
 import { eventHistoryKey, type HistoryKey } from '../history/historyKeys.ts';
 import type { HistoryStep } from '../history/HistoryStep.ts';
@@ -230,16 +231,28 @@ const renameEvent = (hub: DocumentHub, target: EventWindowTarget, name: string):
 };
 
 /**
- * Changes the event's note, as one step in its own history. The note belongs to the editor (blueprint links live
- * there), so it is written exactly as given, every line and character kept.
+ * Changes the event's note as its Note box shows it, as one step in its own history (see copyActions' noteBoxOf). The
+ * note belongs to the editor, so what the author typed is written exactly as given, every line and character kept: as
+ * the whole note, for most events; and for a copy of a blueprint, whose box shows the note's own text, as that text, its
+ * link to its blueprint written after it and never lost. A copy's text holding a link of its own, or one the game would
+ * read otherwise with the link after it, is refused, with why.
  * @param {DocumentHub} hub The window's documents; the event's map must be held.
  * @param {EventWindowTarget} target The event.
- * @param {string} note The new note.
+ * @param {string} note The note as the box holds it.
  * @returns {EditOutcome} The step, or why nothing changed.
  */
 const setEventNote = (hub: DocumentHub, target: EventWindowTarget, note: string): EditOutcome =>
 {
-  return setEventField(hub, target, 'note', note, 'Edit event note');
+  const found = locateEvent(hub, target);
+  if (found.ok === false)
+  {
+    return found;
+  }
+
+  const planned = noteTextPlan(found.event, note);
+  return planned.ok
+    ? setEventField(hub, target, 'note', planned.event.note, 'Edit event note')
+    : planned;
 };
 
 /**

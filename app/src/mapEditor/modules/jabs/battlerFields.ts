@@ -314,9 +314,10 @@ const JABS_TAGS: readonly BattlerTag[] = [
   rangeTag('alertedSightBoost', 'alerted sight boost', wholeRead),
   rangeTag('guardRange', 'guard range', wholeRead),
 
-  // AlertedPursuitBoost and MoveSpeed, each read with parseFloat: fractions too, from 0, with no top.
+  // AlertedPursuitBoost and MoveSpeed, each read with parseFloat: fractions too, from 0, with no top. The move speed is
+  // the battler's, never to be taken for the page's own movement speed beside it.
   rangeTag('alertedPursuitBoost', 'alerted pursuit boost', fractionRead),
-  rangeTag('moveSpeed', 'move speed', fractionRead),
+  rangeTag('moveSpeed', 'battler move speed', fractionRead),
 
   // AlertDuration, digits read with parseInt: whole frames from 0, with no top.
   { name: 'alertDuration', words: 'alert duration', kind: FROM_ZERO, pattern: linePattern('alertDuration', '\\d+'), read: wholeRead, text: plainText },
@@ -402,6 +403,20 @@ const writtenLine = (tag: BattlerTag, text: string, field: string, value: JsonVa
 };
 
 /**
+ * Names a line carrying one of a battler's tags the way an author knows it: by what the tag is, and, past the first line
+ * of the tag on its page, by which line it is, as {@link battlerLines} names them.
+ * @param {BattlerTag} tag The tag.
+ * @param {string} line The line's key: the tag's name, or the name and which line it is, such as sight2.
+ * @returns {string} The words, such as "sight" or "sight (line 2)".
+ */
+const lineWords = (tag: BattlerTag, line: string): string =>
+{
+  return line === tag.name
+    ? tag.words
+    : `${tag.words} (line ${line.slice(tag.name.length)})`;
+};
+
+/**
  * Builds one of a battler's tags as fields of a blueprint's copies.
  * @param {BattlerTag} tag The tag.
  * @returns {CommentTagDefinition} The tag, as fields.
@@ -412,6 +427,7 @@ const definitionOf = (tag: BattlerTag): CommentTagDefinition =>
     id: `jabs.${tag.name}`,
     read: page => battlerLines(tag, page),
     write: (text, field, value) => writtenLine(tag, text, field, value),
+    words: line => lineWords(tag, line),
   };
 };
 

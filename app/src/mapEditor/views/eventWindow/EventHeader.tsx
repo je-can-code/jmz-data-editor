@@ -12,6 +12,12 @@ type EventHeaderProps = {
   readonly event: RmmzMapEvent;
 
   /**
+   * What the Note box shows: the note's own text for a copy of a blueprint, whose link is kept out of the box and written
+   * back after whatever the author types, and the whole note for any other event (see copyActions' noteBoxOf).
+   */
+  readonly note: string;
+
+  /**
    * The event's own history, oldest step first.
    */
   readonly history: HistoryView;
@@ -23,7 +29,12 @@ type EventHeaderProps = {
   readonly saving: boolean;
 
   readonly onRename: (name: string) => void;
-  readonly onNote: (note: string) => void;
+
+  /**
+   * Writes what the author typed in the Note box, handing back why when it was refused, which the box shows beneath
+   * what was typed, keeping it; null when it was written.
+   */
+  readonly onNote: (note: string) => string | null;
   readonly onUndo: () => void;
   readonly onRedo: () => void;
   readonly onJump: (stepId: string | null) => void;
@@ -33,13 +44,15 @@ type EventHeaderProps = {
 /**
  * The top of an event window: the event's name and note, undo and redo of its own history (each naming the step it
  * would move), the whole history to jump through, and saving the map. The note is the editor's own; anything the
- * author writes there is kept exactly.
- * @param {EventHeaderProps} props The event, its history and save state, and where each choice goes.
+ * author writes there is kept exactly, and a copy's link to its blueprint stays out of the box, kept for them. A note
+ * refused, such as one holding a second link, stays in the box as typed, with why beneath it.
+ * @param {EventHeaderProps} props The event, what its Note box shows, its history and save state, and where each choice
+ * goes.
  * @returns {React.JSX.Element} The header.
  */
 const EventHeader = (props: EventHeaderProps) =>
 {
-  const { event, history, dirty, saving, onRename, onNote, onUndo, onRedo, onJump, onSave } = props;
+  const { event, note, history, dirty, saving, onRename, onNote, onUndo, onRedo, onJump, onSave } = props;
   const [ historyAnchor, setHistoryAnchor ] = useState<HTMLElement | null>(null);
   const { rows, position } = history;
   const undoStep = rows[position - 1] ?? null;
@@ -61,7 +74,7 @@ const EventHeader = (props: EventHeaderProps) =>
         <CommitTextField label={'Name'} size={'small'} fullWidth value={event.name} onCommit={onRename}/>
       </Box>
       <Box sx={{ flex: 1, minWidth: 0 }}>
-        <CommitTextField label={'Note'} size={'small'} fullWidth multiline maxRows={3} value={event.note} onCommit={onNote}/>
+        <CommitTextField label={'Note'} size={'small'} fullWidth multiline maxRows={3} value={note} onCommit={onNote}/>
       </Box>
       <Tooltip title={undoStep === null ? 'Nothing to undo' : `Undo ${undoStep.label} (Ctrl+Z)`}>
         <span>

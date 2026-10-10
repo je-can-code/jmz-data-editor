@@ -402,7 +402,7 @@ describe('battlerFields', () =>
       const refusals = writes.map(([ name, line, value ]) => () => write(name, line, value));
 
       // Assert.
-      const words = [ 'sight', 'sight', 'move speed', 'AI trait', 'enemy', 'no respawn mark', 'respawn', 'respawn', 'level' ];
+      const words = [ 'sight', 'sight', 'battler move speed', 'AI trait', 'enemy', 'no respawn mark', 'respawn', 'respawn', 'level' ];
       refusals.forEach((refusal, index) => expect(refusal)
         .toThrow(`its ${words[index]} cannot be ${JSON.stringify(writes[index][2])} as the game reads it`));
     });
@@ -421,6 +421,22 @@ describe('battlerFields', () =>
       // Assert: each is a mistake, never the copy's own.
       writes.forEach(each => expect(each)
         .toThrow('a battler\'s sight line gives one value'));
+    });
+  });
+
+  describe('words', () =>
+  {
+    it('names each line by what its tag is to an author, and a later line of the tag by which line it is', () =>
+    {
+      // Arrange: a page's first sight, its third, its move speed, its AI trait and its level.
+      const named: [ string, string ][] = [ [ 'sight', 'sight' ], [ 'sight', 'sight3' ], [ 'moveSpeed', 'moveSpeed' ], [ 'aiTrait', 'aiTrait' ], [ 'level', 'level2' ] ];
+
+      // Act.
+      const words = named.map(([ name, line ]) => tagNamed(name).words?.(line, LINE_VALUE));
+
+      // Assert: the move speed is the battler's, never to be taken for the page's movement speed.
+      expect(words)
+        .toStrictEqual([ 'sight', 'sight (line 3)', 'battler move speed', 'AI trait', 'level (line 2)' ]);
     });
   });
 });

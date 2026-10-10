@@ -3,6 +3,7 @@ import { MapEditorApiError } from '../../../../src/mapEditor/core/api/MapEditorA
 import { withBlueprintLink } from '../../../../src/mapEditor/core/blueprints/blueprintLink.ts';
 import type { CopyGround } from '../../../../src/mapEditor/core/blueprints/copyPlans.ts';
 import {
+  copyMarkOf,
   copyStandingOf,
   lookFailure,
   placementMiddle,
@@ -12,6 +13,8 @@ import {
 } from '../../../../src/mapEditor/core/blueprints/whereUsed.ts';
 import { createEventPage, createMapEvent } from '../../../../src/mapEditor/core/model/eventModel.ts';
 import type { RmmzMapEvent } from '../../../../src/mapEditor/core/model/rmmzTypes.ts';
+import { COPY_TAGS, copyOf, needler, needlerNest, turnOf } from '../../support/copyFixtures.ts';
+import { command, event, page } from '../../support/eventKindFixtures.ts';
 import { stampOf } from '../../support/stampFixtures.ts';
 import { blankGrid, put } from '../tiles/support/tileGridBuilder.ts';
 
@@ -27,7 +30,10 @@ import { blankGrid, put } from '../tiles/support/tileGridBuilder.ts';
  * far for a change to reach, with why. A copy drifts by what it holds, which the look shows (more or fewer pages than its
  * blueprint's event, a link to an event its blueprint no longer keeps, a note that would read otherwise without its
  * link), or by what the last change to its blueprint found, which only that change could see. An event no longer a copy
- * of the blueprint, and one on a map that is gone or not to be read, stands nowhere that can be told.
+ * of the blueprint, and one on a map that is gone or not to be read, stands nowhere that can be told. A copy that follows
+ * is marked with how far it stands apart, so one that stopped following in some fields is never silent: its choices set by
+ * hand and its numbers pinned, read against the blueprint as a change to it would read them, its group known by the
+ * placements on its map; a number at an offset still follows, and is not counted.
  */
 
 /**
@@ -388,5 +394,110 @@ describe('placementMiddle', () =>
     // Assert.
     expect(middle)
       .toStrictEqual({ x: 1, y: 1 });
+  });
+});
+
+describe('copyMarkOf', () =>
+{
+  /**
+   * Looks at a map holding a copy of the needler nest's needler as its event 12, a plain event 11 beside it, and any other
+   * events given.
+   * @param {RmmzMapEvent} copy The copy.
+   * @param {readonly RmmzMapEvent[]} others Other events, each in its slot by id.
+   * @returns {LookedMap} The look.
+   */
+  const lookedAtCopy = (copy: RmmzMapEvent, others: readonly RmmzMapEvent[] = []): LookedMap =>
+  {
+    const events: (RmmzMapEvent | null)[] = Array.from({ length: 14 }, () => null);
+    events[11] = createMapEvent(11, 3, 3);
+    events[12] = copy;
+    others.forEach(other =>
+    {
+      events[other.id] = other;
+    });
+    return { kind: 'looked', ground: { ...blankGrid(16, 12), tilesetId: 4, events } };
+  };
+
+  it('counts a following copy\'s choices set by hand and numbers pinned, leaving out a number at an offset', () =>
+  {
+    // Arrange: a trigger and a name set by hand, a speed pinned, and a frequency one higher in the link.
+    const copy = { ...copyOf(needler({ trigger: 2, moveSpeed: 5, moveFrequency: 4 }), [ 'p1.speed=5', 'p1.frequency+1' ]), name: 'Needler (west)' };
+
+    // Act.
+    const mark = copyMarkOf(lookedAtCopy(copy), 12, needlerNest(), COPY_TAGS, []);
+
+    // Assert.
+    expect(mark)
+      .toBe('2 fields set by hand, 1 pinned');
+  });
+
+  it('marks nothing for a copy that follows in everything, or only at an offset', () =>
+  {
+    // Arrange.
+    const copies = [ copyOf(needler()), copyOf(needler({ moveSpeed: 4 }), [ 'p1.speed+1' ]) ];
+
+    // Act.
+    const marks = copies.map(copy => copyMarkOf(lookedAtCopy(copy), 12, needlerNest(), COPY_TAGS, []));
+
+    // Assert.
+    expect(marks)
+      .toStrictEqual([ '', '' ]);
+  });
+
+  it('marks nothing for a map not yet looked at, an event no longer there or no copy of this blueprint, or a drifted copy', () =>
+  {
+    // Arrange: the copy's map still being looked at; event 11, plain; a copy of another blueprint; and a copy of two pages.
+    const settled = lookedAtCopy(copyOf(needler({ trigger: 2 })));
+    const other = { ...copyOf(needler({ trigger: 2 })), note: '<blueprint:[zz99zz99, 2]>' };
+    const twoPages = copyOf(event(2, [ needler({ trigger: 2 }).pages[0], needler().pages[0] ]));
+
+    // Act.
+    const marks = [
+      copyMarkOf({ kind: 'looking' }, 12, needlerNest(), COPY_TAGS, []),
+      copyMarkOf(undefined, 12, needlerNest(), COPY_TAGS, []),
+      copyMarkOf(settled, 13, needlerNest(), COPY_TAGS, []),
+      copyMarkOf(settled, 11, needlerNest(), COPY_TAGS, []),
+      copyMarkOf(lookedAtCopy(other), 12, needlerNest(), COPY_TAGS, []),
+      copyMarkOf(lookedAtCopy(twoPages), 12, needlerNest(), COPY_TAGS, []),
+    ];
+
+    // Assert: the settled copy itself is marked, as the near miss beside the rest.
+    expect([ marks, copyMarkOf(settled, 12, needlerNest(), COPY_TAGS, []) ])
+      .toStrictEqual([ [ '', '', '', '', '', '' ], '1 field set by hand' ]);
+  });
+
+  it('reads a copy\'s commands naming its group by the blueprint\'s placements on its map', () =>
+  {
+    // Arrange: a nest of tiles whose needler turns its event 3; the copy, 12, placed at (6, 8) with 3's copy, 13, at
+    // (7, 8), its turn naming 13.
+    const turn = (eventId: number) => command(205, [ eventId, { list: [ { code: 0, parameters: [] } ], repeat: false, skippable: false, wait: false } ]);
+    const tiles = { layers: [ 0 ], values: [ 1, 2 ], calledFor: [ -1, -1 ] };
+    const made = { ...event(2, [ page([ turn(3) ]) ], { name: 'Needler' }), x: 0, y: 0 };
+    const nest = { ...needlerNest(), stamp: stampOf({ width: 2, height: 1, tiles, events: [ made, { ...needler(), id: 3, x: 1, y: 0 } ] }) };
+    const copy = { ...copyOf(event(2, [ page([ turn(13) ]) ], { name: 'Needler' })), x: 6, y: 8 };
+    const sibling = { ...copyOf({ ...needler(), id: 3 }), id: 13, x: 7, y: 8 };
+    const looked = lookedAtCopy(copy, [ sibling ]);
+
+    // Act: with the placement recorded, and without.
+    const marks = [ copyMarkOf(looked, 12, nest, COPY_TAGS, [ { blueprintId: 'k3x9q2mf', x: 6, y: 8 } ]), copyMarkOf(looked, 12, nest, COPY_TAGS, []) ];
+
+    // Assert: unknown, its commands are kept as its own, said as the copy's own panel says it, never as set by hand.
+    expect(marks)
+      .toStrictEqual([ '', 'its commands name other events in the blueprint, so this copy keeps its own' ]);
+  });
+
+  it('marks a copy keeping commands that name its group beside its fields set by hand', () =>
+  {
+    // Arrange: the nest of events alone whose needler turns its event 3, no placement to know the group by, and the
+    // copy's trigger set by hand.
+    const nest = needlerNest([ event(2, [ page([ turnOf(3) ]) ], { name: 'Needler' }), { ...needler(), id: 3 } ]);
+    const copy = copyOf(event(2, [ page([ turnOf(13) ], { trigger: 2 }) ], { name: 'Needler' }));
+
+    // Act.
+    const mark = copyMarkOf(lookedAtCopy(copy), 12, nest, COPY_TAGS, []);
+
+    // Assert.
+    expect(mark)
+      .toBe('1 field set by hand; its commands name other events in the blueprint, so this copy keeps its own');
   });
 });

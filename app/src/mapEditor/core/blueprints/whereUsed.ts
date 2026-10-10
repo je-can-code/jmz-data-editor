@@ -2,11 +2,14 @@ import { MapEditorApiError } from '../api/MapEditorApi.ts';
 import type { MapCell } from '../renderer/camera.ts';
 import type { Stamp } from '../stamps/stamp.ts';
 import type { BlueprintCopy } from './blueprintCopies.ts';
-import { ownNoteOf } from './blueprintFields.ts';
+import { ownNoteOf, type CommentTagDefinition } from './blueprintFields.ts';
 import { blueprintLinkOf } from './blueprintLink.ts';
-import { cellsPlaced, type PlacedPart, type PlacedSpot } from './blueprintUses.ts';
+import type { Blueprint } from './blueprints.ts';
+import { cellsPlaced, type BlueprintSpot, type PlacedPart, type PlacedSpot } from './blueprintUses.ts';
 import { pagesWords } from './copyChanges.ts';
-import type { CopyGround } from './copyPlans.ts';
+import { copyGroupOf, type CopyGround } from './copyPlans.ts';
+import { differencesOf, readCopy } from './copyReading.ts';
+import { markWords } from './copyWords.ts';
 import { checkPlacement, placementProblem } from './placementMatch.ts';
 
 /**
@@ -184,6 +187,54 @@ const copyStandingOf = (looked: LookedMap | undefined, eventId: number, stamp: S
 };
 
 /**
+ * Says how far one copy of a blueprint's events stands apart from its blueprint, for the where-used list to mark beside
+ * it, so a copy that stopped following in some fields is never silent: how many of its choices were set by hand and how
+ * many of its numbers are pinned, and whether it keeps commands naming other events of the blueprint, read against the
+ * blueprint as a change to it would read them (see readCopy), its group known by the blueprint's placements on its map,
+ * in the words the copy's own panel uses (see copyWords' markWords). A number at an offset still follows, and is not
+ * counted. A copy not yet looked at, no longer a copy of this blueprint, or not to be read field by field, is marked with
+ * nothing: the list says on its own why such a copy no longer follows.
+ * @param {LookedMap | undefined} looked The look at the copy's map, or undefined before one was asked for.
+ * @param {number} eventId The copy's id on its map.
+ * @param {Blueprint} blueprint The blueprint.
+ * @param {readonly CommentTagDefinition[]} tags The tags the active modules read from comments as fields.
+ * @param {readonly BlueprintSpot[]} spots The placements the record holds on the copy's map.
+ * @returns {string} The words, such as "2 fields set by hand, 1 pinned"; empty when there is nothing to mark.
+ */
+const copyMarkOf = (
+  looked: LookedMap | undefined,
+  eventId: number,
+  blueprint: Blueprint,
+  tags: readonly CommentTagDefinition[],
+  spots: readonly BlueprintSpot[],
+): string =>
+{
+  if (looked === undefined || looked.kind !== 'looked')
+  {
+    return '';
+  }
+
+  const { events } = looked.ground;
+  const copy = events[eventId] ?? null;
+  const link = copy === null ? null : blueprintLinkOf(copy.note);
+  if (copy === null || link === null || link.blueprintId !== blueprint.id)
+  {
+    return '';
+  }
+
+  // the copy's group is found on the very map it was looked at on.
+  const references = copyGroupOf(events, copy, blueprint.stamp, spots);
+  const reading = readCopy(copy, {
+    blueprint: blueprintId => (blueprintId === blueprint.id ? blueprint : null),
+    tags,
+    ...(references === undefined ? {} : { references }),
+  });
+  return reading.kind === 'read'
+    ? markWords(differencesOf(reading.fields))
+    : '';
+};
+
+/**
  * Finds the cell to centre on to show a placement: the middle of the cells its tiles went down on, as near as a cell can
  * be, so one hanging over the map's edge is shown by the part on the map.
  * @param {UsedSpot} spot Where its top-left corner sits, and its part placed.
@@ -196,5 +247,5 @@ const placementMiddle = (spot: UsedSpot, size: { readonly width: number; readonl
   return { x: cells.x + Math.floor(cells.width / 2), y: cells.y + Math.floor(cells.height / 2) };
 };
 
-export { copyStandingOf, lookFailure, placementMiddle, standingOf, whereUsed };
+export { copyMarkOf, copyStandingOf, lookFailure, placementMiddle, standingOf, whereUsed };
 export type { CopyStanding, LookedMap, MapUse, PlacementStanding, UsedSpot };

@@ -1,9 +1,9 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useSyncExternalStore } from 'react';
 import { Box, Button, Stack, Typography } from '@mui/material';
 import type { BlueprintCopy } from '../../core/blueprints/blueprintCopies.ts';
 import type { Blueprint } from '../../core/blueprints/blueprints.ts';
 import type { PlacedSpot } from '../../core/blueprints/blueprintUses.ts';
-import { copyStandingOf, lookFailure, placementMiddle, standingOf, whereUsed, type LookedMap } from '../../core/blueprints/whereUsed.ts';
+import { copyMarkOf, copyStandingOf, lookFailure, placementMiddle, standingOf, whereUsed, type LookedMap } from '../../core/blueprints/whereUsed.ts';
 import { MAP_INFOS_KEY, mapDocumentKey } from '../../core/model/documentKeys.ts';
 import type { MapDocument } from '../../core/model/MapDocument.ts';
 import { lookAtDocument } from '../../core/sync/lookAtDocument.ts';
@@ -128,8 +128,11 @@ const PlacementRow = (props: {
 
 /**
  * The copies of a blueprint's events on one map, each a button that opens the map at it; and under them, each copy a
- * change to the blueprint no longer reaches, saying why.
- * @param {object} props The map, its copies by id, the blueprint, and the look at the map.
+ * change to the blueprint no longer reaches, saying why, and each copy that follows it but for fields set by hand or
+ * numbers pinned, saying how many. Those marks wait for the project's plugins to be read, until when a module's numbers
+ * would read as comments set by hand.
+ * @param {object} props The map, its copies by id, the blueprint, the look at the map, and the placements the record
+ * holds on it.
  * @returns {React.JSX.Element} The rows.
  */
 const CopyRows = (props: {
@@ -137,18 +140,26 @@ const CopyRows = (props: {
   readonly eventIds: readonly number[];
   readonly blueprint: Blueprint;
   readonly looked: LookedMap | undefined;
+  readonly spots: readonly PlacedSpot[];
 }) =>
 {
-  const { mapId, eventIds, blueprint, looked } = props;
+  const { mapId, eventIds, blueprint, looked, spots } = props;
   const controller = useWorkspace();
-  const { copyMaps } = controller.services;
+  const { copyMaps, modules } = controller.services;
+  const plugins = useSyncExternalStore(modules.subscribe, () => modules.revision);
 
   // a copy drifts by what it holds, which the look shows, or by what the last change to its blueprint found.
-  const drifted = eventIds.flatMap(eventId =>
-  {
-    const standing = copyStandingOf(looked, eventId, blueprint.stamp, blueprint.id, copyMaps.driftOf(mapId, eventId));
-    return standing.kind === 'drifted' ? [ { eventId, reason: standing.reason } ] : [];
-  });
+  const standings = eventIds.map(eventId => ({ eventId, standing: copyStandingOf(looked, eventId, blueprint.stamp, blueprint.id, copyMaps.driftOf(mapId, eventId)) }));
+  const drifted = standings.flatMap(({ eventId, standing }) => (standing.kind === 'drifted' ? [ { eventId, reason: standing.reason } ] : []));
+
+  // a copy that follows says how far it stands apart, once the plugins are read.
+  const marked = plugins === 0
+    ? []
+    : standings.flatMap(({ eventId, standing }) =>
+    {
+      const words = standing.kind === 'following' ? copyMarkOf(looked, eventId, blueprint, modules.commentTags(), spots) : '';
+      return words === '' ? [] : [ { eventId, words } ];
+    });
 
   return (
     <>
@@ -164,6 +175,11 @@ const CopyRows = (props: {
           {`Event ${eventId} no longer follows its blueprint: ${reason}.`}
         </Typography>
       ))}
+      {marked.map(({ eventId, words }) => (
+        <Typography key={eventId} variant={'caption'} color={'text.secondary'} data-testid={'copy-differs'} sx={{ display: 'block', pl: 1.5 }}>
+          {`Event ${eventId}: ${words}.`}
+        </Typography>
+      ))}
     </>
   );
 };
@@ -171,8 +187,9 @@ const CopyRows = (props: {
 /**
  * Where one blueprint is used, map by map: each placement of its tiles, at the cell its corner was put down at, checked
  * against the blueprint, so one no longer where it was says why and can be forgotten; and each copy of its events, so one
- * a change no longer reaches says why. A click on either opens the map there. The placements come from the record of
- * where blueprints are placed, the copies from the maps' notes.
+ * a change no longer reaches says why, and one that follows but for fields set by hand or pinned says how many. A click on
+ * either opens the map there. The placements come from the record of where blueprints are placed, the copies from the
+ * maps' notes.
  * @param {object} props The blueprint, its placements and its event copies, whether those are still being counted, and
  * what forgetting a placement does.
  * @returns {React.JSX.Element} The list.
@@ -212,7 +229,13 @@ const BlueprintWhereUsed = (props: {
             />
           ))}
           {use.eventIds.length > 0 && (
-            <CopyRows mapId={use.mapId} eventIds={use.eventIds} blueprint={blueprint} looked={looked.get(use.mapId)} />
+            <CopyRows
+              mapId={use.mapId}
+              eventIds={use.eventIds}
+              blueprint={blueprint}
+              looked={looked.get(use.mapId)}
+              spots={spots.filter(spot => spot.mapId === use.mapId)}
+            />
           )}
         </Box>
       ))}
