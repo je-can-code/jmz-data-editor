@@ -2005,6 +2005,73 @@ describe('DocumentHub', () =>
       expect([ hub.isDirty(MAP_A), hub.dirtyKeys() ])
         .toStrictEqual([ true, [ MAP_A ] ]);
     });
+
+    it('reads as saved once later edits bring a document back to what its file holds, whatever steps it took there', () =>
+    {
+      // Arrange: a rename, then a second edit putting the old name back, both on map 1; map 2 renamed alone.
+      const hub = buildHub();
+      hub.edit('Rename', [ mapHistoryKey(1) ], tx => tx.set(MAP_A, [ 'displayName' ], 'Harbor'));
+      const renamed = hub.isDirty(MAP_A);
+      hub.edit('Rename back', [ mapHistoryKey(1) ], tx => tx.set(MAP_A, [ 'displayName' ], 'Test Town'));
+
+      // Act.
+      hub.edit('Rename', [ mapHistoryKey(2) ], tx => tx.set(MAP_B, [ 'displayName' ], 'Harbor'));
+
+      // Assert: map 1 holds two steps no save named, and reads as saved; map 2 does not.
+      expect([ renamed, hub.appliedSteps(MAP_A).length, hub.isDirty(MAP_A), hub.dirtyKeys() ])
+        .toStrictEqual([ true, 2, false, [ MAP_B ] ]);
+    });
+
+    it('leaves an edit still open out of whether a document is saved, reading it once the edit is done', () =>
+    {
+      // Arrange: a stroke under way on map 1, asked about before it began, and once it has painted.
+      const hub = buildHub();
+      const before = hub.isDirty(MAP_A);
+      const stroke = hub.begin('Paint', [ mapHistoryKey(1) ]);
+      stroke.tiles(MAP_A, [ [ 0, 999 ] ]);
+      const midStroke = hub.isDirty(MAP_A);
+
+      // Act.
+      stroke.commit();
+
+      // Assert.
+      expect([ before, midStroke, hub.isDirty(MAP_A) ])
+        .toStrictEqual([ false, false, true ]);
+    });
+
+    it('works out a document\'s saved state under an open edit from what it holds without that edit', () =>
+    {
+      // Arrange: a rename made, then a stroke opened over it before the map was ever asked about.
+      const hub = buildHub();
+      hub.edit('Rename', [ mapHistoryKey(1) ], tx => tx.set(MAP_A, [ 'displayName' ], 'Harbor'));
+      hub.edit('Rename back', [ mapHistoryKey(1) ], tx => tx.set(MAP_A, [ 'displayName' ], 'Test Town'));
+      const stroke = hub.begin('Paint', [ mapHistoryKey(1) ]);
+      stroke.tiles(MAP_A, [ [ 0, 999 ] ]);
+
+      // Act.
+      const midStroke = hub.isDirty(MAP_A);
+      stroke.cancel();
+
+      // Assert: saved mid-stroke, as the map would be with the stroke cancelled, and so it is.
+      expect([ midStroke, hub.isDirty(MAP_A) ])
+        .toStrictEqual([ false, false ]);
+    });
+
+    it('hands what a document\'s file holds to another window with its unsaved edits, and nothing more for a clean one', () =>
+    {
+      // Arrange: map 1 renamed and unsaved; map 2 untouched.
+      const source = buildHub();
+      const target = new DocumentHub({ clientId: 'window-b', now: () => 1000 });
+      source.edit('Rename', [ mapHistoryKey(1) ], tx => tx.set(MAP_A, [ 'displayName' ], 'Harbor'));
+      const snapshots = [ source.snapshot(MAP_A), source.snapshot(MAP_B) ];
+
+      // Act.
+      snapshots.forEach(snapshot => target.adoptSnapshot(snapshot));
+
+      // Assert: the other window reads map 1 unsaved against the file this one knows, and map 2 saved.
+      expect([ snapshots.map(snapshot => 'file' in snapshot), target.isDirty(MAP_A), target.fileContent(MAP_A), target.isDirty(MAP_B) ])
+        .toStrictEqual([ [ true, false ], true, buildMapJson(), false ]);
+    });
   });
 
   describe('external changes', () =>
@@ -2911,6 +2978,20 @@ describe('DocumentHub', () =>
       // Assert.
       expect([ hub.isDirty(USES), hub.isDirty(MAP_A), hub.dirtyKeys() ])
         .toStrictEqual([ false, true, [ MAP_A ] ]);
+    });
+
+    it('keeps no copy of its file, its keeper writing that a part at a time, and hands none to another window', () =>
+    {
+      // Arrange.
+      const hub = buildRecordHub();
+      place(hub, 1, 3);
+
+      // Act.
+      const snapshot = hub.snapshot(USES);
+
+      // Assert: the map beside it keeps the file it was loaded from.
+      expect([ hub.fileContent(USES), 'file' in snapshot, hub.fileContent(MAP_A) ])
+        .toStrictEqual([ null, false, buildMapJson() ]);
     });
 
     it('refuses to be saved whole, writing nothing', async () =>

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { blueprintMapId } from '../../../../src/mapEditor/core/model/documentKeys.ts';
 import { createMapEvent } from '../../../../src/mapEditor/core/model/eventModel.ts';
 import type { DocumentChange } from '../../../../src/mapEditor/core/model/EditorDocument.ts';
+import type { JsonValue } from '../../../../src/mapEditor/core/model/json.ts';
 import { invertPatch, PatchConflictError, type Patch } from '../../../../src/mapEditor/core/model/patches.ts';
 import { MapDocument, MapLayer } from '../../../../src/mapEditor/core/model/MapDocument.ts';
 import type { RmmzMap } from '../../../../src/mapEditor/core/model/rmmzTypes.ts';
@@ -693,6 +694,58 @@ describe('MapDocument', () =>
         .toThrow(/events list/u);
       expect(attempts[1])
         .toThrow(/not a tile id/u);
+    });
+  });
+
+  describe('matches', () =>
+  {
+    it('holds the very file it was built from, and one changed since once it takes that change', () =>
+    {
+      // Arrange: the fixture file, and one with a cell and the name changed.
+      const document = buildDocument();
+      const changed = { ...buildMapJson(), displayName: 'Harbor' };
+      changed.data[3] = 900;
+
+      // Act.
+      const atFirst = [ document.matches(buildMapJson() as unknown as JsonValue), document.matches(changed as unknown as JsonValue) ];
+      document.apply(document.tilesPatch([ [ 3, 900 ] ]));
+      document.apply(document.setPatch([ 'displayName' ], 'Harbor'));
+
+      // Assert.
+      expect([ atFirst, document.matches(changed as unknown as JsonValue), document.matches(buildMapJson() as unknown as JsonValue) ])
+        .toStrictEqual([ [ true, false ], true, false ]);
+    });
+
+    it('tells apart a file differing by one cell, one event, a field more, or tile data of another length', () =>
+    {
+      // Arrange: the fixture file four ways, each a near miss.
+      const document = buildDocument();
+      const cell = buildMapJson();
+      cell.data[5] = 901;
+      const event = buildMapJson();
+      event.events[1] = { ...(event.events[1] as NonNullable<RmmzMap['events'][number]>), name: 'Renamed' };
+      const extra = { ...buildMapJson(), meta: {} };
+      const shorter = { ...buildMapJson(), data: buildMapJson().data.slice(1) };
+
+      // Act.
+      const found = [ cell, event, extra, shorter ].map(file => document.matches(file as unknown as JsonValue));
+
+      // Assert.
+      expect(found)
+        .toStrictEqual([ false, false, false, false ]);
+    });
+
+    it('holds no file that is not a map file at all', () =>
+    {
+      // Arrange.
+      const document = buildDocument();
+
+      // Act.
+      const found = [ document.matches(null), document.matches([ 1, 2 ]), document.matches({ ...buildMapJson(), data: 'cells' } as unknown as JsonValue) ];
+
+      // Assert.
+      expect(found)
+        .toStrictEqual([ false, false, false ]);
     });
   });
 

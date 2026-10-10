@@ -790,8 +790,9 @@ class DocumentHub
   /**
    * Reads what a held document's file holds, as this window last read it, wrote it, or heard another window write it.
    * @param {DocumentKey} key The document.
-   * @returns {JsonValue | null} The file's content, not to be changed; null when the document is not held, or what its
-   * file holds is not known, after a write this window could not follow, until the file is read again.
+   * @returns {JsonValue | null} The file's content, not to be changed; null when the document is not held, is kept
+   * alongside others (whose keeper writes its file a part at a time), or what its file holds is not known, after a write
+   * this window could not follow, until the file is read again.
    */
   fileContent(key: DocumentKey): JsonValue | null
   {
@@ -1795,14 +1796,16 @@ class DocumentHub
   }
 
   /**
-   * Learns what a held document's file holds, and works out afresh whether the document is saved.
+   * Learns what a held document's file holds, and works out afresh whether the document is saved. A document kept
+   * alongside others keeps no copy of its file here: its keeper writes the file a part at a time, so no copy here could
+   * say what it holds.
    * @param {DocumentKey} key The document.
    * @param {JsonValue | null} content What the file holds, never shared with anything else; null when it is not known.
    */
   #learnFile(key: DocumentKey, content: JsonValue | null): void
   {
     this.#learnings += 1;
-    this.#files.set(key, content);
+    this.#files.set(key, isKeptAlongside(key) ? null : content);
     this.#fileLearnt.set(key, this.#learnings);
     this.#dirty.delete(key);
   }

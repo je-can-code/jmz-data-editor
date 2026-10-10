@@ -39,6 +39,19 @@ describe('JsonDocument', () =>
       .toStrictEqual({ names: [ 'a', 'b' ] });
   });
 
+  it('holds exactly the content it was built from, whatever its keys\' order, and nothing differing by one value', () =>
+  {
+    // Arrange.
+    const document = new JsonDocument('editor-data:layouts', { width: 1, height: 2 });
+
+    // Act.
+    const found = [ document.matches({ height: 2, width: 1 }), document.matches({ width: 1, height: 3 }), document.matches({ width: 1 }) ];
+
+    // Assert.
+    expect(found)
+      .toStrictEqual([ true, false, false ]);
+  });
+
   it('applies a set and tells its listeners', () =>
   {
     // Arrange.
