@@ -6,6 +6,7 @@ import {
   copyTitle,
   differenceWords,
   fieldWords,
+  markWords,
   offsetText,
   pageWords,
   stateWords,
@@ -13,15 +14,16 @@ import {
   type LinkedReading,
 } from '../../../../src/mapEditor/core/blueprints/copyWords.ts';
 import { battlerTagFields } from '../../../../src/mapEditor/modules/jabs/battlerFields.ts';
-import { event } from '../../support/eventKindFixtures.ts';
-import { contextOf, copyOf, needler, needlerNest } from '../../support/copyFixtures.ts';
+import { event, page } from '../../support/eventKindFixtures.ts';
+import { contextOf, copyOf, needler, needlerNest, turnOf } from '../../support/copyFixtures.ts';
 
 /*
  * A copy's panel and the steps it records speak to the author in the words they already know, never in keys or tags:
  * each field named as the event window labels it, or by its module's own words, a field whose module gives none going by
  * its name on the page; a field's standing as "Follows the blueprint", with an offset's sign, "Pinned at" a value, "Set by
- * hand", or which side alone has it; what a copy copies, by the blueprint's name and the event it was made from; how far
- * it stands apart, kind by kind, counted in fields, offsets only when asked; and its standing as a whole, as a sentence.
+ * hand", commands kept for naming other events of the blueprint, or which side alone has it; what a copy copies, by the
+ * blueprint's name and the event it was made from; how far it stands apart, kind by kind, counted in fields, offsets only
+ * when asked; its standing as a whole, as a sentence; and the mark where-used sets beside it, in the same words.
  */
 describe('copy words', () =>
 {
@@ -122,6 +124,7 @@ describe('copy words', () =>
         { kind: 'offset', amount: -2.5 },
         { kind: 'pinned', value: -3 },
         { kind: 'own' },
+        { kind: 'names-group' },
         { kind: 'copy-only' },
         { kind: 'blueprint-only' },
       ] as const;
@@ -137,6 +140,7 @@ describe('copy words', () =>
           'Follows the blueprint, -2.5',
           'Pinned at -3',
           'Set by hand',
+          'These commands name other events in the blueprint, so this copy keeps its own',
           'Only on this copy',
           'Not on this copy',
         ]);
@@ -166,10 +170,10 @@ describe('copy words', () =>
     {
       // Arrange: every kind, one kind, and kinds without the first.
       const counts = [
-        { own: 2, pinned: 1, offsets: 1 },
-        { own: 1, pinned: 0, offsets: 0 },
-        { own: 0, pinned: 1, offsets: 2 },
-        { own: 0, pinned: 0, offsets: 2 },
+        { own: 2, pinned: 1, offsets: 1, group: 0 },
+        { own: 1, pinned: 0, offsets: 0, group: 0 },
+        { own: 0, pinned: 1, offsets: 2, group: 0 },
+        { own: 0, pinned: 0, offsets: 2, group: 0 },
       ];
 
       // Act.
@@ -201,6 +205,24 @@ describe('copy words', () =>
         .toStrictEqual([ 'Follows the blueprint in everything.', '1 field set by hand, 1 at an offset.' ]);
     });
 
+    it('says after the rest that commands naming other events of the blueprint are kept, in their row\'s words', () =>
+    {
+      // Arrange: the nest's needler turns its event 3, whose copy here nobody knows; one copy follows in all else, and one
+      // has its trigger set by hand.
+      const nest = needlerNest([ event(2, [ page([ turnOf(3) ]) ], { name: 'Needler' }), { ...needler(), id: 3 } ]);
+      const readings = [ {}, { trigger: 2 } ].map(overrides => readCopy(copyOf(event(2, [ page([ turnOf(15) ], overrides) ], { name: 'Needler' })), contextOf(nest)) as LinkedReading);
+
+      // Act.
+      const words = readings.map(summaryWords);
+
+      // Assert.
+      expect(words)
+        .toStrictEqual([
+          'Follows the blueprint, but its commands name other events in the blueprint, so this copy keeps its own.',
+          '1 field set by hand. Its commands name other events in the blueprint, so this copy keeps its own.',
+        ]);
+    });
+
     it('says why no change reaches a drifted copy, and why a lost one has nothing to follow', () =>
     {
       // Arrange.
@@ -213,6 +235,32 @@ describe('copy words', () =>
       // Assert.
       expect(words)
         .toStrictEqual([ 'No change to the blueprint reaches it: it has 2 pages and its blueprint has 1 page.', 'Its blueprint is gone.' ]);
+    });
+  });
+
+  describe('markWords', () =>
+  {
+    it('counts the choices set by hand and the pins, then says commands naming the group are kept, never offsets', () =>
+    {
+      // Arrange: counts and commands kept, commands kept alone, counts alone, and offsets alone.
+      const counts = [
+        { own: 1, pinned: 1, offsets: 1, group: 1 },
+        { own: 0, pinned: 0, offsets: 0, group: 2 },
+        { own: 2, pinned: 0, offsets: 0, group: 0 },
+        { own: 0, pinned: 0, offsets: 3, group: 0 },
+      ];
+
+      // Act.
+      const words = counts.map(markWords);
+
+      // Assert.
+      expect(words)
+        .toStrictEqual([
+          '1 field set by hand, 1 pinned; its commands name other events in the blueprint, so this copy keeps its own',
+          'its commands name other events in the blueprint, so this copy keeps its own',
+          '2 fields set by hand',
+          '',
+        ]);
     });
   });
 

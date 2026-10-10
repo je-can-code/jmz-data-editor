@@ -17,7 +17,6 @@ import {
   noteTextPlan,
   pinPlan,
   SECOND_LINK,
-  SIBLING_UNKNOWN,
   unlinkPlan,
   unpinPlan,
   type CopyPlan,
@@ -29,7 +28,7 @@ import { cloneJson } from '../../../../src/mapEditor/core/model/json.ts';
 import type { RmmzMapEvent } from '../../../../src/mapEditor/core/model/rmmzTypes.ts';
 import { OTHER_TAGS_MISREAD } from '../../../../src/mapEditor/core/properties/noteText.ts';
 import { command, event, page } from '../../support/eventKindFixtures.ts';
-import { comment, contextOf, COPY_TAGS, copyOf, fieldOf, later, needler, needlerCommands, needlerNest } from '../../support/copyFixtures.ts';
+import { comment, contextOf, COPY_TAGS, copyOf, fieldOf, later, needler, needlerCommands, needlerNest, turnOf } from '../../support/copyFixtures.ts';
 
 /*
  * A copy's panel acts on a copy through plans that touch exactly what each action is about, and every other field and
@@ -46,7 +45,8 @@ import { comment, contextOf, COPY_TAGS, copyOf, fieldOf, later, needler, needler
  * - following again in everything puts the copy back as its blueprint's event, keeping its id, its place and the link's
  *   values of no shape the field model knows, and is the way back for a drifted copy too;
  * - commands naming another of the blueprint's events whose copy is not known are never followed, since the copy would
- *   name some other event of its map;
+ *   name some other event of its map, and say so in the words their row says: the copy keeps its own; commands standing
+ *   apart for that alone offer nothing, and leave nothing to follow again;
  * - unlinking takes the link and its line out, leaving the note's own text byte for byte;
  * - the Note box shows a copy's own text and writes what is typed there back before the link, refusing a second link,
  *   and leaving the note as it is when nothing was changed, wherever its link sits.
@@ -335,9 +335,12 @@ describe('followPlan', () =>
     const refused = followPlan(copy, read(copy, contextOf(nest)), 'p1.commands', { tags: COPY_TAGS });
     const known = followPlan(copy, read(copy, contextOf(nest, new Map([ [ 3, 16 ] ]))), 'p1.commands', { tags: COPY_TAGS, references: new Map([ [ 3, 16 ] ]) });
 
-    // Assert: known, the turn names 3's copy, 16.
+    // Assert: refused in the words the commands' row says them in; known, the turn names 3's copy, 16.
     expect([ refused, plannedEvent(known).pages[0].list[0].parameters[0] ])
-      .toStrictEqual([ { ok: false, message: `The commands can't follow: ${SIBLING_UNKNOWN}.` }, 16 ]);
+      .toStrictEqual([
+        { ok: false, message: 'The commands can\'t follow: they name other events in the blueprint, so this copy keeps its own.' },
+        16,
+      ]);
   });
 
   it('leaves a field already following as the very copy it was', () =>
@@ -403,17 +406,19 @@ describe('followAllPlan', () =>
 
   it('refuses when the blueprint\'s commands name another of its events whose copy on this map is not known', () =>
   {
-    // Arrange.
-    const turn = command(205, [ 3, { list: [ { code: 0, parameters: [] } ], repeat: false, skippable: false, wait: false } ]);
-    const nest = needlerNest([ event(2, [ page([ turn ]) ], { name: 'Needler' }), { ...needler(), id: 3 } ]);
-    const copy = copyOf(needler());
+    // Arrange: a copy read field by field, and one drifted by a page more.
+    const nest = needlerNest([ event(2, [ page([ turnOf(3) ]) ], { name: 'Needler' }), { ...needler(), id: 3 } ]);
+    const copies = [ copyOf(needler()), copyOf(event(2, [ needler().pages[0], needler().pages[0] ], { name: 'Needler' })) ];
 
     // Act.
-    const refused = followAllPlan(copy, readCopy(copy, contextOf(nest)) as FollowableCopy, undefined);
+    const refusals = copies.map(copy => followAllPlan(copy, readCopy(copy, contextOf(nest)) as FollowableCopy, undefined));
 
-    // Assert.
-    expect(refused)
-      .toStrictEqual({ ok: false, message: `It can't follow: ${SIBLING_UNKNOWN}.` });
+    // Assert: in the words the commands' row says them in, the copy read field by field told what it can still do.
+    expect(refusals)
+      .toStrictEqual([
+        { ok: false, message: 'It can\'t follow in everything: its commands name other events in the blueprint, so this copy keeps its own. Follow its other fields one by one.' },
+        { ok: false, message: 'It can\'t follow: its commands name other events in the blueprint, so this copy keeps its own.' },
+      ]);
   });
 });
 
@@ -551,6 +556,21 @@ describe('fieldActions', () =>
     expect(offered)
       .toStrictEqual([ [ 'pin', 'follow' ], [ 'unpin', 'follow' ], [ 'pin' ], [ 'follow' ], [], [] ]);
   });
+
+  it('offers nothing on commands kept for naming other events of the blueprint, and following on ones set by hand', () =>
+  {
+    // Arrange: the nest's needler turns its event 3, whose copy here nobody knows; one copy as placed, one saying more.
+    const nest = needlerNest([ event(2, [ page([ turnOf(3) ]) ], { name: 'Needler' }), { ...needler(), id: 3 } ]);
+    const placed = copyOf(event(2, [ page([ turnOf(15) ]) ], { name: 'Needler' }));
+    const talking = copyOf(event(2, [ page([ turnOf(15), command(101, [ '', 0, 0, 2, '' ]), command(401, [ 'Bzz.' ]) ]) ], { name: 'Needler' }));
+
+    // Act.
+    const offered = [ placed, talking ].map(copy => fieldActions(fieldOf(read(copy, contextOf(nest)), 'p1.commands')));
+
+    // Assert.
+    expect(offered)
+      .toStrictEqual([ [], [ 'follow' ] ]);
+  });
 });
 
 describe('canFollowAgain', () =>
@@ -571,6 +591,20 @@ describe('canFollowAgain', () =>
     // Assert: the last is lost, its blueprint gone.
     expect(answers)
       .toStrictEqual([ false, true, true, false ]);
+  });
+
+  it('says a copy standing apart only in commands kept for naming the group has nothing to follow, and one more has', () =>
+  {
+    // Arrange: the nest's needler turns its event 3, whose copy here nobody knows; one copy as placed, one a trigger apart.
+    const nest = needlerNest([ event(2, [ page([ turnOf(3) ]) ], { name: 'Needler' }), { ...needler(), id: 3 } ]);
+    const readings = [ {}, { trigger: 2 } ].map(overrides => readCopy(copyOf(event(2, [ page([ turnOf(15) ], overrides) ], { name: 'Needler' })), contextOf(nest)));
+
+    // Act.
+    const answers = readings.map(reading => (reading.kind === 'plain' ? null : canFollowAgain(reading)));
+
+    // Assert.
+    expect(answers)
+      .toStrictEqual([ false, true ]);
   });
 });
 

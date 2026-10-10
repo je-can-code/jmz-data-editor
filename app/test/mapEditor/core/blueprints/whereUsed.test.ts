@@ -13,7 +13,7 @@ import {
 } from '../../../../src/mapEditor/core/blueprints/whereUsed.ts';
 import { createEventPage, createMapEvent } from '../../../../src/mapEditor/core/model/eventModel.ts';
 import type { RmmzMapEvent } from '../../../../src/mapEditor/core/model/rmmzTypes.ts';
-import { COPY_TAGS, copyOf, needler, needlerNest } from '../../support/copyFixtures.ts';
+import { COPY_TAGS, copyOf, needler, needlerNest, turnOf } from '../../support/copyFixtures.ts';
 import { command, event, page } from '../../support/eventKindFixtures.ts';
 import { stampOf } from '../../support/stampFixtures.ts';
 import { blankGrid, put } from '../tiles/support/tileGridBuilder.ts';
@@ -481,8 +481,23 @@ describe('copyMarkOf', () =>
     // Act: with the placement recorded, and without.
     const marks = [ copyMarkOf(looked, 12, nest, COPY_TAGS, [ { blueprintId: 'k3x9q2mf', x: 6, y: 8 } ]), copyMarkOf(looked, 12, nest, COPY_TAGS, []) ];
 
-    // Assert: unknown, its commands read as its own.
+    // Assert: unknown, its commands are kept as its own, said as the copy's own panel says it, never as set by hand.
     expect(marks)
-      .toStrictEqual([ '', '1 field set by hand' ]);
+      .toStrictEqual([ '', 'its commands name other events in the blueprint, so this copy keeps its own' ]);
+  });
+
+  it('marks a copy keeping commands that name its group beside its fields set by hand', () =>
+  {
+    // Arrange: the nest of events alone whose needler turns its event 3, no placement to know the group by, and the
+    // copy's trigger set by hand.
+    const nest = needlerNest([ event(2, [ page([ turnOf(3) ]) ], { name: 'Needler' }), { ...needler(), id: 3 } ]);
+    const copy = copyOf(event(2, [ page([ turnOf(13) ], { trigger: 2 }) ], { name: 'Needler' }));
+
+    // Act.
+    const mark = copyMarkOf(lookedAtCopy(copy), 12, nest, COPY_TAGS, []);
+
+    // Assert.
+    expect(mark)
+      .toBe('1 field set by hand; its commands name other events in the blueprint, so this copy keeps its own');
   });
 });

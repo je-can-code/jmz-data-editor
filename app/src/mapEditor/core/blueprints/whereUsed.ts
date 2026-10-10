@@ -9,7 +9,7 @@ import { cellsPlaced, type BlueprintSpot, type PlacedPart, type PlacedSpot } fro
 import { pagesWords } from './copyChanges.ts';
 import { copyGroupOf, type CopyGround } from './copyPlans.ts';
 import { differencesOf, readCopy } from './copyReading.ts';
-import { differenceWords } from './copyWords.ts';
+import { markWords } from './copyWords.ts';
 import { checkPlacement, placementProblem } from './placementMatch.ts';
 
 /**
@@ -189,10 +189,11 @@ const copyStandingOf = (looked: LookedMap | undefined, eventId: number, stamp: S
 /**
  * Says how far one copy of a blueprint's events stands apart from its blueprint, for the where-used list to mark beside
  * it, so a copy that stopped following in some fields is never silent: how many of its choices were set by hand and how
- * many of its numbers are pinned, read against the blueprint as a change to it would read them (see readCopy), its group
- * known by the blueprint's placements on its map. A number at an offset still follows, and is not counted. A copy not yet
- * looked at, no longer a copy of this blueprint, or not to be read field by field, is marked with nothing: the list says
- * on its own why such a copy no longer follows.
+ * many of its numbers are pinned, and whether it keeps commands naming other events of the blueprint, read against the
+ * blueprint as a change to it would read them (see readCopy), its group known by the blueprint's placements on its map,
+ * in the words the copy's own panel uses (see copyWords' markWords). A number at an offset still follows, and is not
+ * counted. A copy not yet looked at, no longer a copy of this blueprint, or not to be read field by field, is marked with
+ * nothing: the list says on its own why such a copy no longer follows.
  * @param {LookedMap | undefined} looked The look at the copy's map, or undefined before one was asked for.
  * @param {number} eventId The copy's id on its map.
  * @param {Blueprint} blueprint The blueprint.
@@ -229,7 +230,7 @@ const copyMarkOf = (
     ...(references === undefined ? {} : { references }),
   });
   return reading.kind === 'read'
-    ? differenceWords(differencesOf(reading.fields), false)
+    ? markWords(differencesOf(reading.fields))
     : '';
 };
 

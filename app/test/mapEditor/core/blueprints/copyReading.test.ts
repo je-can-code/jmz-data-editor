@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { BLUEPRINT_GONE, differencesOf, NO_SUCH_EVENT, readCopy, type CopyReading } from '../../../../src/mapEditor/core/blueprints/copyReading.ts';
 import { cloneJson } from '../../../../src/mapEditor/core/model/json.ts';
 import { OTHER_TAGS_MISREAD } from '../../../../src/mapEditor/core/properties/noteText.ts';
-import { command, event, page } from '../../support/eventKindFixtures.ts';
-import { comment, contextOf, copyOf, fieldOf, later, needler, needlerCommands, needlerNest } from '../../support/copyFixtures.ts';
+import { command, event, page, text } from '../../support/eventKindFixtures.ts';
+import { comment, contextOf, copyOf, fieldOf, later, needler, needlerCommands, needlerNest, turnOf } from '../../support/copyFixtures.ts';
 
 /*
  * A copy's panel shows the author what a copy of a blueprint follows, so reading a copy owes them the very standing a
@@ -17,12 +17,14 @@ import { comment, contextOf, copyOf, fieldOf, later, needler, needlerCommands, n
  *   the next change would read it, an offset from the blueprint's value, or a pin moved to where the copy sits;
  * - a tag line one side has and the other has not is only on the copy, or not on it, and its page's commands are then set
  *   by hand;
- * - the blueprint's commands naming the event itself, or another of its group, read as the copy's own do.
+ * - the blueprint's commands naming the event itself, or another of its group, read as the copy's own do; where the group
+ *   is not known, commands standing apart only by naming the others of it are kept as the copy's own, never read as set
+ *   by hand, and commands changed in any other way too are set by hand.
  *
  * A copy whose blueprint is gone, or no longer has its event, is lost; one whose pages do not pair with its blueprint
  * event's, or whose note would read otherwise without its link, has drifted, in the where-used list's own words. An event
- * linked to nothing is plain. And the counts of how far a copy stands apart count choices set by hand, pins and offsets,
- * and nothing that follows.
+ * linked to nothing is plain. And the counts of how far a copy stands apart count choices set by hand, pins, offsets and
+ * commands kept for naming the group, and nothing that follows.
  */
 describe('readCopy', () =>
 {
@@ -240,9 +242,27 @@ describe('readCopy', () =>
     const known = readCopy(copy, contextOf(nest, new Map([ [ 3, 15 ] ])));
     const unknown = readCopy(copy, contextOf(nest));
 
-    // Assert: unknown, the command naming 3's copy reads as the copy's own choice, as a change to the blueprint reads it.
+    // Assert: unknown, the command naming 3's copy can't be matched, so the commands are the copy's own, as a change to
+    // the blueprint keeps them, though nobody set them by hand.
     expect([ fieldOf(known, 'p1.commands').state, fieldOf(unknown, 'p1.commands').state ])
-      .toStrictEqual([ { kind: 'follows' }, { kind: 'own' } ]);
+      .toStrictEqual([ { kind: 'follows' }, { kind: 'names-group' } ]);
+  });
+
+  it('reads commands naming the group and changed in any other way too as set by hand', () =>
+  {
+    // Arrange: the nest's needler turns itself and its event 3; one copy also says something, and one turns the player
+    // where the blueprint turns the needler itself, which is the copy, known.
+    const made = event(2, [ page([ turnOf(2), turnOf(3) ]) ], { name: 'Needler' });
+    const nest = needlerNest([ made, { ...needler(), id: 3 } ]);
+    const talking = copyOf(event(2, [ page([ turnOf(12), turnOf(15), ...text([ 'Bzz.' ]) ]) ], { name: 'Needler' }));
+    const turned = copyOf(event(2, [ page([ turnOf(-1), turnOf(15) ]) ], { name: 'Needler' }));
+
+    // Act.
+    const readings = [ talking, turned ].map(copy => readCopy(copy, contextOf(nest)));
+
+    // Assert.
+    expect(readings.map(reading => fieldOf(reading, 'p1.commands').state))
+      .toStrictEqual([ { kind: 'own' }, { kind: 'own' } ]);
   });
 
   it('reads the note\'s own text, outside the link, against the blueprint\'s note', () =>
@@ -290,7 +310,21 @@ describe('differencesOf', () =>
 
     // Assert: the commands are set by hand too, since a tag line came and one went.
     expect(differences)
-      .toStrictEqual({ own: 3, pinned: 1, offsets: 1 });
+      .toStrictEqual({ own: 3, pinned: 1, offsets: 1, group: 0 });
+  });
+
+  it('counts commands naming the group apart from the choices set by hand', () =>
+  {
+    // Arrange: the nest's needler turns its event 3, whose copy here nobody knows; the copy's trigger is set by hand.
+    const nest = needlerNest([ event(2, [ page([ turnOf(3) ]) ], { name: 'Needler' }), { ...needler(), id: 3 } ]);
+    const reading = readCopy(copyOf(event(2, [ page([ turnOf(15) ], { trigger: 2 }) ], { name: 'Needler' })), contextOf(nest));
+
+    // Act.
+    const differences = reading.kind === 'read' ? differencesOf(reading.fields) : null;
+
+    // Assert.
+    expect(differences)
+      .toStrictEqual({ own: 1, pinned: 0, offsets: 0, group: 1 });
   });
 
   it('counts nothing for a copy that follows in everything', () =>
@@ -303,6 +337,6 @@ describe('differencesOf', () =>
 
     // Assert.
     expect(differences)
-      .toStrictEqual({ own: 0, pinned: 0, offsets: 0 });
+      .toStrictEqual({ own: 0, pinned: 0, offsets: 0, group: 0 });
   });
 });

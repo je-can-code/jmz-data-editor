@@ -59,13 +59,15 @@ const ACTION_WORDS: Readonly<Record<FieldAction, { readonly label: string; reado
 };
 
 /**
- * The colour each standing is said in: quiet for a field that follows, louder the further a field stands apart.
+ * The colour each standing is said in: quiet for a field that follows, louder the further a field stands apart; commands
+ * kept for naming other events of the blueprint are said plainly, since nobody set them apart.
  */
 const STATE_COLOURS: Readonly<Record<CopyFieldState['kind'], string>> = {
   'follows': 'text.secondary',
   'offset': 'text.primary',
   'pinned': 'info.main',
   'own': 'warning.main',
+  'names-group': 'text.primary',
   'copy-only': 'warning.main',
   'blueprint-only': 'warning.main',
 };
@@ -88,7 +90,8 @@ const showsFirst = (field: CopyField): boolean =>
 
 /**
  * One field of the copy: what it is, where it stands against the blueprint beneath it, and what can be done with it, to
- * the right, so the standing has the row's whole width however long the field's name.
+ * the right, so the standing has the row's whole width however long the field's name, running on to a second line when
+ * it says more than the width holds.
  * @param {{ field: CopyField, onAction: (action: FieldAction) => void }} props The field, and what each action does.
  * @returns {React.JSX.Element} The row.
  */
@@ -105,7 +108,7 @@ const FieldRow = (props: { readonly field: CopyField; readonly onAction: (action
         <Typography variant={'body2'} noWrap title={capitalised(words)}>
           {capitalised(words)}
         </Typography>
-        <Typography variant={'caption'} color={STATE_COLOURS[field.state.kind]} noWrap component={'p'} data-testid={'copy-field-state'}>
+        <Typography variant={'caption'} color={STATE_COLOURS[field.state.kind]} component={'p'} data-testid={'copy-field-state'}>
           {stateWords(field.state)}
         </Typography>
       </Box>

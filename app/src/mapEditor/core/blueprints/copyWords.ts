@@ -8,6 +8,13 @@ import { amountText } from './fieldLinks.ts';
 type LinkedReading = Exclude<CopyReading, { readonly kind: 'plain' }>;
 
 /**
+ * What a copy's commands do when they name other events of its blueprint whose copies on its map can't be told, said the
+ * same way wherever it is said: on the commands' row, in the copy's summary, in where-used, and when following them is
+ * refused. Its subject, the commands, comes before it.
+ */
+const NAMES_GROUP_WORDS = 'name other events in the blueprint, so this copy keeps its own';
+
+/**
  * Names a field of a copy the way an author knows it, in lowercase, as the event window labels it: "name", "speed",
  * "graphic", "commands", or a module's tag field by the module's own words, such as "sight" or "light 1 radius". A tag
  * whose module gives no words goes by its name on the page.
@@ -58,7 +65,8 @@ const offsetText = (amount: number): string =>
 
 /**
  * Says where a field of a copy stands, in plain words: "Follows the blueprint", "Follows the blueprint, +1", "Pinned at 3",
- * "Set by hand", "Only on this copy", or "Not on this copy".
+ * "Set by hand", "These commands name other events in the blueprint, so this copy keeps its own", "Only on this copy", or
+ * "Not on this copy".
  * @param {CopyFieldState} state Where it stands.
  * @returns {string} The words.
  */
@@ -74,6 +82,8 @@ const stateWords = (state: CopyFieldState): string =>
       return `Pinned at ${amountText(state.value)}`;
     case 'own':
       return 'Set by hand';
+    case 'names-group':
+      return `These commands ${NAMES_GROUP_WORDS}`;
     case 'copy-only':
       return 'Only on this copy';
     case 'blueprint-only':
@@ -132,8 +142,9 @@ const capitalised = (words: string): string =>
 
 /**
  * Says how a copy stands against its blueprint as a whole, as a sentence: how far it stands apart, offsets and all, when
- * it was read field by field, or that it follows in everything; why no change to the blueprint reaches it, when it has
- * drifted; and why there is nothing to read it against, when it is lost.
+ * it was read field by field, or that it follows in everything, and then whether its commands name other events of the
+ * blueprint, which it keeps as its own; why no change to the blueprint reaches it, when it has drifted; and why there is
+ * nothing to read it against, when it is lost.
  * @param {LinkedReading} reading The copy, read.
  * @returns {string} Such as "2 fields set by hand, 1 pinned." or "Follows the blueprint in everything."
  */
@@ -149,11 +160,46 @@ const summaryWords = (reading: LinkedReading): string =>
     return `No change to the blueprint reaches it: ${reading.reason}.`;
   }
 
-  const apart = differenceWords(differencesOf(reading.fields), true);
+  const differences = differencesOf(reading.fields);
+  const apart = differenceWords(differences, true);
+  if (differences.group === 0)
+  {
+    return apart === ''
+      ? 'Follows the blueprint in everything.'
+      : `${capitalised(apart)}.`;
+  }
+
+  // commands kept for naming the others of the group are said after the counts, in the words their row says them in.
   return apart === ''
-    ? 'Follows the blueprint in everything.'
-    : `${capitalised(apart)}.`;
+    ? `Follows the blueprint, but its commands ${NAMES_GROUP_WORDS}.`
+    : `${capitalised(apart)}. Its commands ${NAMES_GROUP_WORDS}.`;
 };
 
-export { capitalised, copyTitle, differenceWords, fieldWords, offsetText, pageWords, stateWords, summaryWords };
+/**
+ * Says how far one copy stands apart from its blueprint, for the where-used list to mark beside it: its choices set by
+ * hand and its numbers pinned, counted, then its commands kept for naming other events of the blueprint, in the words the
+ * copy's own panel says them in. Offsets are left out, since a number at an offset still follows the blueprint.
+ * @param {CopyDifferences} differences The counts.
+ * @returns {string} The words, such as "1 field set by hand; its commands name other events in the blueprint, so this
+ * copy keeps its own"; empty when there is nothing to mark.
+ */
+const markWords = (differences: CopyDifferences): string =>
+{
+  const counted = differenceWords(differences, false);
+  const group = differences.group > 0 ? `its commands ${NAMES_GROUP_WORDS}` : '';
+  return [ counted, group ].filter(words => words !== '').join('; ');
+};
+
+export {
+  capitalised,
+  copyTitle,
+  differenceWords,
+  fieldWords,
+  markWords,
+  NAMES_GROUP_WORDS,
+  offsetText,
+  pageWords,
+  stateWords,
+  summaryWords,
+};
 export type { LinkedReading };

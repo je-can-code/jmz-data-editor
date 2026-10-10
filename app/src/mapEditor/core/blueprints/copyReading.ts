@@ -1,9 +1,11 @@
 import { rewireGroupReferences } from '../events/eventReferences.ts';
 import { jsonEquals, type JsonValue } from '../model/json.ts';
-import type { RmmzMapEvent } from '../model/rmmzTypes.ts';
+import type { RmmzEventCommand, RmmzEventPage, RmmzMapEvent } from '../model/rmmzTypes.ts';
 import {
+  listLessTags,
   ownNoteOf,
   placedEventFields,
+  tagLinesOf,
   type CommentTagDefinition,
   type FieldKind,
   type FieldPlace,
@@ -22,6 +24,10 @@ import { currentLink, fieldLinksOf, type FieldLink } from './fieldLinks.ts';
  * - **offset**: a number held by how far it sits from the blueprint's, which it keeps through every change;
  * - **pinned**: a number held at a value of its own, whatever the blueprint does;
  * - **own**: a choice the copy holds otherwise than its blueprint, set by hand, which no change to the blueprint moves;
+ * - **names-group**: a page's command list that stands apart from its blueprint's only where the blueprint's commands
+ *   name other events of the blueprint whose copies on this map can't be told, which nobody set by hand: placing the
+ *   blueprint had the copy's commands name those events' copies, and with the copies unknown the two lists can't be
+ *   matched, so the copy keeps its own, as a change to the blueprint keeps it (see planCopyChange);
  * - **copy-only** and **blueprint-only**: a field one side has and the other has not, such as a tag line the copy was given
  *   by hand, or one it lost, which only the page's command list can bring in step.
  *
@@ -34,6 +40,7 @@ type CopyFieldState =
   | { readonly kind: 'offset'; readonly amount: number }
   | { readonly kind: 'pinned'; readonly value: number }
   | { readonly kind: 'own' }
+  | { readonly kind: 'names-group' }
   | { readonly kind: 'copy-only' }
   | { readonly kind: 'blueprint-only' };
 
@@ -102,13 +109,14 @@ type CopyReading =
   | { readonly kind: 'read'; readonly link: BlueprintLink; readonly blueprint: Blueprint; readonly source: RmmzMapEvent; readonly fields: readonly CopyField[] };
 
 /**
- * How many of a copy's fields stand apart from its blueprint, kind by kind: choices set by hand, numbers pinned, and
- * numbers held by an offset.
+ * How many of a copy's fields stand apart from its blueprint, kind by kind: choices set by hand, numbers pinned, numbers
+ * held by an offset, and pages whose commands name other events of the blueprint, which the copy keeps as its own.
  */
 type CopyDifferences = {
   readonly own: number;
   readonly pinned: number;
   readonly offsets: number;
+  readonly group: number;
 };
 
 /**
@@ -125,6 +133,12 @@ const FOLLOWS: CopyFieldState = { kind: 'follows' };
  * What a choice set by hand stands at.
  */
 const OWN: CopyFieldState = { kind: 'own' };
+
+/**
+ * What a page's command list stands at when it stands apart only by naming other events of the blueprint whose copies
+ * on this map can't be told.
+ */
+const NAMES_GROUP: CopyFieldState = { kind: 'names-group' };
 
 /**
  * What a field only the copy has stands at.
@@ -158,6 +172,114 @@ const sourceFor = (event: RmmzMapEvent, copy: RmmzMapEvent, references: Readonly
 {
   // the copy is always its own blueprint event's copy, whatever else of its group is known.
   return rewireGroupReferences(event, new Map([ ...references ?? [], [ event.id, copy.id ] ]));
+};
+
+/**
+ * Lists the blueprint's other events whose copies on this map are not known, each to an id no event has, so a command
+ * naming one of them shows once rewired (see {@link namesUnknown}).
+ * @param {Blueprint} blueprint The blueprint.
+ * @param {RmmzMapEvent} made The event of it the copy was made from.
+ * @param {ReadonlyMap<number, number> | undefined} references The copy's group, by the blueprint's ids, when known.
+ * @returns {Map<number, number>} The ids, each to -1.
+ */
+const unknownSiblings = (blueprint: Blueprint, made: RmmzMapEvent, references: ReadonlyMap<number, number> | undefined): Map<number, number> =>
+{
+  const known = references ?? new Map<number, number>();
+  return new Map(blueprint.stamp.events.filter(event => event.id !== made.id && known.has(event.id) === false).map(event => [ event.id, -1 ]));
+};
+
+/**
+ * Reports whether a command on some of an event's pages names one of the events given, as rewiring them shows.
+ * @param {RmmzMapEvent} event The event, as its blueprint holds it.
+ * @param {readonly RmmzEventPage[]} pages The pages to look at.
+ * @param {ReadonlyMap<number, number>} unknown The events, by id.
+ * @returns {boolean} True when a command names one.
+ */
+const namesUnknown = (event: RmmzMapEvent, pages: readonly RmmzEventPage[], unknown: ReadonlyMap<number, number>): boolean =>
+{
+  const looked = { ...event, pages: [ ...pages ] };
+  return unknown.size > 0 && jsonEquals(rewireGroupReferences(looked, unknown), looked) === false;
+};
+
+/**
+ * Finds where one page of the blueprint's event names another of the blueprint's events whose copy on this map is not
+ * known, as rewiring them shows: for each command naming one, by its place in the list, the places among its parameters
+ * that do. Read off the blueprint's own ids, so a command naming a known event's copy is never taken for one of these.
+ * @param {RmmzMapEvent} made The blueprint's event, its commands naming the blueprint's own ids.
+ * @param {number} pageIndex The page, counted from 0.
+ * @param {ReadonlyMap<number, number>} unknown The events whose copies are not known, by id (see {@link unknownSiblings}).
+ * @returns {Map<number, number[]>} The places, by command; empty when the page names none.
+ */
+const unknownPlaces = (made: RmmzMapEvent, pageIndex: number, unknown: ReadonlyMap<number, number>): Map<number, number[]> =>
+{
+  const page = made.pages[pageIndex];
+  const [ rewired ] = rewireGroupReferences({ ...made, pages: [ page ] }, unknown).pages;
+  const places = new Map<number, number[]>();
+  page.list.forEach((command, index) =>
+  {
+    // rewiring moves nothing but the parameters naming an event, so whatever it moved names one of these.
+    const named = command.parameters.flatMap((value, at) => (jsonEquals(value, rewired.list[index].parameters[at]) ? [] : [ at ]));
+    if (named.length > 0)
+    {
+      places.set(index, named);
+    }
+  });
+
+  return places;
+};
+
+/**
+ * Blanks the parameters at the places given in a command list, so two lists can be held side by side but for the events
+ * those places name.
+ * @param {readonly RmmzEventCommand[]} list The list.
+ * @param {ReadonlyMap<number, readonly number[]>} places The places, by command (see {@link unknownPlaces}).
+ * @returns {RmmzEventCommand[]} The list, each of those parameters null.
+ */
+const withPlacesBlank = (list: readonly RmmzEventCommand[], places: ReadonlyMap<number, readonly number[]>): RmmzEventCommand[] =>
+{
+  return list.map((command, index) =>
+  {
+    const blank = places.get(index);
+    return blank === undefined
+      ? command
+      : { ...command, parameters: command.parameters.map((value, at) => (blank.includes(at) ? null : value)) };
+  });
+};
+
+/**
+ * Reports whether a copy's command list on one page stands apart from its blueprint's only where the blueprint's commands
+ * name other events of the blueprint whose copies on this map can't be told: placing the blueprint had the copy's commands
+ * name those events' copies, the blueprint's name them by the blueprint's own ids, and with the copies unknown the two
+ * can't be matched. Held side by side but for those places, less every tag line as the command list is read, the two
+ * lists are then the same; a list changed in any other way was changed by hand.
+ * @param {RmmzMapEvent} made The blueprint's event, its commands naming the blueprint's own ids.
+ * @param {RmmzMapEvent} source The blueprint's event as the copy follows it (see {@link sourceFor}).
+ * @param {RmmzMapEvent} copy The copy, whose pages pair with the blueprint's.
+ * @param {number} pageIndex The page, counted from 0.
+ * @param {{ unknown: ReadonlyMap<number, number>, tags: readonly CommentTagDefinition[] }} reading The events whose
+ * copies are not known, by id, and the tags the active modules read.
+ * @returns {boolean} True when the list stands apart for that alone.
+ */
+const namesGroupAlone = (
+  made: RmmzMapEvent,
+  source: RmmzMapEvent,
+  copy: RmmzMapEvent,
+  pageIndex: number,
+  reading: { readonly unknown: ReadonlyMap<number, number>; readonly tags: readonly CommentTagDefinition[] },
+): boolean =>
+{
+  const places = unknownPlaces(made, pageIndex, reading.unknown);
+  if (places.size === 0)
+  {
+    return false;
+  }
+
+  // the tag lines are read off the lists as they stand, the places blanked naming events, never a comment.
+  const theirs = source.pages[pageIndex];
+  const ours = copy.pages[pageIndex];
+  const theirList = listLessTags(withPlacesBlank(theirs.list, places), tagLinesOf(theirs, reading.tags));
+  const ourList = listLessTags(withPlacesBlank(ours.list, places), tagLinesOf(ours, reading.tags));
+  return jsonEquals(theirList, ourList);
 };
 
 /**
@@ -243,7 +365,8 @@ const ownNoteRead = (copy: RmmzMapEvent): { readonly ok: true; readonly note: st
  * A copy whose blueprint is gone, or no longer has its event, is lost; one whose pages do not pair with its blueprint
  * event's, or whose note cannot be read without its link, has drifted, in the very words the where-used list uses. The
  * blueprint's event is read as the copy follows it, its commands naming its group as the copy's do where the group is
- * known.
+ * known; where it is not, a command list standing apart only by naming the others of the group names its group, rather
+ * than reading as set by hand, since nobody set it.
  * @param {RmmzMapEvent} copy The event, a copy of a blueprint or not.
  * @param {CopyContext} context The blueprints, the tags the modules read, and the copy's group.
  * @returns {CopyReading} What reading it came to.
@@ -276,7 +399,17 @@ const readCopy = (copy: RmmzMapEvent, context: CopyContext): CopyReading =>
   }
 
   // a blueprint's events carry no links, so the blueprint's own text is its whole note.
-  const fields = pairedFields(placedEventFields(copy, note.note, context.tags), placedEventFields(source, ownNoteOf(source), context.tags), fieldLinksOf(link));
+  const paired = pairedFields(placedEventFields(copy, note.note, context.tags), placedEventFields(source, ownNoteOf(source), context.tags), fieldLinksOf(link));
+
+  // a command list apart only by naming the others of a group nobody knows was never set by hand.
+  const group = { unknown: unknownSiblings(blueprint, made, context.references), tags: context.tags };
+  const fields = paired.map((field): CopyField =>
+  {
+    const groupAlone = field.place.kind === 'commands' && field.state.kind === 'own' && namesGroupAlone(made, source, copy, field.place.page, group);
+    return groupAlone
+      ? { ...field, state: NAMES_GROUP }
+      : field;
+  });
   return { kind: 'read', link, blueprint, source, fields };
 };
 
@@ -289,8 +422,8 @@ const readCopy = (copy: RmmzMapEvent, context: CopyContext): CopyReading =>
 const differencesOf = (fields: readonly CopyField[]): CopyDifferences =>
 {
   const count = (kind: CopyFieldState['kind']) => fields.filter(field => field.state.kind === kind).length;
-  return { own: count('own'), pinned: count('pinned'), offsets: count('offset') };
+  return { own: count('own'), pinned: count('pinned'), offsets: count('offset'), group: count('names-group') };
 };
 
-export { BLUEPRINT_GONE, differencesOf, NO_SUCH_EVENT, readCopy };
+export { BLUEPRINT_GONE, differencesOf, namesUnknown, NO_SUCH_EVENT, readCopy, unknownSiblings };
 export type { CopyContext, CopyDifferences, CopyField, CopyFieldState, CopyReading };

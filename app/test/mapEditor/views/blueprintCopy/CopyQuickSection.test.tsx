@@ -17,8 +17,8 @@ import type { MapEditorServices } from '../../../../src/mapEditor/services/MapEd
 import { MapEditorServicesProvider } from '../../../../src/mapEditor/services/MapEditorServicesContext.tsx';
 import { QuickPanelHost } from '../../../../src/mapEditor/views/quickPanel/QuickPanelHost.tsx';
 import { holdBlueprints } from '../../support/blueprintFixtures.ts';
-import { copyOf, NEST_ID, needler, needlerNest } from '../../support/copyFixtures.ts';
-import { command, event, hubWith, oreChest, page } from '../../support/eventKindFixtures.ts';
+import { copyOf, NEST_ID, needler, needlerNest, turnOf } from '../../support/copyFixtures.ts';
+import { event, hubWith, oreChest, page } from '../../support/eventKindFixtures.ts';
 
 /*
  * A copy of a blueprint picked alone on a map shows in the quick panel, above its own settings, what it is a copy of and
@@ -140,26 +140,40 @@ describe('CopyQuickSection', () =>
   it('says why a copy could not follow, and leaves the map as it was', () =>
   {
     // Arrange: the nest's needler turns its event 3, standing beside it, whose copy here nobody knows; the copy's turn
-    // names 15.
-    const turn = (eventId: number) => command(205, [ eventId, { list: [ { code: 0, parameters: [] } ], repeat: false, skippable: false, wait: false } ]);
-    const nest = needlerNest([ event(2, [ page([ turn(3) ]) ], { name: 'Needler' }), { ...needler(), id: 3, x: 0, y: 0 } ]);
-    const { hub } = renderPick([ copyOf(event(2, [ page([ turn(15) ]) ], { name: 'Needler' })) ], [ 12 ], { nest });
+    // names 15, and its trigger is set by hand.
+    const nest = needlerNest([ event(2, [ page([ turnOf(3) ]) ], { name: 'Needler' }), { ...needler(), id: 3, x: 0, y: 0 } ]);
+    const { hub } = renderPick([ copyOf(event(2, [ page([ turnOf(15) ], { trigger: 2 }) ], { name: 'Needler' })) ], [ 12 ], { nest });
     const before = JSON.stringify(hub.document('map:1').toJson());
 
     // Act.
     fireEvent.click(screen.getByRole('button', { name: 'Follow the blueprint again' }));
 
-    // Assert.
+    // Assert: in the words the copy's commands are said in everywhere.
     expect([ screen.getByRole('alert').textContent, JSON.stringify(hub.document('map:1').toJson()) === before ])
-      .toStrictEqual([ 'It can\'t follow: the blueprint\'s commands name another of its events, and which event that is on this map can\'t be told.', true ]);
+      .toStrictEqual([
+        'It can\'t follow in everything: its commands name other events in the blueprint, so this copy keeps its own. Follow its other fields one by one.',
+        true,
+      ]);
+  });
+
+  it('offers no follow to a copy apart only in commands naming other events of the blueprint, and says why', () =>
+  {
+    // Arrange: the nest's needler turns its event 3, whose copy here nobody knows; the copy, as placed, turns 15.
+    const nest = needlerNest([ event(2, [ page([ turnOf(3) ]) ], { name: 'Needler' }), { ...needler(), id: 3, x: 0, y: 0 } ]);
+
+    // Act.
+    renderPick([ copyOf(event(2, [ page([ turnOf(15) ]) ], { name: 'Needler' })) ], [ 12 ], { nest });
+
+    // Assert.
+    expect([ screen.getByTestId('copy-summary').textContent, (screen.getByRole('button', { name: 'Follow the blueprint again' }) as HTMLButtonElement).disabled ])
+      .toStrictEqual([ 'Follows the blueprint, but its commands name other events in the blueprint, so this copy keeps its own.', true ]);
   });
 
   it('puts away why a follow could not be made once the author closes it', () =>
   {
     // Arrange: the follow refused, as above.
-    const turn = (eventId: number) => command(205, [ eventId, { list: [ { code: 0, parameters: [] } ], repeat: false, skippable: false, wait: false } ]);
-    const nest = needlerNest([ event(2, [ page([ turn(3) ]) ], { name: 'Needler' }), { ...needler(), id: 3, x: 0, y: 0 } ]);
-    renderPick([ copyOf(event(2, [ page([ turn(15) ]) ], { name: 'Needler' })) ], [ 12 ], { nest });
+    const nest = needlerNest([ event(2, [ page([ turnOf(3) ]) ], { name: 'Needler' }), { ...needler(), id: 3, x: 0, y: 0 } ]);
+    renderPick([ copyOf(event(2, [ page([ turnOf(15) ], { trigger: 2 }) ], { name: 'Needler' })) ], [ 12 ], { nest });
     fireEvent.click(screen.getByRole('button', { name: 'Follow the blueprint again' }));
 
     // Act.

@@ -22,9 +22,10 @@ import type { MapEditorServices } from '../../../../src/mapEditor/services/MapEd
 import { MapEditorServicesProvider } from '../../../../src/mapEditor/services/MapEditorServicesContext.tsx';
 import { SoundPlayerContext } from '../../../../src/mapEditor/views/commandList/commandListResources.ts';
 import { EventWindowView } from '../../../../src/mapEditor/views/EventWindowView.tsx';
+import type { Blueprint } from '../../../../src/mapEditor/core/blueprints/blueprints.ts';
 import { holdBlueprints } from '../../support/blueprintFixtures.ts';
-import { copyOf, later, NEST_ID, needler, needlerNest } from '../../support/copyFixtures.ts';
-import { event } from '../../support/eventKindFixtures.ts';
+import { copyOf, later, NEST_ID, needler, needlerNest, turnOf } from '../../support/copyFixtures.ts';
+import { event, page } from '../../support/eventKindFixtures.ts';
 import { mapWithEvents } from '../../support/eventFixtures.ts';
 
 // the route preview is proved in its own tests, and draws nothing here.
@@ -67,17 +68,18 @@ describe('CopyPanel', () =>
   /**
    * Renders the copy's event window over a hub holding its map and the nest, the plugins J-ABS and J-Lighting read
    * unless told not to be.
-   * @param {object} options The copy, whether the plugins have been read, and whether the nest is kept.
+   * @param {object} options The copy, whether the plugins have been read, whether the nest is kept and what it holds, and
+   * whether pop-ups are blocked.
    * @returns {object} The hub, and every window the window asked to open.
    */
-  const renderCopy = (options: { copy?: RmmzMapEvent; plugins?: boolean; nest?: boolean; blocked?: boolean } = {}) =>
+  const renderCopy = (options: { copy?: RmmzMapEvent; plugins?: boolean; nest?: boolean; nestOf?: Blueprint; blocked?: boolean } = {}) =>
   {
-    const { copy = apartCopy(), plugins = true, nest = true, blocked = false } = options;
+    const { copy = apartCopy(), plugins = true, nest = true, nestOf = needlerNest(), blocked = false } = options;
     const file = mapWithEvents(16, 12, Array.from({ length: COPY_ID + 1 }, () => null));
     file.events[COPY_ID] = copy;
     const hub = new DocumentHub({ clientId: 'event-window' });
     hub.adopt('map:1', file as unknown as JsonValue);
-    holdBlueprints(hub, nest ? { [NEST_ID]: needlerNest() } : {});
+    holdBlueprints(hub, nest ? { [NEST_ID]: nestOf } : {});
     const modules = new PluginModuleRegistry(new CommandCatalog());
     if (plugins)
     {
@@ -204,6 +206,32 @@ describe('CopyPanel', () =>
         '<blueprint:[k3x9q2mf, 2, p1.speed+2, p1.sight+2, p1.frequency=3]>',
         0,
         [ 'Speed | Follows the blueprint, +2', 'Frequency | Pinned at 3', 'Sight | Follows the blueprint, +2' ],
+      ]);
+  });
+
+  it('says commands naming other events of the blueprint are kept as the copy\'s own, offering nothing to follow', () =>
+  {
+    // Arrange: the nest's needler turns its event 3, standing beside it, whose copy here nobody knows; the copy, as placed,
+    // turns 15.
+    const nestOf = needlerNest([ event(2, [ page([ turnOf(3) ]) ], { name: 'Needler' }), { ...needler(), id: 3, x: 0, y: 0 } ]);
+    const copy = copyOf(event(2, [ page([ turnOf(15) ]) ], { name: 'Needler' }));
+
+    // Act.
+    renderCopy({ copy, nestOf });
+
+    // Assert: the commands' row offers no action, and nothing else stands apart to follow.
+    const commandsRow = screen.getAllByTestId('copy-field').find(row => row.textContent?.startsWith('Commands') === true) as HTMLElement;
+    expect([
+      screen.getByTestId('copy-summary').textContent,
+      within(commandsRow).getByTestId('copy-field-state').textContent,
+      within(commandsRow).queryAllByRole('button').length,
+      (screen.getByRole('button', { name: 'Follow the blueprint again' }) as HTMLButtonElement).disabled,
+    ])
+      .toStrictEqual([
+        'Follows the blueprint, but its commands name other events in the blueprint, so this copy keeps its own.',
+        'These commands name other events in the blueprint, so this copy keeps its own',
+        0,
+        true,
       ]);
   });
 

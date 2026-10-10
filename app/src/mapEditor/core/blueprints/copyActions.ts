@@ -1,6 +1,5 @@
-import { rewireGroupReferences } from '../events/eventReferences.ts';
-import { cloneJson, jsonEquals, type JsonValue } from '../model/json.ts';
-import type { RmmzEventPage, RmmzMapEvent } from '../model/rmmzTypes.ts';
+import { cloneJson, type JsonValue } from '../model/json.ts';
+import type { RmmzMapEvent } from '../model/rmmzTypes.ts';
 import { metaTagsOf } from '../properties/noteText.ts';
 import {
   addExactly,
@@ -20,9 +19,9 @@ import {
   withoutBlueprintLink,
   type BlueprintLink,
 } from './blueprintLink.ts';
-import type { Blueprint } from './blueprints.ts';
 import { followedList } from './copyChanges.ts';
-import type { CopyField, CopyReading } from './copyReading.ts';
+import { namesUnknown, unknownSiblings, type CopyField, type CopyReading } from './copyReading.ts';
+import { NAMES_GROUP_WORDS } from './copyWords.ts';
 import { readFieldLink, withFieldLinks, type FieldLink } from './fieldLinks.ts';
 
 /**
@@ -75,10 +74,23 @@ type NoteBox = {
 const FIELD_GONE = 'That setting has changed since; look again and try once more.';
 
 /**
- * Why following the blueprint's commands is refused when they name another of the blueprint's events whose copy on this
- * map is not known: the copy would be written to name some other event of the map.
+ * Why following a page's commands is refused when the blueprint's name other events of the blueprint whose copies on this
+ * map are not known, since the copy would be written to name some other event of the map: in the words the commands' row
+ * says them in.
  */
-const SIBLING_UNKNOWN = 'the blueprint\'s commands name another of its events, and which event that is on this map can\'t be told';
+const COMMANDS_KEEP_OWN = `The commands can't follow: they ${NAMES_GROUP_WORDS}.`;
+
+/**
+ * Why following the blueprint again in everything is refused when its commands name other events of the blueprint whose
+ * copies on this map are not known, in the same words, with what the author can still do: for a copy read field by field,
+ * follow its other fields one by one.
+ */
+const ALL_KEEP_OWN = `It can't follow in everything: its commands ${NAMES_GROUP_WORDS}. Follow its other fields one by one.`;
+
+/**
+ * Why following the blueprint again is refused, for the same reason, for a copy drifted too far to be read field by field.
+ */
+const DRIFTED_KEEP_OWN = `It can't follow: its commands ${NAMES_GROUP_WORDS}.`;
 
 /**
  * Why the Note box refuses text holding a link of its own.
@@ -94,13 +106,14 @@ type FieldAction = 'pin' | 'unpin' | 'follow';
 /**
  * Lists the actions a copy's panel offers on one field: a number the copy and its blueprint both hold can be pinned, or
  * unpinned once pinned; any field the two both hold that stands apart from the blueprint can follow it again. A field
- * only one side has offers nothing of its own: its page's command list brings the two in step.
+ * only one side has offers nothing of its own: its page's command list brings the two in step. Commands naming other
+ * events of the blueprint whose copies here can't be told offer nothing either, since they can't follow.
  * @param {CopyField} field The field.
  * @returns {FieldAction[]} The actions, in the order the panel shows them.
  */
 const fieldActions = (field: CopyField): FieldAction[] =>
 {
-  if (field.copy === undefined || field.blueprint === undefined)
+  if (field.copy === undefined || field.blueprint === undefined || field.state.kind === 'names-group')
   {
     return [];
   }
@@ -116,8 +129,9 @@ const fieldActions = (field: CopyField): FieldAction[] =>
 
 /**
  * Reports whether following the blueprint again in everything would change anything of a copy: a copy drifted too far for
- * a change to reach it always has something to follow, and a copy read field by field has while any field stands apart; a
- * lost copy has nothing left to follow.
+ * a change to reach it always has something to follow, and a copy read field by field has while any field stands apart
+ * but commands it keeps for naming other events of the blueprint, which can't follow; a lost copy has nothing left to
+ * follow.
  * @param {Exclude<CopyReading, { kind: 'plain' }>} reading The copy, read.
  * @returns {boolean} True when there is anything to follow.
  */
@@ -125,7 +139,7 @@ const canFollowAgain = (reading: Exclude<CopyReading, { readonly kind: 'plain' }
 {
   if (reading.kind === 'read')
   {
-    return reading.fields.some(field => field.state.kind !== 'follows');
+    return reading.fields.some(field => field.state.kind !== 'follows' && field.state.kind !== 'names-group');
   }
 
   return reading.kind === 'drifted';
@@ -267,33 +281,6 @@ const unpinPlan = (copy: RmmzMapEvent, reading: ReadCopy, key: string): CopyPlan
 };
 
 /**
- * Lists the blueprint's other events whose copies on this map are not known, each to an id no event has, so a command
- * naming one of them shows once rewired (see {@link namesUnknown}).
- * @param {Blueprint} blueprint The blueprint.
- * @param {RmmzMapEvent} made The event of it the copy was made from.
- * @param {ReadonlyMap<number, number> | undefined} references The copy's group, by the blueprint's ids, when known.
- * @returns {Map<number, number>} The ids, each to -1.
- */
-const unknownSiblings = (blueprint: Blueprint, made: RmmzMapEvent, references: ReadonlyMap<number, number> | undefined): Map<number, number> =>
-{
-  const known = references ?? new Map<number, number>();
-  return new Map(blueprint.stamp.events.filter(event => event.id !== made.id && known.has(event.id) === false).map(event => [ event.id, -1 ]));
-};
-
-/**
- * Reports whether a command on some of an event's pages names one of the events given, as rewiring them shows.
- * @param {RmmzMapEvent} event The event, as its blueprint holds it.
- * @param {readonly RmmzEventPage[]} pages The pages to look at.
- * @param {ReadonlyMap<number, number>} unknown The events, by id.
- * @returns {boolean} True when a command names one.
- */
-const namesUnknown = (event: RmmzMapEvent, pages: readonly RmmzEventPage[], unknown: ReadonlyMap<number, number>): boolean =>
-{
-  const looked = { ...event, pages: [ ...pages ] };
-  return unknown.size > 0 && jsonEquals(rewireGroupReferences(looked, unknown), looked) === false;
-};
-
-/**
  * Finds the event of its blueprint a copy was made from, as the blueprint holds it, its commands naming the blueprint's
  * own ids.
  * @param {FollowableCopy} reading The copy, read.
@@ -321,7 +308,7 @@ const followCommands = (copy: RmmzMapEvent, reading: ReadCopy, page: number, con
   const made = madeFrom(reading);
   if (namesUnknown(made, [ made.pages[page] ], unknownSiblings(reading.blueprint, made, context.references)))
   {
-    return refused(`The commands can't follow: ${SIBLING_UNKNOWN}.`);
+    return refused(COMMANDS_KEEP_OWN);
   }
 
   const theirs = reading.source.pages[page];
@@ -441,7 +428,9 @@ const followPlan = (copy: RmmzMapEvent, reading: ReadCopy, key: string, context:
  * Plans following the blueprint again in everything: the copy becomes its blueprint's event, as placing it would put it
  * down, its commands naming its group's copies, keeping only its own id, where it stands, and its link, which keeps no
  * offset or pin any more, every value of no shape the field model knows staying as written. It is how a copy drifted
- * too far for a change to reach it, or left behind by an undo, comes back in step.
+ * too far for a change to reach it, or left behind by an undo, comes back in step. A copy whose blueprint's commands name
+ * other events of the blueprint whose copies here can't be told keeps its own commands, so it can't follow in everything,
+ * and is refused, in the words its commands' row says it in.
  * @param {RmmzMapEvent} copy The copy, as it stands.
  * @param {FollowableCopy} reading The copy, read against its blueprint, or drifted from it.
  * @param {ReadonlyMap<number, number> | undefined} references The copy's group, by the blueprint's ids, when known.
@@ -452,7 +441,7 @@ const followAllPlan = (copy: RmmzMapEvent, reading: FollowableCopy, references: 
   const made = madeFrom(reading);
   if (namesUnknown(made, made.pages, unknownSiblings(reading.blueprint, made, references)))
   {
-    return refused(`It can't follow: ${SIBLING_UNKNOWN}.`);
+    return refused(reading.kind === 'read' ? ALL_KEEP_OWN : DRIFTED_KEEP_OWN);
   }
 
   // a blueprint's events carry no links, so the blueprint's own text is its whole note.
@@ -507,7 +496,10 @@ const noteTextPlan = (event: RmmzMapEvent, text: string): CopyPlan =>
 };
 
 export {
+  ALL_KEEP_OWN,
   canFollowAgain,
+  COMMANDS_KEEP_OWN,
+  DRIFTED_KEEP_OWN,
   FIELD_GONE,
   fieldActions,
   followAllPlan,
@@ -516,7 +508,6 @@ export {
   noteTextPlan,
   pinPlan,
   SECOND_LINK,
-  SIBLING_UNKNOWN,
   unlinkPlan,
   unpinPlan,
 };

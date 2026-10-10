@@ -101,6 +101,16 @@ const contextOf = (blueprint: Blueprint | null, references?: ReadonlyMap<number,
 };
 
 /**
+ * Builds a Set Movement Route turning an event to face down, a command naming an event by its id.
+ * @param {number} eventId The event turned.
+ * @returns {RmmzEventCommand} The command.
+ */
+const turnOf = (eventId: number): RmmzEventCommand =>
+{
+  return command(205, [ eventId, { list: [ { code: 0, parameters: [] } ], repeat: false, skippable: false, wait: false } ]);
+};
+
+/**
  * Finds one field of a reading by its key.
  * @param {CopyReading} reading The reading, which must have read the copy field by field.
  * @param {string} key The field's key.
@@ -118,4 +128,4 @@ const fieldOf = (reading: CopyReading, key: string): CopyField =>
   return field;
 };
 
-export { comment, contextOf, COPY_TAGS, copyOf, fieldOf, later, NEST_ID, needler, needlerCommands, needlerNest };
+export { comment, contextOf, COPY_TAGS, copyOf, fieldOf, later, NEST_ID, needler, needlerCommands, needlerNest, turnOf };

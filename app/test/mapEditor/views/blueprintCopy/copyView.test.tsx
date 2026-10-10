@@ -179,9 +179,9 @@ describe('useCopyView', () =>
     // Act.
     await settle();
 
-    // Assert: until the look landed, the turn naming 13 read as the copy's own.
+    // Assert: until the look landed, the turn naming 13 was kept as the copy's own.
     expect([ before, commandsStanding(), hub.has(BLUEPRINT_USES_DOCUMENT) ])
-      .toStrictEqual([ 'Set by hand', null, false ]);
+      .toStrictEqual([ 'These commands name other events in the blueprint, so this copy keeps its own', null, false ]);
   });
 
   it('reads the copy\'s group as unknown when the record cannot be had, or is no record of placements', async () =>
@@ -198,7 +198,10 @@ describe('useCopyView', () =>
 
     // Assert.
     expect([ unreadable, commandsStanding() ])
-      .toStrictEqual([ 'Set by hand', 'Set by hand' ]);
+      .toStrictEqual([
+        'These commands name other events in the blueprint, so this copy keeps its own',
+        'These commands name other events in the blueprint, so this copy keeps its own',
+      ]);
   });
 
   it('reads a copy whose blueprint the blueprints keep something else under as a copy of a blueprint that is gone', () =>
