@@ -423,4 +423,20 @@ describe('battlerFields', () =>
         .toThrow('a battler\'s sight line gives one value'));
     });
   });
+
+  describe('words', () =>
+  {
+    it('names each line by what its tag is to an author, and a later line of the tag by which line it is', () =>
+    {
+      // Arrange: a page's first sight, its third, its move speed, its AI trait and its level.
+      const named: [ string, string ][] = [ [ 'sight', 'sight' ], [ 'sight', 'sight3' ], [ 'moveSpeed', 'moveSpeed' ], [ 'aiTrait', 'aiTrait' ], [ 'level', 'level2' ] ];
+
+      // Act.
+      const words = named.map(([ name, line ]) => tagNamed(name).words?.(line, LINE_VALUE));
+
+      // Assert.
+      expect(words)
+        .toStrictEqual([ 'sight', 'sight (line 3)', 'move speed', 'AI trait', 'level (line 2)' ]);
+    });
+  });
 });

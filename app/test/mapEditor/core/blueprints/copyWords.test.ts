@@ -1,0 +1,234 @@
+import { describe, expect, it } from 'vitest';
+import { PAGE_FIELDS, UNDECLARED_TAG, type CommentTagDefinition, type FieldPlace } from '../../../../src/mapEditor/core/blueprints/blueprintFields.ts';
+import { readCopy } from '../../../../src/mapEditor/core/blueprints/copyReading.ts';
+import {
+  capitalised,
+  copyTitle,
+  differenceWords,
+  fieldWords,
+  offsetText,
+  pageWords,
+  stateWords,
+  summaryWords,
+  type LinkedReading,
+} from '../../../../src/mapEditor/core/blueprints/copyWords.ts';
+import { battlerTagFields } from '../../../../src/mapEditor/modules/jabs/battlerFields.ts';
+import { event } from '../../support/eventKindFixtures.ts';
+import { contextOf, copyOf, needler, needlerNest } from '../../support/copyFixtures.ts';
+
+/*
+ * A copy's panel and the steps it records speak to the author in the words they already know, never in keys or tags:
+ * each field named as the event window labels it, or by its module's own words, a field whose module gives none going by
+ * its name on the page; a field's standing as "Follows the blueprint", with an offset's sign, "Pinned at" a value, "Set by
+ * hand", or which side alone has it; what a copy copies, by the blueprint's name and the event it was made from; how far
+ * it stands apart, kind by kind, counted in fields, offsets only when asked; and its standing as a whole, as a sentence.
+ */
+describe('copy words', () =>
+{
+  /**
+   * Reads a copy of the needler against the nest.
+   * @param {Parameters<typeof needler>[0]} overrides What the copy's page holds of its own.
+   * @param {readonly string[]} differences What its link keeps.
+   * @returns {LinkedReading} The reading.
+   */
+  const reading = (overrides: Parameters<typeof needler>[0] = {}, differences: readonly string[] = []): LinkedReading =>
+  {
+    return readCopy(copyOf(needler(overrides), differences), contextOf(needlerNest())) as LinkedReading;
+  };
+
+  describe('fieldWords', () =>
+  {
+    it('names the event\'s own fields, a page\'s own fields as the event window labels them, and a page\'s commands', () =>
+    {
+      // Arrange: the name, the note, the graphic, the movement type, and the commands.
+      const image = PAGE_FIELDS.find(field => field.name === 'image') as (typeof PAGE_FIELDS)[number];
+      const moveType = PAGE_FIELDS.find(field => field.name === 'moveType') as (typeof PAGE_FIELDS)[number];
+      const places: FieldPlace[] = [
+        { kind: 'name' },
+        { kind: 'note' },
+        { kind: 'page', page: 0, field: image },
+        { kind: 'page', page: 1, field: moveType },
+        { kind: 'commands', page: 0 },
+      ];
+
+      // Act.
+      const words = places.map(fieldWords);
+
+      // Assert.
+      expect(words)
+        .toStrictEqual([ 'name', 'note', 'graphic', 'movement type', 'commands' ]);
+    });
+
+    it('names a tag\'s field by its module\'s words, and by its name on the page when the module gives none', () =>
+    {
+      // Arrange: J-ABS's sight on a second line, a line no module reads, and a module giving no words.
+      const sight = battlerTagFields(false).find(tag => tag.id === 'jabs.sight') as CommentTagDefinition;
+      const wordless: CommentTagDefinition = { id: 'test.wordless', read: () => [], write: text => text };
+      const places: FieldPlace[] = [
+        { kind: 'tag', page: 0, tag: sight, line: 'sight2', field: '' },
+        { kind: 'tag', page: 0, tag: UNDECLARED_TAG, line: '<motion>#2', field: '' },
+        { kind: 'tag', page: 0, tag: wordless, line: 'glow1', field: 'radius' },
+      ];
+
+      // Act.
+      const words = places.map(fieldWords);
+
+      // Assert.
+      expect(words)
+        .toStrictEqual([ 'sight (line 2)', 'motion comment 2', 'glow1.radius' ]);
+    });
+  });
+
+  describe('pageWords', () =>
+  {
+    it('names the page a page\'s field sits on, and no page for the event\'s own fields', () =>
+    {
+      // Arrange.
+      const places: FieldPlace[] = [ { kind: 'commands', page: 1 }, { kind: 'name' }, { kind: 'note' } ];
+
+      // Act.
+      const words = places.map(pageWords);
+
+      // Assert.
+      expect(words)
+        .toStrictEqual([ ' (page 2)', '', '' ]);
+    });
+  });
+
+  describe('offsetText', () =>
+  {
+    it('writes an offset with its sign, a fraction in full', () =>
+    {
+      // Arrange: up, down, and a fraction.
+      const amounts = [ 2, -1, 0.5 ];
+
+      // Act.
+      const texts = amounts.map(offsetText);
+
+      // Assert.
+      expect(texts)
+        .toStrictEqual([ '+2', '-1', '+0.5' ]);
+    });
+  });
+
+  describe('stateWords', () =>
+  {
+    it('says each standing in plain words', () =>
+    {
+      // Arrange: every standing a field can have.
+      const states = [
+        { kind: 'follows' },
+        { kind: 'offset', amount: 1 },
+        { kind: 'offset', amount: -2.5 },
+        { kind: 'pinned', value: -3 },
+        { kind: 'own' },
+        { kind: 'copy-only' },
+        { kind: 'blueprint-only' },
+      ] as const;
+
+      // Act.
+      const words = states.map(stateWords);
+
+      // Assert.
+      expect(words)
+        .toStrictEqual([
+          'Follows the blueprint',
+          'Follows the blueprint, +1',
+          'Follows the blueprint, -2.5',
+          'Pinned at -3',
+          'Set by hand',
+          'Only on this copy',
+          'Not on this copy',
+        ]);
+    });
+  });
+
+  describe('copyTitle', () =>
+  {
+    it('names the blueprint and the event of it a copy was made from, and says when the blueprint is gone', () =>
+    {
+      // Arrange.
+      const known = reading();
+      const gone = readCopy(copyOf(needler()), contextOf(null)) as LinkedReading;
+
+      // Act.
+      const titles = [ known, gone ].map(copyTitle);
+
+      // Assert.
+      expect(titles)
+        .toStrictEqual([ 'Copy of "Needler nest" (event 2)', 'Copy of a blueprint that is gone' ]);
+    });
+  });
+
+  describe('differenceWords', () =>
+  {
+    it('counts each kind standing apart in fields, the first saying what is counted, offsets only when asked', () =>
+    {
+      // Arrange: every kind, one kind, and kinds without the first.
+      const counts = [
+        { own: 2, pinned: 1, offsets: 1 },
+        { own: 1, pinned: 0, offsets: 0 },
+        { own: 0, pinned: 1, offsets: 2 },
+        { own: 0, pinned: 0, offsets: 2 },
+      ];
+
+      // Act.
+      const counted = counts.map(each => [ differenceWords(each, true), differenceWords(each, false) ]);
+
+      // Assert.
+      expect(counted)
+        .toStrictEqual([
+          [ '2 fields set by hand, 1 pinned, 1 at an offset', '2 fields set by hand, 1 pinned' ],
+          [ '1 field set by hand', '1 field set by hand' ],
+          [ '1 field pinned, 2 at an offset', '1 field pinned' ],
+          [ '2 fields at an offset', '' ],
+        ]);
+    });
+  });
+
+  describe('summaryWords', () =>
+  {
+    it('says a copy follows in everything, or how far it stands apart, as a sentence', () =>
+    {
+      // Arrange: one following, one with a trigger set by hand and a speed one faster.
+      const readings = [ reading(), reading({ trigger: 2, moveSpeed: 4 }) ];
+
+      // Act.
+      const words = readings.map(summaryWords);
+
+      // Assert.
+      expect(words)
+        .toStrictEqual([ 'Follows the blueprint in everything.', '1 field set by hand, 1 at an offset.' ]);
+    });
+
+    it('says why no change reaches a drifted copy, and why a lost one has nothing to follow', () =>
+    {
+      // Arrange.
+      const drifted = readCopy(copyOf(event(2, [ needler().pages[0], needler().pages[0] ])), contextOf(needlerNest())) as LinkedReading;
+      const lost = readCopy(copyOf(needler()), contextOf(null)) as LinkedReading;
+
+      // Act.
+      const words = [ drifted, lost ].map(summaryWords);
+
+      // Assert.
+      expect(words)
+        .toStrictEqual([ 'No change to the blueprint reaches it: it has 2 pages and its blueprint has 1 page.', 'Its blueprint is gone.' ]);
+    });
+  });
+
+  describe('capitalised', () =>
+  {
+    it('starts words with a capital, leaving the rest as they are', () =>
+    {
+      // Arrange.
+      const words = [ 'light 1 radius', 'AI trait', '' ];
+
+      // Act.
+      const capitals = words.map(capitalised);
+
+      // Assert.
+      expect(capitals)
+        .toStrictEqual([ 'Light 1 radius', 'AI trait', '' ]);
+    });
+  });
+});

@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { BLUEPRINT_GONE, differencesOf, NO_SUCH_EVENT, readCopy, type CopyReading } from '../../../../src/mapEditor/core/blueprints/copyReading.ts';
 import { cloneJson } from '../../../../src/mapEditor/core/model/json.ts';
-import type { RmmzMapEvent } from '../../../../src/mapEditor/core/model/rmmzTypes.ts';
 import { OTHER_TAGS_MISREAD } from '../../../../src/mapEditor/core/properties/noteText.ts';
 import { command, event, page } from '../../support/eventKindFixtures.ts';
 import { comment, contextOf, copyOf, fieldOf, later, needler, needlerCommands, needlerNest } from '../../support/copyFixtures.ts';

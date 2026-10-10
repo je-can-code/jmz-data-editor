@@ -10,7 +10,9 @@ import {
   MOVE_FREQUENCY,
   MOVE_SPEED,
   ownNoteOf,
+  PAGE_FIELDS,
   parsableCommentLines,
+  placedEventFields,
   tagFieldKey,
   tagLinesOf,
   UNDECLARED_TAG,
@@ -505,6 +507,55 @@ describe('blueprintFields', () =>
       // Assert.
       writes.forEach(write => expect(write)
         .toThrow('a tag line no plugin reads can only be written as another line of the same tag'));
+    });
+
+    it('names a line as the comment it is, by its tag, and by which line of the tag it is past the first', () =>
+    {
+      // Arrange: the first motion line, the second, and a mark holding no value.
+      const keys = [ '<motion>', '<motion>#2', '<noRespawn>#12' ];
+
+      // Act.
+      const words = keys.map(key => UNDECLARED_TAG.words?.(key, LINE_VALUE));
+
+      // Assert.
+      expect(words)
+        .toStrictEqual([ 'motion comment', 'motion comment 2', 'noRespawn comment 12' ]);
+    });
+  });
+
+  describe('placedEventFields', () =>
+  {
+    it('places each field where it sits: the name, the note, a page\'s own field, its commands, and a tag line\'s field', () =>
+    {
+      // Arrange: a lamp of two pages, its second page lit.
+      const lamp = event(5, [ page([]), page([ comment('<light:[4, #ffbb73, 30, flicker]>') ]) ], { name: 'Lamp' });
+
+      // Act.
+      const fields = placedEventFields(lamp, 'Lit at dusk', [ LIGHTS ]);
+
+      // Assert: a page's own field carries the page field itself, and a tag line's field the tag reading its line.
+      const placeOf = (key: string) => fields.find(field => field.key === key)?.place;
+      expect([ placeOf('name'), fields[1], placeOf('p2.trigger'), placeOf('p1.commands'), placeOf('p2.light1.color') ])
+        .toStrictEqual([
+          { kind: 'name' },
+          { key: 'note', kind: { kind: 'choice' }, value: 'Lit at dusk', place: { kind: 'note' } },
+          { kind: 'page', page: 1, field: PAGE_FIELDS.find(field => field.name === 'trigger') },
+          { kind: 'commands', page: 0 },
+          { kind: 'tag', page: 1, tag: LIGHTS, line: 'light1', field: 'color' },
+        ]);
+    });
+
+    it('reads the very fields eventFields reads, each at its place', () =>
+    {
+      // Arrange: a lit event whose note holds its link after its own text.
+      const lit = { ...event(5, [ page([ comment('<light:[4]>'), comment('<motion:[float]>') ]) ]), note: withBlueprintLink('Lit', { blueprintId: 'k3x9q2mf', eventId: 2, differences: [] }) };
+
+      // Act.
+      const placed = placedEventFields(lit, 'Lit', [ LIGHTS ]).map(({ key, kind, value }) => ({ key, kind, value }));
+
+      // Assert.
+      expect(placed)
+        .toStrictEqual(eventFields(lit, [ LIGHTS ]));
     });
   });
 
