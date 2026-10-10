@@ -216,16 +216,18 @@ const mapsOf = (copies: readonly BlueprintCopy[]): number[] =>
  * copies' links counted on every map (as this window holds them, as other windows hold theirs, and as the disk holds
  * them, unsaved edits left out), and from the record's part each held map's file holds:
  *
- * - **a map held here** is changed in place by the change; its file is kept too while the map holds unsaved edits, read
- *   from disk, so the file's own copies can be planned apart from the map's;
+ * - **a map held here** is changed in place by the change; its file is kept too, from what the window knows the file
+ *   holds (see DocumentHub's fileContent), so the file's own copies can be planned apart from the map's whenever the map
+ *   holds unsaved edits;
  * - **a map only another window holds** is brought into this window, so the change reaches its unsaved copies in the same
  *   step, and that window repeats the step on its own copy;
  * - **a map nobody holds** is read from disk and kept, never held: the change writes it through to its file.
  *
  * Each kept file follows every blueprint change made, undone or redone, here or in another window, exactly as whoever
  * writes the change to disk writes it (see {@link follow}), so it is always the file as it will be once every write on
- * its way has landed; a map's file follows its saves; and a file changed by anything else on disk is read again, once no
- * write of this window's to it is on its way. Maps holding a plugin's patterns, such as J-ABS's action map, are never
+ * its way has landed; a held map's file follows its saves and whatever else the window learns its file holds, once no
+ * write of this window's to it is on its way; and the file of a map nobody here holds is read again when anything else
+ * changes it on disk. Maps holding a plugin's patterns, such as J-ABS's action map, are never
  * among these, whatever links or records name them. A map kept here that this window then opens from its file takes up
  * the changes the file holds (see DocumentHub's attachSteps), so undo reaches them from the map too.
  */
