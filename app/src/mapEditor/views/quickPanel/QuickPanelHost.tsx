@@ -1,9 +1,11 @@
 import React, { useSyncExternalStore } from 'react';
 import { Box, Divider, Stack, Typography } from '@mui/material';
+import { blueprintLinkOf } from '../../core/blueprints/blueprintLink.ts';
 import { groupSelection, type KindGroup } from '../../core/eventKinds/quickFields.ts';
 import type { MapDocument } from '../../core/model/MapDocument.ts';
 import type { EventKindDefinition } from '../../core/modules/PluginModule.ts';
 import { useMapEditorServices } from '../../services/MapEditorServicesContext.tsx';
+import { CopyQuickSection } from '../blueprintCopy/CopyQuickSection.tsx';
 import { useRevision } from './quickResources.ts';
 
 /**
@@ -96,6 +98,7 @@ const KindSection = (props: { document: MapDocument; group: KindGroup<EventKindD
  * The quick panel: for the events selected on a map, each event's kind by its detector (a chest, a transfer, a
  * battler once J-ABS's module is on), and that kind's quick panel for them, a section per kind in the order the
  * selection first names each. Events no kind recognises are counted, and an empty selection says how to make one.
+ * One copy of a blueprint picked alone says first what it copies and how it stands against it (see CopyQuickSection).
  * The map redraws as settings change, since every change is an edit to the map itself.
  * @param {QuickPanelHostProps} props The map and the selected events.
  * @returns {React.JSX.Element} The panel.
@@ -125,9 +128,15 @@ const QuickPanelHost = (props: QuickPanelHostProps) =>
     ? `${unclaimed.length} of the picked events have no quick settings.`
     : `${loneEvent.name} has no quick settings.`;
 
+  // one copy of a blueprint picked says what it copies first.
+  const [ only ] = eventIds;
+  const picked = eventIds.length === 1 ? document.event(only) : null;
+  const copy = picked !== null && blueprintLinkOf(picked.note) !== null ? picked : null;
+
   return (
     <Box sx={{ height: '100%', overflowY: 'auto', px: 1.5, py: 1, bgcolor: 'background.default' }} data-testid={'quick-panel'}>
       <Stack spacing={1.5} divider={<Divider flexItem/>}>
+        {copy !== null && <CopyQuickSection key={`${document.key} ${copy.id}`} mapId={document.mapId} copy={copy}/>}
         {groups.map(group => <KindSection key={sectionKey(document, group)} document={document} group={group}/>)}
         {unclaimed.length > 0 && (
           <Typography variant={'body2'} color={'text.secondary'}>

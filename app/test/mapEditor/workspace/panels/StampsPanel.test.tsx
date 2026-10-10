@@ -11,11 +11,13 @@ import { BlueprintCopyCounter, type EventNote } from '../../../../src/mapEditor/
 import { BlueprintWriter } from '../../../../src/mapEditor/core/blueprints/blueprintWriter.ts';
 import { BLUEPRINTS_DOCUMENT, blueprintsOf } from '../../../../src/mapEditor/core/blueprints/blueprints.ts';
 import { BLUEPRINT_USES_DOCUMENT, usesOf, type PlacedSpot } from '../../../../src/mapEditor/core/blueprints/blueprintUses.ts';
+import { CommandCatalog } from '../../../../src/mapEditor/core/commands/CommandCatalog.ts';
 import { DocumentHub } from '../../../../src/mapEditor/core/history/DocumentHub.ts';
 import type { DocumentKey } from '../../../../src/mapEditor/core/model/documentKeys.ts';
 import { createMapEvent } from '../../../../src/mapEditor/core/model/eventModel.ts';
 import type { JsonValue } from '../../../../src/mapEditor/core/model/json.ts';
 import type { RmmzMap, RmmzMapEvent } from '../../../../src/mapEditor/core/model/rmmzTypes.ts';
+import { PluginModuleRegistry } from '../../../../src/mapEditor/core/modules/PluginModuleRegistry.ts';
 import type { Stamp } from '../../../../src/mapEditor/core/stamps/stamp.ts';
 import { StampHistory } from '../../../../src/mapEditor/core/stamps/StampHistory.ts';
 import { WindowPaints } from '../../../../src/mapEditor/core/tools/WindowPaint.ts';
@@ -745,18 +747,20 @@ describe('StampsPanel: where a blueprint is used', () =>
   const CAMP = stampOf({ width: 2, tiles: { layers: [ 3 ], values: [ 10, 11 ], calledFor: [ -1, -1 ] }, events: [ { ...createMapEvent(1, 0, 0), name: 'Guard' } ] });
 
   /**
-   * What the where-used fixture may hold beyond the camp: copies of its guard standing on map 7, from event 1 on, and
-   * why the last change to the camp could not reach a copy, when it could not.
+   * What the where-used fixture may hold beyond the camp: copies of its guard standing on map 7, from event 1 on, why
+   * the last change to the camp could not reach a copy, when it could not, and the window's plugin modules, which by
+   * default have never been switched on, as before the project's plugins are read.
    */
   type UsesExtras = {
     readonly copiesOnMap7?: readonly RmmzMapEvent[];
     readonly driftOf?: (mapId: number, eventId: number) => string | null;
+    readonly modules?: PluginModuleRegistry;
   };
 
   /**
    * Renders the panel with the camp, its placements, and the maps as the fixture says, its card's list showing.
    * @param {readonly PlacedSpot[]} uses The placements the record holds.
-   * @param {UsesExtras} extras Copies on map 7, and the reasons the last change gave, when the test has any.
+   * @param {UsesExtras} extras Copies on map 7, the reasons the last change gave, and the modules, when the test has any.
    * @returns {Promise<object>} The window's documents, the controller, what was saved, and what the dock was asked.
    */
   const renderUses = async (uses: readonly PlacedSpot[], extras: UsesExtras = {}) =>
@@ -800,6 +804,7 @@ describe('StampsPanel: where a blueprint is used', () =>
       paints: new WindowPaints(window),
       blueprintCopies,
       copyMaps: { driftOf },
+      modules: extras.modules ?? new PluginModuleRegistry(new CommandCatalog()),
       openDocument: async (key: DocumentKey) => hub.document(key),
     } as unknown as MapEditorServices;
     const controller = new WorkspaceController(services);
