@@ -4,6 +4,7 @@ import { groupSelection, type KindGroup } from '../../core/eventKinds/quickField
 import type { MapDocument } from '../../core/model/MapDocument.ts';
 import type { EventKindDefinition } from '../../core/modules/PluginModule.ts';
 import { useMapEditorServices } from '../../services/MapEditorServicesContext.tsx';
+import { AreaAlerts } from './AreaAlerts.tsx';
 import { useRevision } from './quickResources.ts';
 
 /**
@@ -96,7 +97,8 @@ const KindSection = (props: { document: MapDocument; group: KindGroup<EventKindD
  * The quick panel: for the events selected on a map, each event's kind by its detector (a chest, a transfer, a
  * battler once J-ABS's module is on), and that kind's quick panel for them, a section per kind in the order the
  * selection first names each. Events no kind recognises are counted, and an empty selection says how to make one.
- * The map redraws as settings change, since every change is an edit to the map itself.
+ * The map redraws as settings change, since every change is an edit to the map itself. Above it all, while a plugin
+ * module gives pages areas, each selected event whose area runs past the map's edge says so, whatever its kind.
  * @param {QuickPanelHostProps} props The map and the selected events.
  * @returns {React.JSX.Element} The panel.
  */
@@ -127,6 +129,7 @@ const QuickPanelHost = (props: QuickPanelHostProps) =>
 
   return (
     <Box sx={{ height: '100%', overflowY: 'auto', px: 1.5, py: 1, bgcolor: 'background.default' }} data-testid={'quick-panel'}>
+      {modules.eventAreas().length > 0 && <AreaAlerts document={document} eventIds={eventIds}/>}
       <Stack spacing={1.5} divider={<Divider flexItem/>}>
         {groups.map(group => <KindSection key={sectionKey(document, group)} document={document} group={group}/>)}
         {unclaimed.length > 0 && (

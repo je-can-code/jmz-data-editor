@@ -1,5 +1,6 @@
 import type { ImageFolder } from '../api/MapEditorApi.ts';
 import type { EventMarkerSymbol } from '../eventKinds/eventMarkers.ts';
+import type { EventArea } from '../events/eventAreas.ts';
 import type { MapDocument } from '../model/MapDocument.ts';
 import type { RmmzEventImage, RmmzEventPage, RmmzMapEvent, RmmzTileset } from '../model/rmmzTypes.ts';
 import type { PassabilityRule } from '../modules/PluginModule.ts';
@@ -94,6 +95,32 @@ type CoreOverlayId = 'grid' | 'regions' | 'passability' | 'layer-highlight' | 's
  * the page it shows, when that is given, for an event no kind names a symbol for.
  */
 type MarkerClassifier = (event: RmmzMapEvent, mapId: number, page?: RmmzEventPage) => EventMarkerSymbol;
+
+/**
+ * The way an exit sends the player, as Transfer Player's facing names it: 2 down, 4 left, 6 right and 8 up, or 0 for an
+ * exit keeping the way the player faced.
+ */
+type ExitWay = 0 | 2 | 4 | 6 | 8;
+
+/**
+ * How an event shows the area its page covers, joined to its marker: the area, the colour of the marker, as a number
+ * ({@code 0xRRGGBB}), and, for a transfer whose page sends the player on, the way it sends them, which draws the area as
+ * an exit strip. Null there for anything else.
+ */
+type EventFootprint = {
+  readonly area: EventArea;
+  readonly colour: number;
+  readonly exit: ExitWay | null;
+};
+
+/**
+ * Finds the footprint an event shows while a page is the one it is shown with, for an event on a map.
+ * @param {RmmzMapEvent} event The event.
+ * @param {number} mapId The map it is on.
+ * @param {RmmzEventPage} page The page it is shown with.
+ * @returns {EventFootprint | null} The footprint, or null when the page covers no tile beyond the event's own.
+ */
+type FootprintReader = (event: RmmzMapEvent, mapId: number, page: RmmzEventPage) => EventFootprint | null;
 
 /**
  * Names one overlay.
@@ -362,6 +389,14 @@ interface MapRenderer
   setEventMarkers(classify: MarkerClassifier): void;
 
   /**
+   * Chooses how events show the areas their pages cover, and redraws every event with it: each event shows the area of
+   * the page it is shown with, joined to its marker, and a click anywhere inside it picks the event. The window's plugin
+   * modules read the areas, so this is handed over again once they switch on.
+   * @param {FootprintReader} read Finds an event's footprint.
+   */
+  setEventFootprints(read: FootprintReader): void;
+
+  /**
    * Listens for right clicks that did not move, which open the context menu.
    * @param {(menu: MapContextMenu) => void} listener Called with where the click landed.
    * @returns {() => void} Stops listening.
@@ -416,6 +451,9 @@ export { GAME_LOOK, NO_OVERLAY_STATE };
 export type {
   CellRect,
   CoreOverlayId,
+  EventFootprint,
+  ExitWay,
+  FootprintReader,
   GhostEvent,
   GhostTile,
   LayerVisibility,
