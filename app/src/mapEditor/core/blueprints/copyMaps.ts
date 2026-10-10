@@ -65,15 +65,15 @@ type CopyMapsOptions = {
 const PLUGINS_UNREAD = 'This blueprint can\'t change until the project\'s plugins have been read; try again in a moment.';
 
 /**
- * Why a change to a blueprint waits for its copies to be counted: until then a copy could be missed.
+ * Why a change to a blueprint waits for the events linked to it to be counted: until then one could be missed.
  */
-const COPIES_UNCOUNTED = 'This blueprint can\'t change until its copies have been found; try again in a moment.';
+const COPIES_UNCOUNTED = 'This blueprint can\'t change until its linked events have been found; try again in a moment.';
 
 /**
- * Why a change to a blueprint is refused while its copies on disk cannot be counted: a copy nobody holds could be missed,
- * and would then read as changed by hand.
+ * Why a change to a blueprint is refused while the events linked to it on disk cannot be counted: one nobody holds could
+ * be missed, and would then read as changed by hand.
  */
-const COPIES_UNCOUNTABLE = 'This blueprint can\'t change while its copies on disk can\'t be counted.';
+const COPIES_UNCOUNTABLE = 'This blueprint can\'t change while its linked events on disk can\'t be counted.';
 
 /**
  * Says why a change to a blueprint waits for a map it reaches.
@@ -82,7 +82,7 @@ const COPIES_UNCOUNTABLE = 'This blueprint can\'t change while its copies on dis
  */
 const mapNotReady = (mapId: number): string =>
 {
-  return `This blueprint can't change until Map ${mapId}, which holds a copy, has been read; try again in a moment.`;
+  return `This blueprint can't change until Map ${mapId}, where it is used, has been read; try again in a moment.`;
 };
 
 /**
@@ -92,7 +92,7 @@ const mapNotReady = (mapId: number): string =>
  */
 const mapConflicted = (mapId: number): string =>
 {
-  return `This blueprint can't change while Map ${mapId}, which holds a copy, waits for a choice about changes made elsewhere.`;
+  return `This blueprint can't change while Map ${mapId}, where it is used, waits for a choice about changes made elsewhere.`;
 };
 
 /**

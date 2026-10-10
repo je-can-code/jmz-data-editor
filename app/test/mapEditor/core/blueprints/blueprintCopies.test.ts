@@ -3,7 +3,6 @@ import {
   BlueprintCopyCounter,
   copiesInNotes,
   copiesOnMap,
-  copyCountWords,
   tallyCopies,
   type BlueprintCopy,
   type BlueprintCopyCounts,
@@ -152,42 +151,6 @@ describe('blueprintCopies', () =>
           aa: { total: 3, maps: [ { mapId: 3, copies: 2 }, { mapId: 7, copies: 1 } ] },
           bb: { total: 1, maps: [ { mapId: 3, copies: 1 } ] },
         });
-    });
-  });
-
-  describe('copyCountWords', () =>
-  {
-    it('words a count once counted: none, one, and several on one map or more', () =>
-    {
-      // Arrange.
-      const counts: BlueprintCopyCounts = {
-        state: 'counted',
-        byBlueprint: new Map([
-          [ 'one', { total: 1, maps: [ { mapId: 3, copies: 1 } ] } ],
-          [ 'three', { total: 3, maps: [ { mapId: 3, copies: 3 } ] } ],
-          [ 'five', { total: 5, maps: [ { mapId: 3, copies: 2 }, { mapId: 4, copies: 3 } ] } ],
-        ]),
-      };
-
-      // Act.
-      const words = [ 'none', 'one', 'three', 'five' ].map(id => copyCountWords(counts, id));
-
-      // Assert.
-      expect(words)
-        .toStrictEqual([ 'No copies yet', '1 copy', '3 copies on 1 map', '5 copies on 2 maps' ]);
-    });
-
-    it('says the copies are still being counted, or cannot be, whatever the count would say', () =>
-    {
-      // Arrange: a count holding a copy of the blueprint asked about.
-      const byBlueprint = new Map([ [ 'one', { total: 1, maps: [ { mapId: 3, copies: 1 } ] } ] ]);
-
-      // Act.
-      const words = [ copyCountWords({ state: 'counting', byBlueprint }, 'one'), copyCountWords({ state: 'unavailable', byBlueprint }, 'one') ];
-
-      // Assert.
-      expect(words)
-        .toStrictEqual([ 'Counting copies', 'Copies can\'t be counted' ]);
     });
   });
 

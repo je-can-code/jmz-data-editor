@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import type { BlueprintCopyCounts } from '../../../../src/mapEditor/core/blueprints/blueprintCopies.ts';
+import type { Blueprint } from '../../../../src/mapEditor/core/blueprints/blueprints.ts';
 import {
   BLUEPRINT_USES_DOCUMENT,
   changeMapSpots,
-  countsWithPlacements,
   forgetPlacement,
   forgetSpots,
   mapEntryOf,
@@ -18,6 +18,7 @@ import {
   spotsOfBlueprint,
   spotsOfEntry,
   spotsOnMap,
+  usageWords,
   usedCopiesOf,
   usesOf,
   type PlacedSpot,
@@ -27,6 +28,7 @@ import { blueprintHistoryKey, mapHistoryKey } from '../../../../src/mapEditor/co
 import type { JsonValue } from '../../../../src/mapEditor/core/model/json.ts';
 import { holdBlueprints, holdBlueprintUses, storedUses } from '../../support/blueprintFixtures.ts';
 import { buildMapJson } from '../../support/fixtures.ts';
+import { stampOf } from '../../support/stampFixtures.ts';
 
 /*
  * The record of where blueprints are placed is the only way back to a placement of a blueprint's tiles, since tiles carry
@@ -44,8 +46,11 @@ import { buildMapJson } from '../../support/fixtures.ts';
  * change that changes nothing adds nothing to the step. A placement put down at a cell already recorded takes the place of
  * the one there.
  *
- * Counting: a placement of a blueprint's tiles is one copy of it on its map, as each copy of one of its events is; with
- * no record to read, the count cannot be told. Forgetting a placement is a step in the blueprint's own history.
+ * Counting: a placement of a blueprint's tiles is one more use of it on its map, as each event linked to it is, and the
+ * count says how many of its uses are placements; with no record to read, the count cannot be told. A blueprint's card
+ * never calls its placements and its linked events by one name: one with tiles says how many times it is placed and on
+ * how many maps, then its linked events; one of events alone, which no placement is recorded for, says its linked events
+ * and the maps they stand on. Forgetting a placement is a step in the blueprint's own history.
  *
  * Saving is the keeper's (see blueprintUsesKeeper.test.ts): the record is kept alongside the maps and never saved whole.
  */
@@ -378,10 +383,10 @@ describe('recordSpots and forgetSpots', () =>
   });
 });
 
-describe('countsWithPlacements', () =>
+describe('usageWords', () =>
 {
   /**
-   * Counts of event copies: two of the camp's on map 16 and one on map 20, and one of the bats' on map 9.
+   * Counts of linked events: three of the camp's, two on map 16 and one on map 20, and one of the bats' on map 9.
    */
   const COUNTS: BlueprintCopyCounts = {
     state: 'counted',
@@ -391,44 +396,81 @@ describe('countsWithPlacements', () =>
     ]),
   };
 
-  it('counts each placement as one copy on its map, beside the copies of the events, a blueprint placed alone included', () =>
+  /**
+   * A blueprint by its id: with a tile and an event, with a tile alone, or with an event alone.
+   * @param {string} id The blueprint's id.
+   * @param {'both' | 'tiles' | 'events'} holds What it holds.
+   * @returns {Blueprint} The blueprint.
+   */
+  const blueprintOf = (id: string, holds: 'both' | 'tiles' | 'events'): Blueprint =>
+  {
+    const tiles = holds === 'events' ? null : { layers: [ 0 ], values: [ 1 ], calledFor: [ -1 ] };
+    return { id, name: id, stamp: stampOf(holds === 'tiles' ? { tiles, events: [] } : { tiles }) };
+  };
+
+  it('says how many times a blueprint with tiles is placed and on how many maps, then how many events are linked to it', () =>
+  {
+    // Arrange: the camp placed three times on two maps; the roost once; the bats never, though one event is linked.
+    const blueprints = [ blueprintOf('aa22', 'both'), blueprintOf('k3x9q2mf', 'both'), blueprintOf('bb33', 'both') ];
+
+    // Act.
+    const words = blueprints.map(blueprint => usageWords(COUNTS, SPOTS, blueprint));
+
+    // Assert.
+    expect(words)
+      .toStrictEqual([ 'Placed 3 times on 2 maps, 3 linked events', 'Placed once on 1 map, no linked events', 'Not placed yet, 1 linked event' ]);
+  });
+
+  it('says only where a blueprint of tiles alone is placed', () =>
   {
     // Arrange: nothing beyond the counts and the placements.
 
     // Act.
-    const counts = countsWithPlacements(COUNTS, SPOTS);
+    const words = usageWords(COUNTS, SPOTS, blueprintOf('aa22', 'tiles'));
 
     // Assert.
-    expect([ counts.state, Object.fromEntries(counts.byBlueprint) ])
-      .toStrictEqual([
-        'counted',
-        {
-          aa22: { total: 6, maps: [ { mapId: 3, copies: 1 }, { mapId: 16, copies: 4 }, { mapId: 20, copies: 1 } ] },
-          bb33: { total: 1, maps: [ { mapId: 9, copies: 1 } ] },
-          k3x9q2mf: { total: 1, maps: [ { mapId: 16, copies: 1 } ] },
-        },
-      ]);
+    expect(words)
+      .toBe('Placed 3 times on 2 maps');
   });
 
-  it('says the count is still being made while no record can be read, and leaves one that cannot be had as it is', () =>
+  it('says how many events are linked to a blueprint of events alone and on how many maps, never its placements', () =>
   {
-    // Arrange.
-    const unavailable: BlueprintCopyCounts = { state: 'unavailable', byBlueprint: new Map() };
+    // Arrange: the camp, as a blueprint of events alone, though the record names it; the bats; and one used nowhere.
+    const blueprints = [ blueprintOf('aa22', 'events'), blueprintOf('bb33', 'events'), blueprintOf('zz99', 'events') ];
 
     // Act.
-    const states = [ countsWithPlacements(COUNTS, null).state, countsWithPlacements(unavailable, null).state ];
+    const words = blueprints.map(blueprint => usageWords(COUNTS, SPOTS, blueprint));
 
     // Assert.
-    expect(states)
-      .toStrictEqual([ 'counting', 'unavailable' ]);
+    expect(words)
+      .toStrictEqual([ '3 linked events on 2 maps', '1 linked event on 1 map', 'No linked events yet' ]);
+  });
+
+  it('says the linked events are still being counted, or cannot be, whatever the count would say', () =>
+  {
+    // Arrange.
+    const counting: BlueprintCopyCounts = { ...COUNTS, state: 'counting' };
+    const unavailable: BlueprintCopyCounts = { ...COUNTS, state: 'unavailable' };
+
+    // Act.
+    const words = [ counting, unavailable ].flatMap(counts => [ usageWords(counts, SPOTS, blueprintOf('aa22', 'both')), usageWords(counts, SPOTS, blueprintOf('bb33', 'events')) ]);
+
+    // Assert.
+    expect(words)
+      .toStrictEqual([
+        'Placed 3 times on 2 maps, counting linked events',
+        'Counting linked events',
+        'Placed 3 times on 2 maps, linked events can\'t be counted',
+        'Linked events can\'t be counted',
+      ]);
   });
 });
 
 describe('usedCopiesOf', () =>
 {
-  it('counts a blueprint\'s placements with the copies of its events, and none for a blueprint used nowhere', () =>
+  it('counts a blueprint\'s placements with its linked events, saying how many are placements, and none for a blueprint used nowhere', () =>
   {
-    // Arrange: the camp has one copy of its events on map 20.
+    // Arrange: the camp has one linked event on map 20.
     const hub = windowWith();
     const copies = { countOf: (blueprintId: string) => (blueprintId === 'aa22' ? { total: 1, maps: [ { mapId: 20, copies: 1 } ] } : { total: 0, maps: [] }) };
 
@@ -438,7 +480,7 @@ describe('usedCopiesOf', () =>
     // Assert.
     expect(counts)
       .toStrictEqual([
-        { total: 4, maps: [ { mapId: 3, copies: 1 }, { mapId: 16, copies: 2 }, { mapId: 20, copies: 1 } ] },
+        { total: 4, maps: [ { mapId: 3, copies: 1 }, { mapId: 16, copies: 2 }, { mapId: 20, copies: 1 } ], placements: 3 },
         { total: 0, maps: [] },
       ]);
   });
@@ -474,7 +516,7 @@ describe('forgetPlacement', () =>
     // Assert.
     expect([ step?.label, step?.histories, forgotten, recorded(hub) ])
       .toStrictEqual([
-        'Forget a copy of "Goblin camp"',
+        'Forget a placement of "Goblin camp"',
         [ blueprintHistoryKey('aa22') ],
         [ { blueprintId: 'aa22', x: -1, y: 0, mapId: 3 }, { blueprintId: 'aa22', x: 1, y: 3, mapId: 16 } ],
         usesOf(windowWith().document(BLUEPRINT_USES_DOCUMENT)),

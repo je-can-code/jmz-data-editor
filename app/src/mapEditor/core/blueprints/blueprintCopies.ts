@@ -25,11 +25,19 @@ type EventNote = {
 
 /**
  * How many copies one blueprint has, and how many stand on each map, by map id. A copy is one event linked to one of
- * the blueprint's events, so a blueprint of three events placed twice has six.
+ * the blueprint's events, so a blueprint of three events placed twice has six. A count of everywhere a blueprint is used
+ * also counts each placement of its tiles in, as one more on its map, and says how many of those there are, so the author
+ * hears placements and linked events apart.
  */
 type BlueprintCopyCount = {
   readonly total: number;
   readonly maps: readonly { readonly mapId: number; readonly copies: number }[];
+
+  /**
+   * How many of the total are placements of the blueprint's tiles rather than events linked to it; none when the count
+   * holds linked events alone.
+   */
+  readonly placements?: number;
 };
 
 /**
@@ -143,39 +151,6 @@ const tallyCopies = (copies: readonly BlueprintCopy[]): Map<string, BlueprintCop
     const onMaps = [ ...maps ].sort(([ left ], [ right ]) => left - right).map(([ mapId, count ]) => ({ mapId, copies: count }));
     return [ blueprintId, { total: onMaps.reduce((sum, each) => sum + each.copies, 0), maps: onMaps } ];
   }));
-};
-
-/**
- * Words how many copies a blueprint has, for its card: how many and on how many maps once counted, and otherwise that
- * they are still being counted, or cannot be.
- * @param {BlueprintCopyCounts} counts The count of every blueprint's copies.
- * @param {string} blueprintId The blueprint.
- * @returns {string} The words, such as "3 copies on 2 maps", "1 copy" or "No copies yet".
- */
-const copyCountWords = (counts: BlueprintCopyCounts, blueprintId: string): string =>
-{
-  if (counts.state === 'counting')
-  {
-    return 'Counting copies';
-  }
-
-  if (counts.state === 'unavailable')
-  {
-    return 'Copies can\'t be counted';
-  }
-
-  const count = counts.byBlueprint.get(blueprintId);
-  if (count === undefined)
-  {
-    return 'No copies yet';
-  }
-
-  if (count.total === 1)
-  {
-    return '1 copy';
-  }
-
-  return `${count.total} copies on ${count.maps.length === 1 ? '1 map' : `${count.maps.length} maps`}`;
 };
 
 /**
@@ -695,5 +670,5 @@ class BlueprintCopyCounter
   }
 }
 
-export { BlueprintCopyCounter, copiesInNotes, copiesOnMap, copyCountWords, tallyCopies };
+export { BlueprintCopyCounter, copiesInNotes, copiesOnMap, tallyCopies };
 export type { BlueprintCopy, BlueprintCopyCount, BlueprintCopyCounts, CopyCountState, CopyCounterOptions, CopySync, EventNote };

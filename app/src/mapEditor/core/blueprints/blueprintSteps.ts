@@ -1,6 +1,7 @@
 import type { DocumentHub } from '../history/DocumentHub.ts';
-import type { StepEntry } from '../history/HistoryStep.ts';
-import { parseDocumentKey } from '../model/documentKeys.ts';
+import { homeDocumentOf, type HistoryKey } from '../history/historyKeys.ts';
+import type { HistoryStep, StepEntry } from '../history/HistoryStep.ts';
+import { parseDocumentKey, type DocumentKey } from '../model/documentKeys.ts';
 import { jsonEquals, type JsonValue } from '../model/json.ts';
 import type { MapDocument } from '../model/MapDocument.ts';
 import { readAt, type Patch, type PatchPath } from '../model/patches.ts';
@@ -359,5 +360,27 @@ const blueprintChangesIn = (hub: Pick<DocumentHub, 'document'>, entries: readonl
   });
 };
 
-export { blueprintChangesIn, blueprintStepChange, pageLineage };
+/**
+ * Names a step as a row of a history lists it. A change to a blueprint is listed in the history of every map it reached,
+ * where its own label, a stroke or an edit made in the blueprint's tab or its event's window, would read as though it
+ * were made on that map; there it is named for its blueprint: "Blueprint 'Needler nest': Paint tiles". In the blueprint's
+ * own history, and any other but a map's, the label stands as it is.
+ * @param {HistoryStep} step The step.
+ * @param {HistoryKey} history The history whose row it is.
+ * @param {(blueprintId: string) => string} blueprintName Names a blueprint as the author knows it.
+ * @returns {string} The row's words.
+ */
+const stepLabelIn = (step: HistoryStep, history: HistoryKey, blueprintName: (blueprintId: string) => string): string =>
+{
+  const changed = step.entries.map(entry => parseDocumentKey(entry.document)).find(parsed => parsed.kind === 'blueprint-map');
+
+  // a map's own history goes by the map's own key, where an event's history lives on its map under a key of its own.
+  const home: DocumentKey = homeDocumentOf(history);
+  const onMap = home === history && parseDocumentKey(home).kind === 'map';
+  return changed === undefined || changed.kind !== 'blueprint-map' || onMap === false
+    ? step.label
+    : `Blueprint '${blueprintName(changed.blueprintId)}': ${step.label}`;
+};
+
+export { blueprintChangesIn, blueprintStepChange, pageLineage, stepLabelIn };
 export type { BlueprintStepChange };

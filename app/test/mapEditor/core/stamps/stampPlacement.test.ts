@@ -655,7 +655,7 @@ describe('placements a stamp carries', () =>
     // Assert.
     expect([ outcomes.map(outcome => outcome.ok && outcome.notes), [ gone, unknown ].map(hub => recorded(hub).filter(spot => spot.mapId === 2)) ])
       .toStrictEqual([
-        [ [ 'The stamp\'s tiles held a copy of a blueprint that no longer exists, so they went down as plain tiles.' ], [] ],
+        [ [ 'The stamp\'s tiles held a placement of a blueprint that no longer exists, so they went down as plain tiles.' ], [] ],
         [ [], [ { blueprintId: 'aa22', x: 4, y: 1, mapId: 2 } ] ],
       ]);
   });
@@ -700,7 +700,7 @@ describe('placements a stamp carries', () =>
 
     // Assert.
     expect([ outcome.ok && outcome.step?.entries.every(entry => entry.document === 'map:2'), outcome.ok && outcome.notes, hub.has(BLUEPRINT_USES_DOCUMENT) ])
-      .toStrictEqual([ true, [ 'The stamp\'s tiles held copies of blueprints, which went down as plain tiles, since where blueprints are placed can\'t be read.' ], false ]);
+      .toStrictEqual([ true, [ 'The stamp\'s tiles held placements of blueprints, which went down as plain tiles, since where blueprints are placed can\'t be read.' ], false ]);
   });
 });
 

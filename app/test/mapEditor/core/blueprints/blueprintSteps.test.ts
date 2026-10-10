@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { withBlueprintLink } from '../../../../src/mapEditor/core/blueprints/blueprintLink.ts';
 import { blueprintMapContent } from '../../../../src/mapEditor/core/blueprints/blueprintMaps.ts';
 import { BLUEPRINTS_DOCUMENT } from '../../../../src/mapEditor/core/blueprints/blueprints.ts';
-import { blueprintChangesIn, blueprintStepChange, pageLineage, type BlueprintStepChange } from '../../../../src/mapEditor/core/blueprints/blueprintSteps.ts';
+import { blueprintChangesIn, blueprintStepChange, pageLineage, stepLabelIn, type BlueprintStepChange } from '../../../../src/mapEditor/core/blueprints/blueprintSteps.ts';
 import { planCopyChange } from '../../../../src/mapEditor/core/blueprints/copyChanges.ts';
 import { followTiles } from '../../../../src/mapEditor/core/blueprints/copyTiles.ts';
 import { moveEvents } from '../../../../src/mapEditor/core/events/eventMoves.ts';
@@ -10,7 +10,9 @@ import { addPage, clearPage, deletePage, duplicatePage, movePage, pastePages } f
 import { setPageTrigger } from '../../../../src/mapEditor/core/eventWindow/pageSettings.ts';
 import { pageListPath, recordEventStep, renameEvent, type EventWindowTarget } from '../../../../src/mapEditor/core/eventWindow/eventWindowTarget.ts';
 import type { DocumentHub } from '../../../../src/mapEditor/core/history/DocumentHub.ts';
-import { blueprintHistoryKey, mapHistoryKey } from '../../../../src/mapEditor/core/history/historyKeys.ts';
+import { blueprintHistoryKey, eventHistoryKey, mapHistoryKey } from '../../../../src/mapEditor/core/history/historyKeys.ts';
+import type { HistoryStep } from '../../../../src/mapEditor/core/history/HistoryStep.ts';
+import type { DocumentKey } from '../../../../src/mapEditor/core/model/documentKeys.ts';
 import { createEventPage, createMapEvent } from '../../../../src/mapEditor/core/model/eventModel.ts';
 import type { JsonValue } from '../../../../src/mapEditor/core/model/json.ts';
 import { MapDocument } from '../../../../src/mapEditor/core/model/MapDocument.ts';
@@ -527,5 +529,60 @@ describe('blueprintSteps', () =>
       expect([ followed.followed, followed.writes.map(([ index, value ]) => [ index, value ]), cellOf(grid, 3, 1, 0) ])
         .toStrictEqual([ [ { x: 3, y: 1, layer: 0 } ], [ [ 9, 1537 ] ], 1536 ]);
     });
+  });
+});
+
+/*
+ * A change to a blueprint is listed in the history of every map it reached, where its own label, a stroke made in the
+ * blueprint's tab, would read as though it were painted on that map; there, and only there, the row names the blueprint.
+ */
+describe('stepLabelIn', () =>
+{
+  /**
+   * A step with the given patches' documents, labelled Paint tiles.
+   * @param {readonly string[]} documents The documents its patches change.
+   * @returns {HistoryStep} The step.
+   */
+  const stepOn = (documents: readonly string[]): HistoryStep => ({
+    id: 'window-a#1',
+    label: 'Paint tiles',
+    histories: [],
+    entries: documents.map(document => ({ document: document as DocumentKey, patch: { kind: 'tiles', indices: [], before: [], after: [] } })),
+    origin: 'window-a',
+    at: 0,
+  });
+
+  /**
+   * Names a blueprint for the rows, as the window knows it.
+   * @param {string} blueprintId The blueprint.
+   * @returns {string} Its name.
+   */
+  const named = (blueprintId: string): string => (blueprintId === 'k3x9q2mf' ? 'Needler nest' : blueprintId);
+
+  it('names a blueprint\'s change for its blueprint in the history of a map it reached', () =>
+  {
+    // Arrange.
+    const step = stepOn([ 'editor-data:blueprints', 'blueprint-map:k3x9q2mf', 'map:301' ]);
+
+    // Act.
+    const label = stepLabelIn(step, mapHistoryKey(301), named);
+
+    // Assert.
+    expect(label)
+      .toBe('Blueprint \'Needler nest\': Paint tiles');
+  });
+
+  it('keeps the label in the blueprint\'s own history, an event\'s history, and for a step on a map no blueprint made', () =>
+  {
+    // Arrange.
+    const change = stepOn([ 'blueprint-map:k3x9q2mf', 'map:301' ]);
+    const stroke = stepOn([ 'map:301' ]);
+
+    // Act.
+    const labels = [ stepLabelIn(change, blueprintHistoryKey('k3x9q2mf'), named), stepLabelIn(change, eventHistoryKey(301, 4), named), stepLabelIn(stroke, mapHistoryKey(301), named) ];
+
+    // Assert.
+    expect(labels)
+      .toStrictEqual([ 'Paint tiles', 'Paint tiles', 'Paint tiles' ]);
   });
 });

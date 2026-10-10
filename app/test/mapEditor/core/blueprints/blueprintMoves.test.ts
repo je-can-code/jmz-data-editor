@@ -80,7 +80,7 @@ describe('blueprintsKeptGuard', () =>
 
     // Assert: the counting started, and the camp is still kept.
     expect([ refusal, copies.start.mock.calls.length, copies.countOf.mock.calls ])
-      .toStrictEqual([ '"Goblin camp" still has 2 copies, on Map 3 (2), so it can\'t be deleted', 1, [ [ 'k3x9q2mf' ] ] ]);
+      .toStrictEqual([ '"Goblin camp" still has 2 linked events, on Map 3, so it can\'t be deleted', 1, [ [ 'k3x9q2mf' ] ] ]);
   });
 
   it('refuses redoing a blueprint\'s delete once copies name it again', () =>
@@ -96,7 +96,7 @@ describe('blueprintsKeptGuard', () =>
 
     // Assert.
     expect(refusal)
-      .toBe('"Goblin camp" still has 2 copies, on Map 3 (2), so it can\'t be deleted');
+      .toBe('"Goblin camp" still has 2 linked events, on Map 3, so it can\'t be deleted');
   });
 
   it('refuses taking a blueprint away while its copies are still being counted, or cannot be', () =>
@@ -110,7 +110,7 @@ describe('blueprintsKeptGuard', () =>
 
     // Assert.
     expect(refusal)
-      .toBe('"Goblin camp" can\'t be deleted until its copies have been counted');
+      .toBe('"Goblin camp" can\'t be deleted until its linked events have been counted');
   });
 
   it('lets a blueprint nothing is a copy of go', () =>
@@ -180,7 +180,7 @@ describe('blueprintsKeptGuard', () =>
 
     // Assert.
     expect([ step.label, refusal ])
-      .toStrictEqual([ 'Externally modified', '"Goblin camp" still has 2 copies, on Map 3 (2), so it can\'t be deleted' ]);
+      .toStrictEqual([ 'Externally modified', '"Goblin camp" still has 2 linked events, on Map 3, so it can\'t be deleted' ]);
   });
 
   it('leaves a step whose patches no longer fit the blueprints to the hub, which refuses it in its own words', () =>
@@ -236,8 +236,8 @@ describe('blueprintsKeptGuard', () =>
     expect([ before, whileCounting, guard(save, 'backward') ])
       .toStrictEqual([
         null,
-        '"Goblin camp" can\'t be deleted until its copies have been counted',
-        '"Goblin camp" still has 1 copy, on Map 5 (1), so it can\'t be deleted',
+        '"Goblin camp" can\'t be deleted until its linked events have been counted',
+        '"Goblin camp" still has 1 linked event, on Map 5, so it can\'t be deleted',
       ]);
   });
 });

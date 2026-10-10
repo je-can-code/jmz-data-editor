@@ -79,6 +79,12 @@ type DeadLinksOut =
   | { readonly ok: false; readonly message: string };
 
 /**
+ * What is being placed, as the author knows it: a stamp, or a blueprint, whose placing is a stamp's in all but its links,
+ * and is named as a blueprint in every word the author hears of it.
+ */
+type PlacedKind = 'stamp' | 'blueprint';
+
+/**
  * What placing a stamp came to: the step it recorded (null when it changed nothing), the events it placed, which take
  * the selection, and what it left out, in words for the author; or why it was refused. A refused stamp changes nothing.
  */
@@ -156,26 +162,33 @@ const planStampTiles = (grid: TileGrid, stamp: Stamp, placement: StampPlacement)
  * or nothing on the map at all.
  * @param {boolean} tilesLeftOut Whether its tiles belong to another tileset.
  * @param {number} events How many events the stamp holds.
+ * @param {PlacedKind} kind What is placed, a stamp or a blueprint.
  * @returns {string} The words.
  */
-const nothingLandsMessage = (tilesLeftOut: boolean, events: number): string =>
+const nothingLandsMessage = (tilesLeftOut: boolean, events: number, kind: PlacedKind): string =>
 {
-  return tilesLeftOut && events === 0
-    ? 'This stamp was copied from a map with another tileset, so its tiles cannot go on this one.'
-    : 'Nothing in the stamp lands on the map there.';
+  if (tilesLeftOut && events === 0)
+  {
+    return kind === 'blueprint'
+      ? 'This blueprint was made on a map with another tileset, so its tiles cannot go on this one.'
+      : 'This stamp was copied from a map with another tileset, so its tiles cannot go on this one.';
+  }
+
+  return `Nothing in the ${kind} lands on the map there.`;
 };
 
 /**
  * Words how many of a stamp's events would land on others, for a refusal.
  * @param {number} blocked How many would.
  * @param {number} landing How many events land on the map in all.
+ * @param {PlacedKind} kind What is placed, a stamp or a blueprint.
  * @returns {string} The words.
  */
-const blockedMessage = (blocked: number, landing: number): string =>
+const blockedMessage = (blocked: number, landing: number, kind: PlacedKind): string =>
 {
   return landing === 1
-    ? 'The stamp\'s event would land on another event.'
-    : `${blocked} of the stamp's ${landing} events would land on other events.`;
+    ? `The ${kind}'s event would land on another event.`
+    : `${blocked} of the ${kind}'s ${landing} events would land on other events.`;
 };
 
 /**
@@ -284,9 +297,10 @@ const landingSpots = (
  * @param {StampPlacement} placement Where it goes and how.
  * @param {LiveBlueprint | null} liveBlueprint Whether a blueprint a copy names is still there, or null while the window
  * does not hold the blueprints, when every link goes down as it is.
+ * @param {PlacedKind} kind What is placed, a stamp or a blueprint, which the refusals name.
  * @returns {StampPlan} What would change, or why it cannot go there.
  */
-const planStamp = (map: StampTarget, stamp: Stamp, placement: StampPlacement, liveBlueprint: LiveBlueprint | null): StampPlan =>
+const planStamp = (map: StampTarget, stamp: Stamp, placement: StampPlacement, liveBlueprint: LiveBlueprint | null, kind: PlacedKind = 'stamp'): StampPlan =>
 {
   const { at, linkRefusal } = placement;
   const tilesFit = stamp.tiles !== null && stamp.tilesetId === map.tilesetId;
@@ -295,7 +309,7 @@ const planStamp = (map: StampTarget, stamp: Stamp, placement: StampPlacement, li
   const landing = stamp.events.filter(event => isOnMap(landingOf(event, at), map));
   if (tilesPlaced === false && landing.length === 0)
   {
-    return { ok: false, message: nothingLandsMessage(tilesLeftOut, stamp.events.length) };
+    return { ok: false, message: nothingLandsMessage(tilesLeftOut, stamp.events.length, kind) };
   }
 
   const unlinked = withDeadLinksOut(landing, liveBlueprint);
@@ -316,7 +330,7 @@ const planStamp = (map: StampTarget, stamp: Stamp, placement: StampPlacement, li
   const blocked = blockedCells(map, cells, new Set());
   if (blocked.length > 0)
   {
-    return { ok: false, message: blockedMessage(blocked.length, placing.length) };
+    return { ok: false, message: blockedMessage(blocked.length, placing.length, kind) };
   }
 
   // the copies' references to one another follow them to their new ids.
@@ -346,29 +360,30 @@ const planStamp = (map: StampTarget, stamp: Stamp, placement: StampPlacement, li
 /**
  * What the author hears when a stamp's tiles held copies of blueprints the window had no record to keep in.
  */
-const UNRECORDED_SPOTS_NOTE = 'The stamp\'s tiles held copies of blueprints, which went down as plain tiles, since where blueprints are placed can\'t be read.';
+const UNRECORDED_SPOTS_NOTE = 'The stamp\'s tiles held placements of blueprints, which went down as plain tiles, since where blueprints are placed can\'t be read.';
 
 /**
  * Words what a placement left out or changed, for the author: the tiles of another tileset, the events past the map's
  * edge, and the copies of blueprints no longer there, which went down as plain events.
  * @param {Extract<StampPlan, { ok: true }>} plan The placement.
+ * @param {PlacedKind} kind What was placed, a stamp or a blueprint.
  * @returns {string[]} One line per thing; none when everything went down as it was.
  */
-const leftOutNotes = (plan: Extract<StampPlan, { ok: true }>): string[] =>
+const leftOutNotes = (plan: Extract<StampPlan, { ok: true }>, kind: PlacedKind): string[] =>
 {
   const notes: string[] = [];
   if (plan.tilesLeftOut)
   {
-    notes.push('This map uses another tileset, so only the stamp\'s events went down.');
+    notes.push(`This map uses another tileset, so only the ${kind}'s events went down.`);
   }
 
   if (plan.eventsLeftOut === 1)
   {
-    notes.push('One of the stamp\'s events fell past the map\'s edge and was left out.');
+    notes.push(`One of the ${kind}'s events fell past the map's edge and was left out.`);
   }
   else if (plan.eventsLeftOut > 1)
   {
-    notes.push(`${plan.eventsLeftOut} of the stamp's events fell past the map's edge and were left out.`);
+    notes.push(`${plan.eventsLeftOut} of the ${kind}'s events fell past the map's edge and were left out.`);
   }
 
   if (plan.deadLinks === 1)
@@ -382,7 +397,7 @@ const leftOutNotes = (plan: Extract<StampPlan, { ok: true }>): string[] =>
 
   if (plan.deadSpots > 0)
   {
-    notes.push('The stamp\'s tiles held a copy of a blueprint that no longer exists, so they went down as plain tiles.');
+    notes.push('The stamp\'s tiles held a placement of a blueprint that no longer exists, so they went down as plain tiles.');
   }
 
   return notes;
@@ -396,9 +411,10 @@ const leftOutNotes = (plan: Extract<StampPlan, { ok: true }>): string[] =>
  * @param {number} mapId The map.
  * @param {Extract<StampPlan, { ok: true }>} plan The placement, worked out against the map as it stands.
  * @param {string} label What the history panel calls the step.
+ * @param {PlacedKind} kind What was placed, a stamp or a blueprint, which the words for what it left out name.
  * @returns {StampOutcome} The step, the events placed and what was left out.
  */
-const commitStampPlan = (hub: DocumentHub, mapId: number, plan: Extract<StampPlan, { ok: true }>, label: string): StampOutcome =>
+const commitStampPlan = (hub: DocumentHub, mapId: number, plan: Extract<StampPlan, { ok: true }>, label: string, kind: PlacedKind = 'stamp'): StampOutcome =>
 {
   const key = mapDocumentKey(mapId);
   const map = hub.map(key);
@@ -410,7 +426,7 @@ const commitStampPlan = (hub: DocumentHub, mapId: number, plan: Extract<StampPla
     recordSpots(tx, hub, mapId, plan.spots);
   });
 
-  return { ok: true, step, eventIds: plan.events.map(event => event.id), notes: leftOutNotes(plan) };
+  return { ok: true, step, eventIds: plan.events.map(event => event.id), notes: leftOutNotes(plan, kind) };
 };
 
 /**
@@ -499,4 +515,4 @@ const cutStampSource = (hub: DocumentHub, mapId: number, stamp: Stamp, mode: num
 };
 
 export { commitStampPlan, cutStampSource, placeStamp, planStamp };
-export type { StampOutcome, StampPlacement, StampPlan, StampTarget };
+export type { PlacedKind, StampOutcome, StampPlacement, StampPlan, StampTarget };

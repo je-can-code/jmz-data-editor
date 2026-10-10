@@ -27,7 +27,7 @@ import { stampOf } from '../../support/stampFixtures.ts';
 
 /*
  * For now a blueprint's size and its events are fixed: removing an event would delete events on every map, and growing it
- * would paint over cells its copies never owned. Its tiles, on the layers it carries, and everything about its events but
+ * would paint over cells its placements never covered. Its tiles, on the layers it carries, and everything about its events but
  * their ids are free to change, events moved about inside it included, since where a copy stands is never linked.
  * Anything else a change could reach (a layer the blueprint does not carry, the map's own settings, which are no part of a
  * blueprint) would be lost when the blueprint is read back, or break the field model, so it is refused too.

@@ -1,4 +1,5 @@
 import type { DockviewApi, DockviewGroupPanel, IDockviewPanel } from 'dockview-react';
+import { nameInSteps } from '../core/blueprints/blueprintEdits.ts';
 import { blueprintsKeptGuard } from '../core/blueprints/blueprintMoves.ts';
 import { BLUEPRINTS_DOCUMENT, blueprintIn } from '../core/blueprints/blueprints.ts';
 import { BLUEPRINT_USES_DOCUMENT, usedCopiesOf } from '../core/blueprints/blueprintUses.ts';
@@ -6,7 +7,7 @@ import { BlueprintUsesKeeper } from '../core/blueprints/blueprintUsesKeeper.ts';
 import { copiesLeftWords } from '../core/blueprints/copiesLeft.ts';
 import { installCloseGuard, type CloseTarget } from '../core/closeGuard.ts';
 import { EventSelection } from '../core/events/EventSelection.ts';
-import { mapHistoryKey, TREE_HISTORY_KEY, type HistoryKey } from '../core/history/historyKeys.ts';
+import { blueprintHistoryKey, mapHistoryKey, TREE_HISTORY_KEY, type HistoryKey } from '../core/history/historyKeys.ts';
 import type { MapCell } from '../core/renderer/camera.ts';
 import { MapTreeService, type TreeOutcome } from '../core/tree/MapTreeService.ts';
 import { TREE_ROOT } from '../core/tree/MapTreeModel.ts';
@@ -614,10 +615,10 @@ class WorkspaceController
   }
 
   /**
-   * Reads a blueprint's name, for titles.
+   * Reads a blueprint's name, for titles: as the blueprints hold it, or, for one they no longer hold, deleted or its save
+   * undone, the name its own history last gave it, so its history keeps the name it was known by.
    * @param {string} blueprintId The blueprint.
-   * @returns {string} Its name, or its id while the blueprints are not held or no longer hold it, as after its save is
-   * undone.
+   * @returns {string} Its name, or its id when neither the blueprints nor its history name it.
    */
   blueprintName(blueprintId: string): string
   {
@@ -625,9 +626,16 @@ class WorkspaceController
     const blueprint = hub.has(BLUEPRINTS_DOCUMENT)
       ? blueprintIn(hub.document(BLUEPRINTS_DOCUMENT), blueprintId)
       : null;
-    return blueprint === null
-      ? blueprintId
-      : blueprint.name;
+    if (blueprint !== null)
+    {
+      return blueprint.name;
+    }
+
+    // the steps done, newest first, hold the name it last had; failing those, the next to redo, as an undone save does.
+    const { rows } = hub.history(blueprintHistoryKey(blueprintId));
+    const ordered = [ ...rows.filter(row => row.done).reverse(), ...rows.filter(row => row.done === false) ];
+    const steps = ordered.flatMap(row => hub.knownStep(row.id) ?? []);
+    return nameInSteps(steps, blueprintId) ?? blueprintId;
   }
 
   //endregion dock

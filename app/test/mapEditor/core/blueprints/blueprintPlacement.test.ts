@@ -296,7 +296,7 @@ describe('placeBlueprint', () =>
     const placed = mapFileOf(hub, 3);
     expect([ outcome.ok && outcome.notes, notesOf(placed).slice(2), placed.data, recorded(hub) ])
       .toStrictEqual([
-        [ 'This map uses another tileset, so only the stamp\'s events went down.' ],
+        [ 'This map uses another tileset, so only the blueprint\'s events went down.' ],
         [ '<blueprint:[k3x9q2mf, 7]>', 'Guard captain\n<blueprint:[k3x9q2mf, 9]>' ],
         target(9).data,
         [],
@@ -379,7 +379,7 @@ describe('placeBlueprint', () =>
       .toStrictEqual([ { ok: false, message: 'That blueprint is no longer there.' }, target() ]);
   });
 
-  it('refuses what placing its stamp would refuse, such as an event landing on another', () =>
+  it('refuses what placing its stamp would refuse, such as an event landing on another, naming it a blueprint', () =>
   {
     // Arrange: event 1 stands at 3, 2, where the captain would land.
     const hub = windowWithCamp();
@@ -389,7 +389,20 @@ describe('placeBlueprint', () =>
 
     // Assert.
     expect([ outcome, mapFileOf(hub, 1) ])
-      .toStrictEqual([ { ok: false, message: '1 of the stamp\'s 2 events would land on other events.' }, target() ]);
+      .toStrictEqual([ { ok: false, message: '1 of the blueprint\'s 2 events would land on other events.' }, target() ]);
+  });
+
+  it('says a blueprint lands nothing on the map past its edge, as a blueprint, never a stamp', () =>
+  {
+    // Arrange.
+    const hub = windowWithCamp();
+
+    // Act: its corner far past the map's bottom right.
+    const outcome = placeBlueprint(hub, 1, 'k3x9q2mf', at(40, 40));
+
+    // Assert.
+    expect(outcome)
+      .toStrictEqual({ ok: false, message: 'Nothing in the blueprint lands on the map there.' });
   });
 
   it('refuses a blueprint whose event\'s note could not take the link and read the same, changing nothing', () =>

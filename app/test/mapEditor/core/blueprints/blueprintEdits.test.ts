@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { deleteBlueprint, renameBlueprint, saveBlueprint } from '../../../../src/mapEditor/core/blueprints/blueprintEdits.ts';
+import { deleteBlueprint, nameInSteps, renameBlueprint, saveBlueprint, type BlueprintOutcome } from '../../../../src/mapEditor/core/blueprints/blueprintEdits.ts';
 import { BLUEPRINTS_DOCUMENT, blueprintsOf, savedBlueprintOf } from '../../../../src/mapEditor/core/blueprints/blueprints.ts';
 import { DocumentHub } from '../../../../src/mapEditor/core/history/DocumentHub.ts';
 import { blueprintHistoryKey } from '../../../../src/mapEditor/core/history/historyKeys.ts';
+import type { HistoryStep } from '../../../../src/mapEditor/core/history/HistoryStep.ts';
 import { createMapEvent } from '../../../../src/mapEditor/core/model/eventModel.ts';
 import type { Stamp } from '../../../../src/mapEditor/core/stamps/stamp.ts';
 import { drawsFor, holdBlueprints, storedBlueprints, type BlueprintSeed } from '../../support/blueprintFixtures.ts';
@@ -244,13 +245,15 @@ describe('blueprintEdits', () =>
         .toStrictEqual([ [ 'Delete blueprint "Goblin"', [ 'blueprint:k3x9q2mf' ], null ], [ [ 'aa22', 'Bat' ] ], before ]);
     });
 
-    it('refuses a blueprint with copies, saying how many and on which maps, changing nothing', () =>
+    it('refuses a blueprint still used, saying how many times it is placed and how many events are linked to it, and on which maps, changing nothing', () =>
     {
-      // Arrange: one copy; five on two maps.
+      // Arrange: one linked event; five on two maps; placed once beside three linked events; placed twice alone.
       const hub = windowWith({ k3x9q2mf: { name: 'Goblin', stamp: goblin() } });
       const counts = [
         { total: 1, maps: [ { mapId: 3, copies: 1 } ] },
         { total: 5, maps: [ { mapId: 3, copies: 3 }, { mapId: 40, copies: 2 } ] },
+        { total: 4, maps: [ { mapId: 3, copies: 3 }, { mapId: 40, copies: 1 } ], placements: 1 },
+        { total: 2, maps: [ { mapId: 3, copies: 2 } ], placements: 2 },
       ];
 
       // Act.
@@ -260,8 +263,10 @@ describe('blueprintEdits', () =>
       expect([ outcomes, namesIn(hub) ])
         .toStrictEqual([
           [
-            { ok: false, message: '"Goblin" still has 1 copy, on Map 3 (1), so it can\'t be deleted.' },
-            { ok: false, message: '"Goblin" still has 5 copies, on Map 3 (3) and Map 40 (2), so it can\'t be deleted.' },
+            { ok: false, message: '"Goblin" still has 1 linked event, on Map 3, so it can\'t be deleted.' },
+            { ok: false, message: '"Goblin" still has 5 linked events, on Map 3 and Map 40, so it can\'t be deleted.' },
+            { ok: false, message: '"Goblin" is still placed once and has 3 linked events, on Map 3 and Map 40, so it can\'t be deleted.' },
+            { ok: false, message: '"Goblin" is still placed 2 times, on Map 3, so it can\'t be deleted.' },
           ],
           [ [ 'k3x9q2mf', 'Goblin' ] ],
         ]);
@@ -269,7 +274,7 @@ describe('blueprintEdits', () =>
 
     it('names four maps at most, summing up the rest', () =>
     {
-      // Arrange: copies on five maps, then on six.
+      // Arrange: linked events on five maps, then on six.
       const hub = windowWith({ k3x9q2mf: { name: 'Goblin', stamp: goblin() } });
       const five = [ 1, 2, 3, 4, 5 ].map(mapId => ({ mapId, copies: 1 }));
       const counts = [ { total: 5, maps: five }, { total: 6, maps: [ ...five, { mapId: 6, copies: 1 } ] } ];
@@ -280,12 +285,12 @@ describe('blueprintEdits', () =>
       // Assert.
       expect(outcomes.map(outcome => outcome.ok === false && outcome.message))
         .toStrictEqual([
-          '"Goblin" still has 5 copies, on Map 1 (1), Map 2 (1), Map 3 (1), Map 4 (1) and 1 other map, so it can\'t be deleted.',
-          '"Goblin" still has 6 copies, on Map 1 (1), Map 2 (1), Map 3 (1), Map 4 (1) and 2 other maps, so it can\'t be deleted.',
+          '"Goblin" still has 5 linked events, on Map 1, Map 2, Map 3, Map 4 and 1 other map, so it can\'t be deleted.',
+          '"Goblin" still has 6 linked events, on Map 1, Map 2, Map 3, Map 4 and 2 other maps, so it can\'t be deleted.',
         ]);
     });
 
-    it('refuses a blueprint whose copies are not counted yet, and one no longer there, changing nothing', () =>
+    it('refuses a blueprint whose linked events are not counted yet, and one no longer there, changing nothing', () =>
     {
       // Arrange.
       const hub = windowWith({ k3x9q2mf: { name: 'Goblin', stamp: goblin() } });
@@ -297,11 +302,53 @@ describe('blueprintEdits', () =>
       expect([ outcomes, namesIn(hub) ])
         .toStrictEqual([
           [
-            { ok: false, message: '"Goblin" can\'t be deleted until its copies have been counted.' },
+            { ok: false, message: '"Goblin" can\'t be deleted until its linked events have been counted.' },
             { ok: false, message: 'That blueprint is no longer there.' },
           ],
           [ [ 'k3x9q2mf', 'Goblin' ] ],
         ]);
+    });
+  });
+
+  describe('nameInSteps', () =>
+  {
+    it('finds the name a deleted blueprint went with, a renamed one\'s newest name, and a saved one\'s, and nothing for another blueprint', () =>
+    {
+      // Arrange: Goblin saved, renamed Hobgoblin, then deleted, beside Bat, saved; the steps newest first.
+      const hub = windowWith({});
+      const saved = saveBlueprint(hub, goblin(), 'Goblin', drawsFor([ 'k3x9q2mf' ]));
+      const renamed = renameBlueprint(hub, 'k3x9q2mf', 'Hobgoblin');
+      const deleted = deleteBlueprint(hub, 'k3x9q2mf', { total: 0, maps: [] }, mapName);
+      const bat = saveBlueprint(hub, goblin(), 'Bat', drawsFor([ 'aa22' ]));
+      const stepOf = (outcome: BlueprintOutcome): HistoryStep => (outcome.ok ? outcome.step : null) as HistoryStep;
+
+      // Act.
+      const names = [
+        nameInSteps([ stepOf(deleted), stepOf(renamed), stepOf(saved) ], 'k3x9q2mf'),
+        nameInSteps([ stepOf(renamed), stepOf(saved) ], 'k3x9q2mf'),
+        nameInSteps([ stepOf(saved) ], 'k3x9q2mf'),
+        nameInSteps([ stepOf(bat) ], 'k3x9q2mf'),
+        nameInSteps([], 'k3x9q2mf'),
+      ];
+
+      // Assert.
+      expect(names)
+        .toStrictEqual([ 'Hobgoblin', 'Hobgoblin', 'Goblin', null, null ]);
+    });
+
+    it('reads no name from a change to a blueprint\'s stamp, passing on to the step that names it', () =>
+    {
+      // Arrange: Goblin saved, then its stamp changed.
+      const hub = windowWith({});
+      const saved = saveBlueprint(hub, goblin(), 'Goblin', drawsFor([ 'k3x9q2mf' ]));
+      const changed = hub.edit('Change', [ blueprintHistoryKey('k3x9q2mf') ], tx => tx.set(BLUEPRINTS_DOCUMENT, [ 'data', 'blueprints', 'k3x9q2mf', 'stamp', 'width' ], 2)) as HistoryStep;
+
+      // Act.
+      const name = nameInSteps([ changed, (saved.ok ? saved.step : null) as HistoryStep ], 'k3x9q2mf');
+
+      // Assert.
+      expect(name)
+        .toBe('Goblin');
     });
   });
 });

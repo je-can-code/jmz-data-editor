@@ -226,7 +226,7 @@ describe('CopyMaps', () =>
 
       // Assert: the window with no disk reaches what it holds, which is all there is to reach.
       expect(answers)
-        .toStrictEqual([ 'This blueprint can\'t change while its copies on disk can\'t be counted.', null ]);
+        .toStrictEqual([ 'This blueprint can\'t change while its linked events on disk can\'t be counted.', null ]);
     });
 
     it('says why the plugin list could not be read while a map holds a copy, and lets a blueprint with none through', async () =>
@@ -429,7 +429,7 @@ describe('CopyMaps', () =>
       // Assert.
       expect([ waiting, window.reads, window.maps.file(3) === null ])
         .toStrictEqual([
-          [ 'This blueprint can\'t change until Map 3, which holds a copy, has been read; try again in a moment.', [ 3 ] ],
+          [ 'This blueprint can\'t change until Map 3, where it is used, has been read; try again in a moment.', [ 3 ] ],
           [ 3, 3 ],
           false,
         ]);
@@ -519,7 +519,7 @@ describe('CopyMaps', () =>
 
       // Assert.
       expect(found)
-        .toStrictEqual([ [ 1, 2, 3 ], 'This blueprint can\'t change until Map 3, which holds a copy, has been read; try again in a moment.' ]);
+        .toStrictEqual([ [ 1, 2, 3 ], 'This blueprint can\'t change until Map 3, where it is used, has been read; try again in a moment.' ]);
     });
   });
 

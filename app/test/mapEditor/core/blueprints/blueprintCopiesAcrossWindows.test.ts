@@ -85,7 +85,7 @@ describe('blueprint copies across windows', () =>
       .toStrictEqual([
         false,
         { total: 1, maps: [ { mapId: 5, copies: 1 } ] },
-        { ok: false, message: '"Goblin camp" still has 1 copy, on Map 5 (1), so it can\'t be deleted.' },
+        { ok: false, message: '"Goblin camp" still has 1 linked event, on Map 5, so it can\'t be deleted.' },
         { total: 0, maps: [] },
       ]);
     counter.stop();

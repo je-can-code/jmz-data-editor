@@ -997,6 +997,24 @@ describe('ToolSession: the stamp', () =>
       ]);
   });
 
+  it('names a blueprint in hand as a blueprint beside its footprint, where a plain stamp is named a stamp', () =>
+  {
+    // Arrange: the same dirt in hand, as a blueprint and as a plain stamp.
+    const blueprint = stamping(dirtWithEvent(), { blueprint: { id: 'k3x9q2mf', name: 'Dirt patch' } }).bench;
+    const plain = stamping(dirtWithEvent()).bench;
+
+    // Act.
+    const labels = [ blueprint, plain ].map(bench =>
+    {
+      bench.session.move(at(0, 1));
+      return bench.session.overlay().hoverLabel;
+    });
+
+    // Assert.
+    expect(labels)
+      .toStrictEqual([ 'Blueprint', 'Stamp' ]);
+  });
+
   it('says a map may hold no blueprint before the click, and hands over the refusal at it, changing nothing', () =>
   {
     // Arrange: the blueprint in hand over a map that may hold no link.

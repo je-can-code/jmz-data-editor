@@ -31,7 +31,8 @@ import { UsesServer } from '../../support/usesServer.ts';
 
 /*
  * The Stamps panel lists every stamp copied in the window this session, newest first, each with a picture and what it
- * holds, and the map it came from, a stamp copied while the panel is open joining at once. Clicking a stamp takes it up
+ * holds, and the map it came from, a stamp copied while the panel is open joining at once, brought into view rather than
+ * landing out of sight below the blueprints. Clicking a stamp takes it up
  * as the brush, for the workspace's own maps, as the palette picks for them; clicking the stamp in hand again, or Esc
  * while the panel has the keys, puts it down and takes up the tool held before. The stamp in hand shows pressed. With
  * no stamp yet, it says how one is made.
@@ -40,12 +41,12 @@ describe('StampsPanel', () =>
 {
   /**
    * Renders the panel in a workspace with no project server, over a window's stamps.
+   * @param {StampHistory} stamps The window's stamps, none by default.
    * @returns {object} The stamps, the window's paint and the controller.
    */
-  const renderPanel = () =>
+  const renderPanel = (stamps = new StampHistory('window-a')) =>
   {
     const hub = new DocumentHub({ clientId: 'window-a' });
-    const stamps = new StampHistory('window-a');
     const paints = new WindowPaints(window);
     const services = { hub, api: null, stamps, paints } as unknown as MapEditorServices;
     const controller = new WorkspaceController(services);
@@ -108,6 +109,40 @@ describe('StampsPanel', () =>
     // Assert.
     expect(cards())
       .toStrictEqual([ '2 by 1 tiles from layer 4From Map 7', '3 eventsFrom Map 12' ]);
+  });
+
+  it('brings each stamp joining into view, so it never lands out of sight below the blueprints, and moves nothing as it opens', () =>
+  {
+    // Arrange: a stamp kept before the panel opens, and every card brought into view noted.
+    const brought: string[] = [];
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+      configurable: true,
+      value(this: HTMLElement, options: ScrollIntoViewOptions)
+      {
+        brought.push(`${this.textContent ?? ''} ${options.block ?? ''}`);
+      },
+    });
+    try
+    {
+      const stamps = new StampHistory('window-a');
+      stamps.add(threeEvents());
+      renderPanel(stamps);
+      const opened = [ ...brought ];
+
+      // Act.
+      act(() =>
+      {
+        stamps.add(pieceOfLayerFour());
+      });
+
+      // Assert.
+      expect([ opened, brought ])
+        .toStrictEqual([ [], [ '2 by 1 tiles from layer 4From Map 7 nearest' ] ]);
+    }
+    finally
+    {
+      delete (HTMLElement.prototype as { scrollIntoView?: unknown }).scrollIntoView;
+    }
   });
 
   it('takes a stamp clicked up as the brush, pressed, and puts it down when clicked again, back to the tool held before', () =>
@@ -216,12 +251,12 @@ describe('StampsPanel', () =>
 
 /*
  * The panel's blueprints, above its stamps, in a window with a project server: every blueprint by name, each with its
- * picture, its name and how many copies of it stand across every map, still being counted until the server answers.
- * Any stamp can be saved as a blueprint, named in place, which writes the blueprints at once and hands undo the new
- * blueprint's history; Escape, or a name of nothing but spaces, saves nothing. A blueprint is renamed in place, its name
- * following in the paint settings while it is picked. Deleting one with copies says how many and on which maps, and
- * deleting one whose copies are still being counted says so, both changing nothing; one with no copies is deleted after
- * a question, Keep leaving it be. Clicking a blueprint takes it up as the brush, and clicking it again puts it down.
+ * picture, its name and where it is used across every map, its linked events still being counted until the server
+ * answers, never its placements and its linked events under one name. Any stamp can be saved as a blueprint, named in
+ * place, which writes the blueprints at once and hands undo the new blueprint's history; Escape, or a name of nothing but
+ * spaces, saves nothing. A blueprint is renamed in place, its name following in the paint settings while it is picked.
+ * Deleting one still used says how and on which maps, and deleting one whose linked events are still being counted says
+ * so, both changing nothing; one used nowhere is deleted after a question, Keep leaving it be. Clicking a blueprint takes it up as the brush, and clicking it again puts it down.
  * Blueprints that cannot be read say so, as do blueprints that could not be written, and blueprints held back from disk
  * while they wait for a choice about changes made elsewhere.
  */
@@ -362,8 +397,8 @@ describe('StampsPanel: blueprints', () =>
     // Assert.
     expect([ counting, blueprintCards() ])
       .toStrictEqual([
-        [ 'Bat roostCounting copies', 'Goblin campCounting copies' ],
-        [ 'Bat roostNo copies yet', 'Goblin camp3 copies on 2 maps' ],
+        [ 'Bat roostCounting linked events', 'Goblin campCounting linked events' ],
+        [ 'Bat roostNo linked events yet', 'Goblin camp3 linked events on 2 maps' ],
       ]);
   });
 
@@ -387,7 +422,7 @@ describe('StampsPanel: blueprints', () =>
     const [ camp ] = blueprintsOf(hub.document(BLUEPRINTS_DOCUMENT));
     expect([ blueprintCards(), saved, controller.getState().activeHistory, controller.getState().notice?.text, camp.stamp.events ])
       .toStrictEqual([
-        [ 'Goblin campNo copies yet' ],
+        [ 'Goblin campNo linked events yet' ],
         [ BLUEPRINTS_DOCUMENT ],
         `blueprint:${camp.id}`,
         'Saved "Goblin camp" as a blueprint.',
@@ -435,7 +470,7 @@ describe('StampsPanel: blueprints', () =>
 
     // Assert: renamed, it sorts after the bat roost still.
     expect([ blueprintCards(), painting.settings.blueprint, saved ])
-      .toStrictEqual([ [ 'Bat roostNo copies yet', 'Goblin denNo copies yet' ], { id: 'aa22', name: 'Goblin den' }, [ BLUEPRINTS_DOCUMENT ] ]);
+      .toStrictEqual([ [ 'Bat roostNo linked events yet', 'Goblin denNo linked events yet' ], { id: 'aa22', name: 'Goblin den' }, [ BLUEPRINTS_DOCUMENT ] ]);
   });
 
   it('refuses to delete a blueprint with copies, saying how many and on which maps, and asks nothing', async () =>
@@ -450,7 +485,7 @@ describe('StampsPanel: blueprints', () =>
 
     // Assert.
     expect([ controller.getState().notice?.text, screen.queryByTestId('blueprint-delete-confirm'), blueprintCards(), saved ])
-      .toStrictEqual([ '"Goblin camp" still has 2 copies, on Map 3 (1) and Map 7 (1), so it can\'t be deleted.', null, [ 'Goblin camp2 copies on 2 maps' ], [] ]);
+      .toStrictEqual([ '"Goblin camp" still has 2 linked events, on Map 3 and Map 7, so it can\'t be deleted.', null, [ 'Goblin camp2 linked events on 2 maps' ], [] ]);
   });
 
   it('refuses to delete a blueprint while its copies are still being counted', () =>
@@ -467,7 +502,7 @@ describe('StampsPanel: blueprints', () =>
 
     // Assert.
     expect([ controller.getState().notice?.text, blueprintCards() ])
-      .toStrictEqual([ '"Goblin camp" can\'t be deleted until its copies have been counted.', [ 'Goblin campCounting copies' ] ]);
+      .toStrictEqual([ '"Goblin camp" can\'t be deleted until its linked events have been counted.', [ 'Goblin campCounting linked events' ] ]);
   });
 
   it('asks before deleting a blueprint with no copies, keeping it on Keep or Escape and deleting it on Delete', async () =>
@@ -491,8 +526,8 @@ describe('StampsPanel: blueprints', () =>
     expect([ asked, kept, blueprintCards(), saved, controller.getState().notice?.text, controller.getState().activeHistory ])
       .toStrictEqual([
         'Delete the blueprint "Bat roost"?DeleteKeep',
-        [ [ 'Bat roostNo copies yet', 'Goblin campNo copies yet' ], null ],
-        [ 'Goblin campNo copies yet' ],
+        [ [ 'Bat roostNo linked events yet', 'Goblin campNo linked events yet' ], null ],
+        [ 'Goblin campNo linked events yet' ],
         [ BLUEPRINTS_DOCUMENT ],
         'Deleted the blueprint "Bat roost".',
         'blueprint:k3x9q2mf',
@@ -514,7 +549,7 @@ describe('StampsPanel: blueprints', () =>
 
     // Assert.
     expect([ controller.getState().notice?.text, blueprintCards(), saved ])
-      .toStrictEqual([ 'Give the blueprint a name.', [ 'Goblin campNo copies yet' ], [] ]);
+      .toStrictEqual([ 'Give the blueprint a name.', [ 'Goblin campNo linked events yet' ], [] ]);
   });
 
   it('says the blueprints could not be written, keeping the edit in the window', async () =>
@@ -535,7 +570,7 @@ describe('StampsPanel: blueprints', () =>
 
     // Assert.
     expect([ controller.getState().notice?.text, blueprintCards() ])
-      .toStrictEqual([ 'The blueprints could not be saved: the disk is full. They are tried again with the next save.', [ 'Goblin campNo copies yet' ] ]);
+      .toStrictEqual([ 'The blueprints could not be saved: the disk is full. They are tried again with the next save.', [ 'Goblin campNo linked events yet' ] ]);
   });
 
   it('writes nothing over blueprints waiting for a choice about changes made elsewhere, saying so and keeping the edit', async () =>
@@ -559,7 +594,7 @@ describe('StampsPanel: blueprints', () =>
     expect([ controller.getState().notice?.text, blueprintCards(), saved, hub.isDirty(BLUEPRINTS_DOCUMENT) ])
       .toStrictEqual([
         'The blueprints were not saved: they are waiting for a choice about changes made elsewhere.',
-        [ 'Goblin campNo copies yet' ],
+        [ 'Goblin campNo linked events yet' ],
         [],
         true,
       ]);
@@ -576,7 +611,7 @@ describe('StampsPanel: blueprints', () =>
 
     // Assert.
     expect([ opening, screen.queryByText('Opening the blueprints'), blueprintCards() ])
-      .toStrictEqual([ true, null, [ 'Goblin campNo copies yet' ] ]);
+      .toStrictEqual([ true, null, [ 'Goblin campNo linked events yet' ] ]);
   });
 
   it('says the blueprints could not be read when the document holds something else', () =>
@@ -868,7 +903,7 @@ describe('StampsPanel: where a blueprint is used', () =>
       ]);
   });
 
-  it('counts each placement as a copy, and refuses to delete a blueprint still placed, in the words the refusal uses', async () =>
+  it('counts the placements apart from the linked events, and refuses to delete a blueprint still placed, in the words the refusal uses', async () =>
   {
     // Arrange.
     const { controller } = await renderUses(PLACED);
@@ -876,11 +911,11 @@ describe('StampsPanel: where a blueprint is used', () =>
     // Act.
     fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
 
-    // Assert.
+    // Assert: four placements on three maps, and the linked event on map 9, which the refusal names among the maps.
     expect([ screen.getByTestId('blueprint-copies').textContent, controller.getState().notice?.text ])
       .toStrictEqual([
-        '5 copies on 4 maps',
-        '"Goblin camp" still has 5 copies, on Map 3 (2), Map 7 (1), Map 8 (1) and Map 9 (1), so it can\'t be deleted.',
+        'Placed 4 times on 3 maps, 1 linked event',
+        '"Goblin camp" is still placed 4 times and has 1 linked event, on Map 3, Map 7, Map 8 and Map 9, so it can\'t be deleted.',
       ]);
   });
 
@@ -909,7 +944,7 @@ describe('StampsPanel: where a blueprint is used', () =>
         [ { schemaVersion: 2, remove: [ { map: 8, blueprint: 'aa22', x: 0, y: 0 } ] } ],
         [],
         'blueprint:aa22',
-        'Forgot a copy of "Goblin camp" on Map 8.',
+        'Forgot a placement of "Goblin camp" on Map 8.',
       ]);
   });
 

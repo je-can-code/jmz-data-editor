@@ -121,4 +121,17 @@ describe('previewStamp', () =>
     expect(preview.label)
       .toBe('Stamp (exact)');
   });
+
+  it('names a blueprint in hand as a blueprint, Shift held or not', () =>
+  {
+    // Arrange.
+    const held = stamp();
+
+    // Act.
+    const labels = [ previewStamp(map(), held, { x: 0, y: 0 }, 'auto', 'blueprint').label, previewStamp(map(), held, { x: 0, y: 0 }, 'exact', 'blueprint').label ];
+
+    // Assert.
+    expect(labels)
+      .toStrictEqual([ 'Blueprint', 'Blueprint (exact)' ]);
+  });
 });

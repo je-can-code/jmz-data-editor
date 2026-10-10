@@ -1143,7 +1143,7 @@ describe('WorkspaceController', () =>
 
       // Assert.
       expect([ controller.getState().notice?.text, controller.blueprintName('k3x9q2mf') ])
-        .toStrictEqual([ '"Save blueprint "Bat roost"" cannot be undone: "Bat roost" still has 1 copy, on Map 5 (1), so it can\'t be deleted.', 'Bat roost' ]);
+        .toStrictEqual([ '"Save blueprint "Bat roost"" cannot be undone: "Bat roost" is still placed once, on Map 5, so it can\'t be deleted.', 'Bat roost' ]);
     });
   });
 

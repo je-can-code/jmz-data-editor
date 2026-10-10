@@ -860,7 +860,7 @@ class ToolSession
     const placedTiles = stamp.tilesetId === map.tilesetId && (stamp.spots ?? []).some(spot => isLive(spot.blueprintId));
     const linked = blueprint !== null || linkedEvents || placedTiles;
     const refused = linked && this.#host.linkRefusal(map.mapId) !== null;
-    const preview = previewStamp(map, stamp, cell, pointer.shift ? 'exact' : 'auto');
+    const preview = previewStamp(map, stamp, cell, pointer.shift ? 'exact' : 'auto', blueprint === null ? 'stamp' : 'blueprint');
     return {
       hover: preview.hover,
       hoverLabel: refused ? LINKS_REFUSED_LABEL : preview.label,
