@@ -28,6 +28,7 @@ const MotionConfigBoard = () =>
     save,
     reload,
     loading,
+    hasUnsavedEdits,
   } = useMotionConfig();
 
   const [ activeTab, setActiveTab ] = useState<MotionConfigTab>("types");
@@ -61,7 +62,7 @@ const MotionConfigBoard = () =>
     await reload();
   };
 
-  const canSave = loading === false && motionConfig !== null;
+  const canSave = loading === false && hasUnsavedEdits;
   const canReload = loading === false;
 
   useBoardActions({

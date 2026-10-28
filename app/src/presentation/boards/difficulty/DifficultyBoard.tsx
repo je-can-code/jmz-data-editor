@@ -32,6 +32,7 @@ const DifficultyBoard = () =>
     save,
     reload,
     loading,
+    hasUnsavedEdits,
   } = useDifficultyConfig();
 
   const [ isSaving, setIsSaving ] = useState(false);
@@ -116,7 +117,7 @@ const DifficultyBoard = () =>
     await reload();
   };
 
-  const canSave = loading === false && difficultyConfig !== null;
+  const canSave = loading === false && hasUnsavedEdits;
   const canReload = loading === false;
 
   useBoardActions({

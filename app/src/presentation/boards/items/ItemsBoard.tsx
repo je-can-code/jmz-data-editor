@@ -78,7 +78,7 @@ function parseIntInput(raw: string, fallback: number): number
 
 function ItemsBoard()
 {
-  const { data: items, setData, save, reload, loading } = useItems();
+  const { data: items, setData, save, reload, loading, hasUnsavedEdits } = useItems();
   const { states } = useStates();
   const { skills } = useSkills();
   const { rmmzDataPath } = useProjectPath();
@@ -184,7 +184,9 @@ function ItemsBoard()
     setSnackbar({ open: true, message: 'Items reloaded.', severity: MuiSnackbarSeverity.Info, variant: MuiSnackbarVariant.Filled });
   };
 
-  const canSave = !loading && !isSaving && !!rmmzDataPath;
+  // the file can be read again whenever it is idle, but only saved while it holds edits.
+  const canReload = !loading && !isSaving && !!rmmzDataPath;
+  const canSave = canReload && hasUnsavedEdits;
 
   // copy and paste whole items like any other edit, saved the normal way.
   const rowClipboard = useRowClipboard({
@@ -218,7 +220,7 @@ function ItemsBoard()
     />
   );
 
-  useBoardActions({ onSave: handleSave, canSave, isSaving, onReload: handleReload, canReload: canSave });
+  useBoardActions({ onSave: handleSave, canSave, isSaving, onReload: handleReload, canReload });
 
   if (!selectedItem)
   {

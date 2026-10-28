@@ -1,5 +1,6 @@
 import React, { createContext, ReactNode, useCallback, useContext, useEffect, useMemo, useState, } from 'react';
 import { useProjectPath } from '@presentation/context/project-path.context.tsx';
+import { useFileBackedState } from '@presentation/hooks/useFileBackedState.ts';
 import { executeLoad, executeSave } from '@services/DataService.ts';
 import DatabaseFilenames from '@core/enums/DatabaseFilenames.ts';
 import { RPG_BaseDomainModel } from '@core/domain/entities/RPG_BaseDomainModel.ts';
@@ -18,6 +19,16 @@ export type ResourceContextValue<TModel> = {
   save: (updatedList: TModel[]) => Promise<void>;
   reload: () => Promise<void>;
   loading: boolean;
+  /**
+   * True while the data holds edits the file does not, which is exactly when the board's Save lights. It lives here
+   * rather than in the board, so it survives the author moving to another board and back.
+   */
+  hasUnsavedEdits: boolean;
+  /**
+   * Leaves the data unsaved ahead of an edit a board holds back and hands over a moment later, so Save lights the
+   * moment the edit is made.
+   */
+  flagUnsavedEdits: () => void;
 };
 
 /**
@@ -40,7 +51,14 @@ const createResourceContext = <TModel extends RPG_BaseDomainModel<TDto>, TDto ex
       rmmzDataPath,
       projectReloadGeneration
     } = useProjectPath();
-    const [ data, setData ] = useState<TModel[]>([]);
+    const {
+      value: data,
+      edit: setData,
+      flagUnsavedEdits,
+      loaded,
+      beginSave,
+      hasUnsavedEdits,
+    } = useFileBackedState<TModel[]>([]);
     const [ loading, setLoading ] = useState(true);
 
     const reload = useCallback(async () =>
@@ -60,7 +78,7 @@ const createResourceContext = <TModel extends RPG_BaseDomainModel<TDto>, TDto ex
           .filter((rmmz): rmmz is TDto => rmmz !== null)
           .map(rmmz => new ModelClass(rmmz));
 
-        setData(validModels);
+        loaded(validModels);
       }
       catch (error)
       {
@@ -70,7 +88,7 @@ const createResourceContext = <TModel extends RPG_BaseDomainModel<TDto>, TDto ex
       {
         setLoading(false);
       }
-    }, [ rmmzDataPath ]);
+    }, [ rmmzDataPath, loaded ]);
 
     const save = useCallback(async (updatedList: TModel[]) =>
     {
@@ -79,20 +97,22 @@ const createResourceContext = <TModel extends RPG_BaseDomainModel<TDto>, TDto ex
         return;
       }
 
+      // the edits made by now are the ones this save carries.
+      const saved = beginSave();
       try
       {
         const rmmzData = updatedList.map(item => item.toRmmz());
         const finalData = [ null, ...rmmzData ];
 
         await executeSave(rmmzDataPath, filename, finalData);
-        setData(updatedList);
+        saved(updatedList);
       }
       catch (error)
       {
         console.error(`Failed to save ${displayName}:`, error);
         throw error;
       }
-    }, [ rmmzDataPath ]);
+    }, [ rmmzDataPath, beginSave ]);
 
     useEffect(() =>
     {
@@ -117,8 +137,10 @@ const createResourceContext = <TModel extends RPG_BaseDomainModel<TDto>, TDto ex
         save,
         reload,
         loading,
+        hasUnsavedEdits,
+        flagUnsavedEdits,
       }
-    ), [ data, byId, save, reload, loading ]);
+    ), [ data, byId, setData, save, reload, loading, hasUnsavedEdits, flagUnsavedEdits ]);
 
     return (
       <Context.Provider value={value}>

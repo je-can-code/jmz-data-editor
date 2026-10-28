@@ -29,6 +29,7 @@ export function useProficiency()
     save,
     reload,
     loading,
+    hasUnsavedEdits,
   } = useProficiencyInternal();
 
   const conditionals = config?.conditionals ?? [];
@@ -121,6 +122,7 @@ export function useProficiency()
     save,
     reload,
     loading,
+    hasUnsavedEdits,
 
     // raw config access
     config,

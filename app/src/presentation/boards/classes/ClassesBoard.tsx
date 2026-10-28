@@ -58,7 +58,7 @@ function readTraitsExpandedFromLocalStorage(): boolean
 
 function ClassesBoard()
 {
-  const { data: classes, setData, save, reload, loading } = useClasses();
+  const { data: classes, setData, save, reload, loading, hasUnsavedEdits } = useClasses();
   const { rmmzDataPath } = useProjectPath();
 
   const [ selectedIndex, setSelectedIndex ] = useState<number>(0);
@@ -131,7 +131,9 @@ function ClassesBoard()
     setSnackbar({ open: true, message: 'Classes reloaded.', severity: MuiSnackbarSeverity.Info, variant: MuiSnackbarVariant.Filled });
   };
 
-  const canSave = !loading && !isSaving && !!rmmzDataPath;
+  // the file can be read again whenever it is idle, but only saved while it holds edits.
+  const canReload = !loading && !isSaving && !!rmmzDataPath;
+  const canSave = canReload && hasUnsavedEdits;
 
   const handleTraitsExpandedChange = useCallback((expanded: boolean) =>
   {
@@ -171,7 +173,7 @@ function ClassesBoard()
     />
   );
 
-  useBoardActions({ onSave: handleSave, canSave, isSaving, onReload: handleReload, canReload: canSave });
+  useBoardActions({ onSave: handleSave, canSave, isSaving, onReload: handleReload, canReload });
 
   if (!selectedClass)
   {

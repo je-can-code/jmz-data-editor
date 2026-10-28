@@ -40,6 +40,7 @@ const WeatherConfigBoard = () =>
     save,
     reload,
     loading,
+    hasUnsavedEdits,
   } = useWeatherConfig();
 
   const [ activeTab, setActiveTab ] = useState<WeatherConfigTab>('sky');
@@ -99,7 +100,7 @@ const WeatherConfigBoard = () =>
     await reload();
   };
 
-  const canSave = loading === false && weatherConfig !== null;
+  const canSave = loading === false && hasUnsavedEdits;
   const canReload = loading === false;
 
   useBoardActions({

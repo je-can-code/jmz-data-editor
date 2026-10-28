@@ -33,6 +33,7 @@ const NotetagLinesBoard = () =>
     save,
     reload,
     loading,
+    hasUnsavedEdits,
   } = useNotetagLinesConfig();
 
   const [ isSaving, setIsSaving ] = useState(false);
@@ -126,7 +127,7 @@ const NotetagLinesBoard = () =>
     await reload();
   };
 
-  const canSave = loading === false && notetagLinesConfig !== null;
+  const canSave = loading === false && hasUnsavedEdits;
   const canReload = loading === false;
 
   useBoardActions({

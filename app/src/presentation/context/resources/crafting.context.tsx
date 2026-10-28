@@ -24,6 +24,7 @@ export function useCrafting()
     save,
     reload,
     loading,
+    hasUnsavedEdits,
   } = useCraftingInternal();
 
   const recipes = config?.recipes ?? [];
@@ -108,6 +109,7 @@ export function useCrafting()
     save,
     reload,
     loading,
+    hasUnsavedEdits,
 
     // raw config access
     config,

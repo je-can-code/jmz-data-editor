@@ -83,7 +83,7 @@ function buildTypeOptions(names: readonly string[] | undefined, fallbackPrefix: 
 
 function ArmorsBoard()
 {
-  const { data: armors, setData, save, reload, loading } = useArmors();
+  const { data: armors, setData, save, reload, loading, hasUnsavedEdits } = useArmors();
   const { rmmzDataPath } = useProjectPath();
 
   // the vocabulary is authored on the crafting board; this only offers what has been defined.
@@ -175,7 +175,9 @@ function ArmorsBoard()
     setSnackbar({ open: true, message: 'Armors reloaded.', severity: MuiSnackbarSeverity.Info, variant: MuiSnackbarVariant.Filled });
   };
 
-  const canSave = !loading && !isSaving && !!rmmzDataPath;
+  // the file can be read again whenever it is idle, but only saved while it holds edits.
+  const canReload = !loading && !isSaving && !!rmmzDataPath;
+  const canSave = canReload && hasUnsavedEdits;
 
   // copy and paste whole armors like any other edit, saved the normal way.
   const rowClipboard = useRowClipboard({
@@ -209,7 +211,7 @@ function ArmorsBoard()
     />
   );
 
-  useBoardActions({ onSave: handleSave, canSave, isSaving, onReload: handleReload, canReload: canSave });
+  useBoardActions({ onSave: handleSave, canSave, isSaving, onReload: handleReload, canReload });
 
   if (!selectedArmor)
   {

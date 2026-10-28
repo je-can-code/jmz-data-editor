@@ -115,7 +115,9 @@ const SkillsBoard = () =>
     setData: setSkills,
     loading,
     save,
-    reload
+    reload,
+    hasUnsavedEdits,
+    flagUnsavedEdits,
   } = useSkills();
 
   const { states } = useStates();
@@ -198,7 +200,6 @@ const SkillsBoard = () =>
   const listWrapperRef = useRef<HTMLDivElement>(null);
 
   const [ isSaving, setIsSaving ] = useState<boolean>(false);
-  const [ canSave, setCanSave ] = useState<boolean>(false);
   const [ snackOpen, setSnackOpen ] = useState<boolean>(false);
   const [ snackMessage, setSnackMessage ] = useState<string>('');
   const [ snackSeverity, setSnackSeverity ] = useState<MuiSnackbarSeverity>(MuiSnackbarSeverity.Info);
@@ -377,7 +378,9 @@ const SkillsBoard = () =>
       );
 
       setSelectedSkill(clonedSkill);
-      setCanSave(true);
+
+      // light Save now; the edit itself reaches the skills list once the debounce commits it.
+      flagUnsavedEdits();
 
       if (selectedSkillIndex < 0)
       {
@@ -387,7 +390,7 @@ const SkillsBoard = () =>
       pendingSkillEditRef.current = { index: selectedSkillIndex, skill: clonedSkill };
       debouncedCommitPendingSkillEdit();
     },
-    [ selectedSkillIndex, debouncedCommitPendingSkillEdit ]
+    [ selectedSkillIndex, debouncedCommitPendingSkillEdit, flagUnsavedEdits ]
   );
 
   /**
@@ -826,7 +829,7 @@ const SkillsBoard = () =>
   };
 
   /**
-   * Reloads skills from disk and clears the dirty flag on success.
+   * Reloads skills from disk, which leaves nothing unsaved.
    *
    * @returns Promise resolved when reload completes or rejected on failure.
    */
@@ -835,7 +838,6 @@ const SkillsBoard = () =>
     try
     {
       await reload();
-      setCanSave(false);
       handleSnack('Skills data has been reloaded successfully.', MuiSnackbarSeverity.Success);
     }
     catch (error)
@@ -1905,11 +1907,7 @@ const SkillsBoard = () =>
     toRow: (skill) => skill.toRmmz(),
     fromRow: (row) => new RPG_SkillDomainModel(row),
     blankRow: BLANK_SKILL_ROW,
-    applyPaste: (update) =>
-    {
-      setSkills(update);
-      setCanSave(true);
-    },
+    applyPaste: setSkills,
     notify: (message, severity) => handleSnack(message, severity),
   });
 
@@ -1920,14 +1918,13 @@ const SkillsBoard = () =>
       try
       {
         await handleSaveButtonOnClickEvent();
-        setCanSave(false);
       }
       finally
       {
         setIsSaving(false);
       }
     },
-    canSave,
+    canSave: hasUnsavedEdits,
     isSaving,
     onReload: handleReloadButtonOnClickEvent,
     canReload: !loading,

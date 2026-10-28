@@ -2,6 +2,7 @@ import { createContext, type ReactNode, useCallback, useContext, useEffect, useM
 import ConfigFilenames from "@core/enums/ConfigFilenames.ts";
 import { executeLoad, executeSave } from "@services/DataService.ts";
 import { useProjectPath } from "@presentation/context/project-path.context.tsx";
+import { useFileBackedState } from "@presentation/hooks/useFileBackedState.ts";
 import {
   hydrateMotionConfig,
   type MotionConfigRoot,
@@ -25,6 +26,10 @@ type MotionContextValue = {
   save: (updatedConfig: MotionConfigRoot) => Promise<void>;
   reload: () => Promise<void>;
   loading: boolean;
+  /**
+   * True while the config holds edits the file does not, which is exactly when the board's Save lights.
+   */
+  hasUnsavedEdits: boolean;
 };
 
 const MotionContext = createContext<MotionContextValue | null>(null);
@@ -35,7 +40,13 @@ const MotionProvider = ({ children }: { children: ReactNode }) =>
     rmmzDataPath,
     projectReloadGeneration,
   } = useProjectPath();
-  const [ motionConfig, setMotionConfigState ] = useState<MotionConfigRoot | null>(null);
+  const {
+    value: motionConfig,
+    edit: setConfig,
+    loaded,
+    beginSave,
+    hasUnsavedEdits,
+  } = useFileBackedState<MotionConfigRoot | null>(null);
   const [ loading, setLoading ] = useState(true);
 
   const reload = useCallback(async () =>
@@ -49,7 +60,7 @@ const MotionProvider = ({ children }: { children: ReactNode }) =>
     try
     {
       const result = await executeLoad<unknown>(rmmzDataPath, ConfigFilenames.Motion);
-      setMotionConfigState(hydrateMotionConfig(result ?? null));
+      loaded(hydrateMotionConfig(result ?? null));
     }
     catch (error)
     {
@@ -59,7 +70,7 @@ const MotionProvider = ({ children }: { children: ReactNode }) =>
     {
       setLoading(false);
     }
-  }, [ rmmzDataPath ]);
+  }, [ rmmzDataPath, loaded ]);
 
   const save = useCallback(async (updatedConfig: MotionConfigRoot) =>
   {
@@ -68,33 +79,21 @@ const MotionProvider = ({ children }: { children: ReactNode }) =>
       return;
     }
 
+    // the edits made by now are the ones this save carries.
+    const saved = beginSave();
     try
     {
       // the board's grouped shape is an editing convenience; disk gets the flat layout back.
       const flattened = serializeMotionConfig(updatedConfig);
       await executeSave(rmmzDataPath, ConfigFilenames.Motion, flattened);
-      setMotionConfigState(updatedConfig);
+      saved(updatedConfig);
     }
     catch (error)
     {
       console.error("Failed to save Motion config:", error);
       throw error;
     }
-  }, [ rmmzDataPath ]);
-
-  const setConfig = useCallback(
-    (next: MotionConfigRoot | ((prev: MotionConfigRoot | null) => MotionConfigRoot)) =>
-    {
-      if (typeof next === "function")
-      {
-        setMotionConfigState(prev => (next as (p: MotionConfigRoot | null) => MotionConfigRoot)(prev));
-        return;
-      }
-
-      setMotionConfigState(next);
-    },
-    []
-  );
+  }, [ rmmzDataPath, beginSave ]);
 
   useEffect(() =>
   {
@@ -108,8 +107,9 @@ const MotionProvider = ({ children }: { children: ReactNode }) =>
       save,
       reload,
       loading,
+      hasUnsavedEdits,
     }
-  ), [ motionConfig, setConfig, save, reload, loading ]);
+  ), [ motionConfig, setConfig, save, reload, loading, hasUnsavedEdits ]);
 
   return (
     <MotionContext.Provider value={value}>

@@ -2,6 +2,7 @@ import React, { createContext, type ReactNode, useCallback, useContext, useEffec
 import ConfigFilenames from '@core/enums/ConfigFilenames.ts';
 import { executeLoad, executeSave } from '@services/DataService.ts';
 import { useProjectPath } from '@presentation/context/project-path.context.tsx';
+import { useFileBackedState } from '@presentation/hooks/useFileBackedState.ts';
 import { hydrateDifficultyConfig, type DifficultyConfigRoot } from '@core/domain/valueObjects/difficulty-config.ts';
 
 /**
@@ -23,6 +24,10 @@ type DifficultyContextValue = {
   save: (updatedConfig: DifficultyConfigRoot) => Promise<void>;
   reload: () => Promise<void>;
   loading: boolean;
+  /**
+   * True while the config holds edits the file does not, which is exactly when the board's Save lights.
+   */
+  hasUnsavedEdits: boolean;
 };
 
 const DifficultyContext = createContext<DifficultyContextValue | null>(null);
@@ -33,7 +38,13 @@ const DifficultyProvider = ({ children }: { children: ReactNode }) =>
     rmmzDataPath,
     projectReloadGeneration,
   } = useProjectPath();
-  const [ difficultyConfig, setDifficultyConfigState ] = useState<DifficultyConfigRoot | null>(null);
+  const {
+    value: difficultyConfig,
+    edit: setConfig,
+    loaded,
+    beginSave,
+    hasUnsavedEdits,
+  } = useFileBackedState<DifficultyConfigRoot | null>(null);
   const [ loading, setLoading ] = useState(true);
 
   const reload = useCallback(async () =>
@@ -47,7 +58,7 @@ const DifficultyProvider = ({ children }: { children: ReactNode }) =>
     try
     {
       const result = await executeLoad<unknown>(rmmzDataPath, ConfigFilenames.Difficulty);
-      setDifficultyConfigState(hydrateDifficultyConfig(result ?? null));
+      loaded(hydrateDifficultyConfig(result ?? null));
     }
     catch (error)
     {
@@ -57,7 +68,7 @@ const DifficultyProvider = ({ children }: { children: ReactNode }) =>
     {
       setLoading(false);
     }
-  }, [ rmmzDataPath ]);
+  }, [ rmmzDataPath, loaded ]);
 
   const save = useCallback(async (updatedConfig: DifficultyConfigRoot) =>
   {
@@ -66,31 +77,19 @@ const DifficultyProvider = ({ children }: { children: ReactNode }) =>
       return;
     }
 
+    // the edits made by now are the ones this save carries.
+    const saved = beginSave();
     try
     {
       await executeSave(rmmzDataPath, ConfigFilenames.Difficulty, updatedConfig);
-      setDifficultyConfigState(updatedConfig);
+      saved(updatedConfig);
     }
     catch (error)
     {
       console.error('Failed to save Difficulty config:', error);
       throw error;
     }
-  }, [ rmmzDataPath ]);
-
-  const setConfig = useCallback(
-    (next: DifficultyConfigRoot | ((prev: DifficultyConfigRoot | null) => DifficultyConfigRoot)) =>
-    {
-      if (typeof next === 'function')
-      {
-        setDifficultyConfigState(prev => (next as (p: DifficultyConfigRoot | null) => DifficultyConfigRoot)(prev));
-        return;
-      }
-
-      setDifficultyConfigState(next);
-    },
-    []
-  );
+  }, [ rmmzDataPath, beginSave ]);
 
   useEffect(() =>
   {
@@ -104,8 +103,9 @@ const DifficultyProvider = ({ children }: { children: ReactNode }) =>
       save,
       reload,
       loading,
+      hasUnsavedEdits,
     }
-  ), [ difficultyConfig, setConfig, save, reload, loading ]);
+  ), [ difficultyConfig, setConfig, save, reload, loading, hasUnsavedEdits ]);
 
   return (
     <DifficultyContext.Provider value={value}>

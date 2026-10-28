@@ -85,6 +85,7 @@ const ProficiencyBoard = () =>
     save,
     reload,
     loading: proficiencyLoading,
+    hasUnsavedEdits,
   } = useProficiency();
 
   const { data: actors, loading: actorsLoading } = useActors();
@@ -108,7 +109,6 @@ const ProficiencyBoard = () =>
   const [ actorIdChecked, setActorIdsChecked ] = useState<number[]>([]);
   const [ skillIdRewardEarned, setSkillIdRewardEarned ] = useState<number[]>([]);
 
-  const [ canSave, setCanSave ] = useState<boolean>(false);
   const [ tabIndex, setTabIndex ] = useState<number>(0);
   const [ snackOpen, setSnackOpen ] = useState<boolean>(false);
   const [ snackMessage, setSnackMessage ] = useState<string>('');
@@ -119,7 +119,6 @@ const ProficiencyBoard = () =>
   const applyConditionals = (updatedConditionals: Conditional[]) =>
   {
     setConditionals(updatedConditionals);
-    setCanSave(true);
   };
 
   /**
@@ -129,7 +128,6 @@ const ProficiencyBoard = () =>
   const applyKnowledgeTags = (updated: KnowledgeTag[]) =>
   {
     setKnowledgeTags(updated);
-    setCanSave(true);
   };
 
   /**
@@ -139,7 +137,6 @@ const ProficiencyBoard = () =>
   const applySkillTypeMapping = (updated: Proficiency.SkillTypeMapping) =>
   {
     setSkillTypeMapping(updated);
-    setCanSave(true);
   };
 
   /**
@@ -149,7 +146,6 @@ const ProficiencyBoard = () =>
   const applyKnowledgeExchanges = (updated: KnowledgeExchange[]) =>
   {
     setKnowledgeExchanges(updated);
-    setCanSave(true);
   };
 
   useEffect(() =>
@@ -251,7 +247,6 @@ const ProficiencyBoard = () =>
       setExpandedRequirementIdx(null);
       setActorIdsChecked([]);
       setSkillIdRewardEarned([]);
-      setCanSave(false);
       await reload();
       handleSnack('Proficiency data has been reloaded successfully.', MuiSnackbarSeverity.Success);
     }
@@ -411,8 +406,6 @@ const ProficiencyBoard = () =>
   useBoardActions({
     onSave: async () =>
     {
-      setCanSave(false);
-
       // every block of the configuration has to be named here. anything left out is not merely
       // unsaved - it is written away, because this replaces the file rather than patching it.
       await save({
@@ -423,7 +416,7 @@ const ProficiencyBoard = () =>
       } as Configuration);
       handleSnack('Proficiency data saved successfully!', MuiSnackbarSeverity.Success);
     },
-    canSave: canSave && !proficiencyLoading,
+    canSave: hasUnsavedEdits && !proficiencyLoading,
     onReload: handleReloadButtonOnClickEvent,
     canReload: !proficiencyLoading,
   });

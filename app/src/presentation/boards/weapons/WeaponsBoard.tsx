@@ -69,7 +69,7 @@ function parseIntInput(raw: string, fallback: number): number
 
 function WeaponsBoard()
 {
-  const { data: weapons, setData, save, reload, loading } = useWeapons();
+  const { data: weapons, setData, save, reload, loading, hasUnsavedEdits } = useWeapons();
   const { rmmzDataPath } = useProjectPath();
 
   // the vocabulary is authored on the crafting board; this only offers what has been defined.
@@ -173,7 +173,9 @@ function WeaponsBoard()
     setSnackbar({ open: true, message: 'Weapons reloaded.', severity: MuiSnackbarSeverity.Info, variant: MuiSnackbarVariant.Filled });
   };
 
-  const canSave = !loading && !isSaving && !!rmmzDataPath;
+  // the file can be read again whenever it is idle, but only saved while it holds edits.
+  const canReload = !loading && !isSaving && !!rmmzDataPath;
+  const canSave = canReload && hasUnsavedEdits;
 
   // copy and paste whole weapons like any other edit, saved the normal way.
   const rowClipboard = useRowClipboard({
@@ -207,7 +209,7 @@ function WeaponsBoard()
     />
   );
 
-  useBoardActions({ onSave: handleSave, canSave, isSaving, onReload: handleReload, canReload: canSave });
+  useBoardActions({ onSave: handleSave, canSave, isSaving, onReload: handleReload, canReload });
 
   if (!selectedWeapon)
   {

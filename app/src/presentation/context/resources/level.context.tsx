@@ -2,6 +2,7 @@ import React, { createContext, type ReactNode, useCallback, useContext, useEffec
 import ConfigFilenames from "@core/enums/ConfigFilenames.ts";
 import { executeLoad, executeSave } from "@services/DataService.ts";
 import { useProjectPath } from "@presentation/context/project-path.context.tsx";
+import { useFileBackedState } from "@presentation/hooks/useFileBackedState.ts";
 import { hydrateLevelConfig, type LevelConfigRoot } from "@core/domain/valueObjects/level-config.ts";
 
 /**
@@ -24,6 +25,10 @@ type LevelContextValue = {
   save: (updatedConfig: LevelConfigRoot) => Promise<void>;
   reload: () => Promise<void>;
   loading: boolean;
+  /**
+   * True while the config holds edits the file does not, which is exactly when the board's Save lights.
+   */
+  hasUnsavedEdits: boolean;
 };
 
 const LevelContext = createContext<LevelContextValue | null>(null);
@@ -34,7 +39,13 @@ const LevelProvider = ({ children }: { children: ReactNode }) =>
     rmmzDataPath,
     projectReloadGeneration,
   } = useProjectPath();
-  const [ levelConfig, setLevelConfigState ] = useState<LevelConfigRoot | null>(null);
+  const {
+    value: levelConfig,
+    edit: setConfig,
+    loaded,
+    beginSave,
+    hasUnsavedEdits,
+  } = useFileBackedState<LevelConfigRoot | null>(null);
   const [ loading, setLoading ] = useState(true);
 
   const reload = useCallback(async () =>
@@ -48,7 +59,7 @@ const LevelProvider = ({ children }: { children: ReactNode }) =>
     try
     {
       const result = await executeLoad<unknown>(rmmzDataPath, ConfigFilenames.Level);
-      setLevelConfigState(hydrateLevelConfig(result ?? null));
+      loaded(hydrateLevelConfig(result ?? null));
     }
     catch (error)
     {
@@ -58,7 +69,7 @@ const LevelProvider = ({ children }: { children: ReactNode }) =>
     {
       setLoading(false);
     }
-  }, [ rmmzDataPath ]);
+  }, [ rmmzDataPath, loaded ]);
 
   const save = useCallback(async (updatedConfig: LevelConfigRoot) =>
   {
@@ -67,31 +78,19 @@ const LevelProvider = ({ children }: { children: ReactNode }) =>
       return;
     }
 
+    // the edits made by now are the ones this save carries.
+    const saved = beginSave();
     try
     {
       await executeSave(rmmzDataPath, ConfigFilenames.Level, updatedConfig);
-      setLevelConfigState(updatedConfig);
+      saved(updatedConfig);
     }
     catch (error)
     {
       console.error("Failed to save Level config:", error);
       throw error;
     }
-  }, [ rmmzDataPath ]);
-
-  const setConfig = useCallback(
-    (next: LevelConfigRoot | ((prev: LevelConfigRoot | null) => LevelConfigRoot)) =>
-    {
-      if (typeof next === "function")
-      {
-        setLevelConfigState(prev => (next as (p: LevelConfigRoot | null) => LevelConfigRoot)(prev));
-        return;
-      }
-
-      setLevelConfigState(next);
-    },
-    []
-  );
+  }, [ rmmzDataPath, beginSave ]);
 
   useEffect(() =>
   {
@@ -105,8 +104,9 @@ const LevelProvider = ({ children }: { children: ReactNode }) =>
       save,
       reload,
       loading,
+      hasUnsavedEdits,
     }
-  ), [ levelConfig, setConfig, save, reload, loading ]);
+  ), [ levelConfig, setConfig, save, reload, loading, hasUnsavedEdits ]);
 
   return (
     <LevelContext.Provider value={value}>

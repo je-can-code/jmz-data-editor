@@ -1,5 +1,6 @@
 import React, { createContext, ReactNode, useCallback, useContext, useEffect, useMemo, useState, } from 'react';
 import { useProjectPath } from '@presentation/context/project-path.context.tsx';
+import { useFileBackedState } from '@presentation/hooks/useFileBackedState.ts';
 import { executeLoad, executeSave } from '@services/DataService.ts';
 import ConfigFilenames from '@core/enums/ConfigFilenames.ts';
 
@@ -12,6 +13,10 @@ export type CompositeConfigContextValue<T> = {
   save: (updatedConfig: T) => Promise<void>;
   reload: () => Promise<void>;
   loading: boolean;
+  /**
+   * True while the configuration holds edits the file does not, which is exactly when the board's Save lights.
+   */
+  hasUnsavedEdits: boolean;
 };
 
 /**
@@ -32,7 +37,13 @@ export function createCompositeConfigContext<T>(
       rmmzDataPath,
       projectReloadGeneration
     } = useProjectPath();
-    const [ config, setConfig ] = useState<T | null>(null);
+    const {
+      value: config,
+      edit: setConfig,
+      loaded,
+      beginSave,
+      hasUnsavedEdits,
+    } = useFileBackedState<T | null>(null);
     const [ loading, setLoading ] = useState(true);
 
     const reload = useCallback(async () =>
@@ -46,7 +57,7 @@ export function createCompositeConfigContext<T>(
       try
       {
         const result = await executeLoad<T>(rmmzDataPath, filename);
-        setConfig(result ?? null);
+        loaded(result ?? null);
       }
       catch (error)
       {
@@ -56,7 +67,7 @@ export function createCompositeConfigContext<T>(
       {
         setLoading(false);
       }
-    }, [ rmmzDataPath ]);
+    }, [ rmmzDataPath, loaded ]);
 
     const save = useCallback(async (updatedConfig: T) =>
     {
@@ -65,17 +76,19 @@ export function createCompositeConfigContext<T>(
         return;
       }
 
+      // the edits made by now are the ones this save carries.
+      const saved = beginSave();
       try
       {
         await executeSave(rmmzDataPath, filename, updatedConfig);
-        setConfig(updatedConfig);
+        saved(updatedConfig);
       }
       catch (error)
       {
         console.error(`Failed to save ${displayName}:`, error);
         throw error;
       }
-    }, [ rmmzDataPath ]);
+    }, [ rmmzDataPath, beginSave ]);
 
     useEffect(() =>
     {
@@ -89,8 +102,9 @@ export function createCompositeConfigContext<T>(
         save,
         reload,
         loading,
+        hasUnsavedEdits,
       }
-    ), [ config, save, reload, loading ]);
+    ), [ config, setConfig, save, reload, loading, hasUnsavedEdits ]);
 
     return (
       <Context.Provider value={value}>
