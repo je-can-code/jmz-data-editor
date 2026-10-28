@@ -34,7 +34,6 @@ import { MuiSnackbarSeverity, MuiSnackbarVariant } from '@core/enums/MuiSnackbar
 
 import EnemyBaseParameters from './EnemyBaseParameters.tsx';
 import EnemiesExtraDrops from './EnemiesExtraDrops.tsx';
-import SaveButton from '../../../components/core/SaveButton.tsx';
 import NumberInputWithLabel from '../../../components/core/NumberInputWithLabel.tsx';
 import { amber, blue, brown, cyan, green, indigo, orange, pink, purple, red, teal, yellow } from '@mui/material/colors';
 import TraitEditor from '../../components/traits/TraitEditor.tsx';
@@ -43,7 +42,6 @@ import ParameterGrowth from './ParameterGrowth.tsx';
 import { knownLongParams } from '../../../mappers/ParameterIdMapper.ts';
 import { GrowthParser } from '@services/parsers/GrowthParser.ts';
 import EnemySdpDrop from './EnemySdpDrop.tsx';
-import ReloadButton from '../../../components/core/ReloadButton.tsx';
 import { EnemyJabsAiTraits } from './EnemyJabsAiTraits.tsx';
 import { EnemyJabsBattlerRoles } from './EnemyJabsBattlerRoles.tsx';
 import { EnemyJabsBattlerData } from './EnemyJabsBattlerData.tsx';
@@ -51,6 +49,7 @@ import EnemyJabsTeam from './EnemyJabsTeam.tsx';
 import EditorBoardSplitLayout from '@presentation/components/board/EditorBoardSplitLayout.tsx';
 import { useElementClientRect } from '@presentation/hooks/useElementClientRect.ts';
 import { useEnemies } from '@presentation/context/resources/enemies.context.tsx';
+import { useBoardActions } from '@presentation/context/board-actions.context.tsx';
 import { RPG_EnemyDomainModel } from '@core/domain/entities/RPG_EnemyDomainModel.ts';
 import { EnemyJabsConfigs } from '@boards/enemies/EnemyJabsConfigs.tsx';
 import { EnemyPassiveAbs } from '@boards/enemies/EnemyPassiveAbs.tsx';
@@ -698,6 +697,27 @@ const EnemiesBoard = () =>
     ? listViewportSize.width
     : 310;
 
+  // hand save and reload to the top bar, where every board keeps them.
+  useBoardActions({
+    onSave: async () =>
+    {
+      setIsSaving(true);
+      try
+      {
+        await handleSaveButtonOnClickEvent();
+        setCanSave(false);
+      }
+      finally
+      {
+        setIsSaving(false);
+      }
+    },
+    canSave,
+    isSaving,
+    onReload: handleReloadButtonOnClickEvent,
+    canReload: !loading,
+  });
+
   return <>
     <Box sx={{
       flex: 1,
@@ -1022,40 +1042,6 @@ const EnemiesBoard = () =>
     </Box>
 
     {/*region not-grid-related elements */}
-    <Box sx={{
-      display: 'flex',
-      gap: 2
-    }}>
-      <SaveButton
-        extraSaveText={'Enemy Data'}
-        canSave={canSave}
-        isSaving={isSaving}
-        handleSave={async () =>
-        {
-          setIsSaving(true);
-          try
-          {
-            await handleSaveButtonOnClickEvent();
-            setCanSave(false);
-          }
-          finally
-          {
-            setIsSaving(false);
-          }
-        }}
-      />
-
-      {/* Reload Button */}
-      <ReloadButton
-        handleReload={async () =>
-        {
-          await handleReloadButtonOnClickEvent();
-        }}
-        canReload={!loading}
-        extraReloadText={'Enemy Data'}
-      />
-    </Box>
-
     <Snackbar
       open={snackOpen}
       autoHideDuration={2500}
