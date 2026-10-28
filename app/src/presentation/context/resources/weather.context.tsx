@@ -2,6 +2,7 @@ import { createContext, type ReactNode, useCallback, useContext, useEffect, useM
 import ConfigFilenames from '@core/enums/ConfigFilenames.ts';
 import { executeLoad, executeSave } from '@services/DataService.ts';
 import { useProjectPath } from '@presentation/context/project-path.context.tsx';
+import { useFileBackedState } from '@presentation/hooks/useFileBackedState.ts';
 import {
   hydrateWeatherConfig,
   serializeWeatherConfig,
@@ -25,6 +26,10 @@ type WeatherContextValue = {
   save: (updatedConfig: WeatherConfigRoot) => Promise<void>;
   reload: () => Promise<void>;
   loading: boolean;
+  /**
+   * True while the config holds edits the file does not, which is exactly when the board's Save lights.
+   */
+  hasUnsavedEdits: boolean;
 };
 
 const WeatherContext = createContext<WeatherContextValue | null>(null);
@@ -35,7 +40,13 @@ const WeatherProvider = ({ children }: { children: ReactNode; }) =>
     rmmzDataPath,
     projectReloadGeneration,
   } = useProjectPath();
-  const [ weatherConfig, setWeatherConfigState ] = useState<WeatherConfigRoot | null>(null);
+  const {
+    value: weatherConfig,
+    edit: setConfig,
+    loaded,
+    beginSave,
+    hasUnsavedEdits,
+  } = useFileBackedState<WeatherConfigRoot | null>(null);
   const [ loading, setLoading ] = useState(true);
 
   const reload = useCallback(async () =>
@@ -49,7 +60,7 @@ const WeatherProvider = ({ children }: { children: ReactNode; }) =>
     try
     {
       const result = await executeLoad<unknown>(rmmzDataPath, ConfigFilenames.Weather);
-      setWeatherConfigState(hydrateWeatherConfig(result ?? null));
+      loaded(hydrateWeatherConfig(result ?? null));
     }
     catch (error)
     {
@@ -59,7 +70,7 @@ const WeatherProvider = ({ children }: { children: ReactNode; }) =>
     {
       setLoading(false);
     }
-  }, [ rmmzDataPath ]);
+  }, [ rmmzDataPath, loaded ]);
 
   const save = useCallback(async (updatedConfig: WeatherConfigRoot) =>
   {
@@ -68,6 +79,8 @@ const WeatherProvider = ({ children }: { children: ReactNode; }) =>
       return;
     }
 
+    // the edits made by now are the ones this save carries.
+    const saved = beginSave();
     try
     {
       // the edited sections are laid back over the file as it was read, so the motions and layer
@@ -77,28 +90,14 @@ const WeatherProvider = ({ children }: { children: ReactNode; }) =>
 
       // re-hydrate from what was actually written, so the in-memory source matches disk and a
       // second save does not lay edits over a stale original.
-      setWeatherConfigState(hydrateWeatherConfig(merged));
+      saved(hydrateWeatherConfig(merged));
     }
     catch (error)
     {
       console.error('Failed to save Weather config:', error);
       throw error;
     }
-  }, [ rmmzDataPath ]);
-
-  const setConfig = useCallback(
-    (next: WeatherConfigRoot | ((prev: WeatherConfigRoot | null) => WeatherConfigRoot)) =>
-    {
-      if (typeof next === 'function')
-      {
-        setWeatherConfigState(prev => (next as (p: WeatherConfigRoot | null) => WeatherConfigRoot)(prev));
-        return;
-      }
-
-      setWeatherConfigState(next);
-    },
-    []
-  );
+  }, [ rmmzDataPath, beginSave ]);
 
   useEffect(() =>
   {
@@ -112,8 +111,9 @@ const WeatherProvider = ({ children }: { children: ReactNode; }) =>
       save,
       reload,
       loading,
+      hasUnsavedEdits,
     }
-  ), [ weatherConfig, setConfig, save, reload, loading ]);
+  ), [ weatherConfig, setConfig, save, reload, loading, hasUnsavedEdits ]);
 
   return (
     <WeatherContext.Provider value={value}>

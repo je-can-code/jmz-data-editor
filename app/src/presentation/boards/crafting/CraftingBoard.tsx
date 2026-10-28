@@ -195,7 +195,8 @@ const CraftingBoard = () =>
     setProfessions,
     save,
     reload,
-    loading
+    loading,
+    hasUnsavedEdits,
   } = useCrafting();
 
   const {
@@ -225,7 +226,6 @@ const CraftingBoard = () =>
   const [ selectedCategory, setSelectedCategory ] = useState<Category | null>(null);
   const [ selectedCategoryIndex, setSelectedCategoryIndex ] = useState<number>(0);
 
-  const [ canSave, setCanSave ] = useState<boolean>(false);
   const [ snackOpen, setSnackOpen ] = useState<boolean>(false);
   const [ snackMessage, setSnackMessage ] = useState<string>('');
   const [ snackSeverity, setSnackSeverity ] = useState<MuiSnackbarSeverity>(MuiSnackbarSeverity.Info);
@@ -401,25 +401,21 @@ const CraftingBoard = () =>
   const applyRecipes = (updatedRecipes: Recipe[]) =>
   {
     setRecipes(updatedRecipes);
-    setCanSave(true);
   };
 
   const applyCategories = (updatedCategories: Category[]) =>
   {
     setCategories(updatedCategories);
-    setCanSave(true);
   };
 
   const applyIngredientTypes = (updatedTypes: Crafting.IngredientType[]) =>
   {
     setIngredientTypes(updatedTypes);
-    setCanSave(true);
   };
 
   const applyProfessions = (updatedProfessions: Crafting.Profession[]) =>
   {
     setProfessions(updatedProfessions);
-    setCanSave(true);
   };
 
   const patchSelectedRecipe = (patch: Partial<Recipe>) =>
@@ -707,7 +703,6 @@ const CraftingBoard = () =>
   const handleReloadButtonOnClickEvent = async () =>
   {
     await reload();
-    setCanSave(false);
     setSelectedRecipe(null);
     setApplicableCategories([]);
     setCurrentIngredients([]);
@@ -773,14 +768,12 @@ const CraftingBoard = () =>
   useBoardActions({
     onSave: async () =>
     {
-      setCanSave(false);
-
       // every block of the configuration has to be named here. anything left out is not merely unsaved - it is
       // written away, because this replaces the file rather than patching it.
       await save({ recipes, categories, ingredientTypes, professions } as Configuration);
       handleSnack('Crafting data has been saved successfully.');
     },
-    canSave: canSave && !loading,
+    canSave: hasUnsavedEdits && !loading,
     onReload: handleReloadButtonOnClickEvent,
     canReload: !loading,
   });

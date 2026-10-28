@@ -2,6 +2,7 @@ import React, { createContext, type ReactNode, useCallback, useContext, useEffec
 import ConfigFilenames from "@core/enums/ConfigFilenames.ts";
 import { executeLoad, executeSave } from "@services/DataService.ts";
 import { useProjectPath } from "@presentation/context/project-path.context.tsx";
+import { useFileBackedState } from "@presentation/hooks/useFileBackedState.ts";
 import { hydrateJabsConfig, type JabsConfigRoot } from "@core/domain/valueObjects/jabs-config.ts";
 
 /**
@@ -23,6 +24,10 @@ type JabsContextValue = {
   save: (updatedConfig: JabsConfigRoot) => Promise<void>;
   reload: () => Promise<void>;
   loading: boolean;
+  /**
+   * True while the config holds edits the file does not, which is exactly when the board's Save lights.
+   */
+  hasUnsavedEdits: boolean;
 };
 
 const JabsContext = createContext<JabsContextValue | null>(null);
@@ -33,7 +38,13 @@ const JabsProvider = ({ children }: { children: ReactNode }) =>
     rmmzDataPath,
     projectReloadGeneration,
   } = useProjectPath();
-  const [ jabsConfig, setJabsConfigState ] = useState<JabsConfigRoot | null>(null);
+  const {
+    value: jabsConfig,
+    edit: setConfig,
+    loaded,
+    beginSave,
+    hasUnsavedEdits,
+  } = useFileBackedState<JabsConfigRoot | null>(null);
   const [ loading, setLoading ] = useState(true);
 
   const reload = useCallback(async () =>
@@ -49,7 +60,7 @@ const JabsProvider = ({ children }: { children: ReactNode }) =>
       // raw payload may legitimately lack a `juice` block (older config files predate the migration);
       // hydrate fills the gaps so the editor always renders against a complete shape.
       const result = await executeLoad<unknown>(rmmzDataPath, ConfigFilenames.Jabs);
-      setJabsConfigState(hydrateJabsConfig(result ?? null));
+      loaded(hydrateJabsConfig(result ?? null));
     }
     catch (error)
     {
@@ -59,7 +70,7 @@ const JabsProvider = ({ children }: { children: ReactNode }) =>
     {
       setLoading(false);
     }
-  }, [ rmmzDataPath ]);
+  }, [ rmmzDataPath, loaded ]);
 
   const save = useCallback(async (updatedConfig: JabsConfigRoot) =>
   {
@@ -68,31 +79,19 @@ const JabsProvider = ({ children }: { children: ReactNode }) =>
       return;
     }
 
+    // the edits made by now are the ones this save carries.
+    const saved = beginSave();
     try
     {
       await executeSave(rmmzDataPath, ConfigFilenames.Jabs, updatedConfig);
-      setJabsConfigState(updatedConfig);
+      saved(updatedConfig);
     }
     catch (error)
     {
       console.error("Failed to save Jabs config:", error);
       throw error;
     }
-  }, [ rmmzDataPath ]);
-
-  const setConfig = useCallback(
-    (next: JabsConfigRoot | ((prev: JabsConfigRoot | null) => JabsConfigRoot)) =>
-    {
-      if (typeof next === "function")
-      {
-        setJabsConfigState(prev => (next as (p: JabsConfigRoot | null) => JabsConfigRoot)(prev));
-        return;
-      }
-
-      setJabsConfigState(next);
-    },
-    []
-  );
+  }, [ rmmzDataPath, beginSave ]);
 
   useEffect(() =>
   {
@@ -106,8 +105,9 @@ const JabsProvider = ({ children }: { children: ReactNode }) =>
       save,
       reload,
       loading,
+      hasUnsavedEdits,
     }
-  ), [ jabsConfig, setConfig, save, reload, loading ]);
+  ), [ jabsConfig, setConfig, save, reload, loading, hasUnsavedEdits ]);
 
   return (
     <JabsContext.Provider value={value}>

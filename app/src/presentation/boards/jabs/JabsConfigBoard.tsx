@@ -30,6 +30,7 @@ const JabsConfigBoard = () =>
     save,
     reload,
     loading,
+    hasUnsavedEdits,
   } = useJabs();
 
   const [ activeTab, setActiveTab ] = useState<JabsConfigTab>("teams");
@@ -63,7 +64,7 @@ const JabsConfigBoard = () =>
     await reload();
   };
 
-  const canSave = loading === false && jabsConfig !== null;
+  const canSave = loading === false && hasUnsavedEdits;
   const canReload = loading === false;
 
   useBoardActions({

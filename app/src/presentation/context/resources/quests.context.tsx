@@ -20,6 +20,7 @@ export function useQuests()
     save,
     reload,
     loading,
+    hasUnsavedEdits,
   } = useQuestsInternal();
 
   const quests = config?.quests ?? [];
@@ -80,6 +81,7 @@ export function useQuests()
     save,
     reload,
     loading,
+    hasUnsavedEdits,
 
     // expose raw config if a caller truly needs it
     config,

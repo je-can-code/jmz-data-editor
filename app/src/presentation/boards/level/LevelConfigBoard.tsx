@@ -19,6 +19,7 @@ const LevelConfigBoard = () =>
     save,
     reload,
     loading,
+    hasUnsavedEdits,
   } = useLevelConfig();
 
   const [ isSaving, setIsSaving ] = useState(false);
@@ -53,7 +54,7 @@ const LevelConfigBoard = () =>
     await reload();
   };
 
-  const canSave = loading === false && levelConfig !== null;
+  const canSave = loading === false && hasUnsavedEdits;
   const canReload = loading === false;
 
   useBoardActions({

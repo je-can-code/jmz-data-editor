@@ -1,5 +1,6 @@
 import React, { createContext, ReactNode, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { useProjectPath } from "@presentation/context/project-path.context.tsx";
+import { useFileBackedState } from "@presentation/hooks/useFileBackedState.ts";
 import { executeLoad, executeSave } from "@services/DataService.ts";
 import ConfigFilenames from "@core/enums/ConfigFilenames.ts";
 import {
@@ -13,6 +14,10 @@ export type SdpConfigContextValue = {
   save: (updatedConfig: Sdp.Configuration) => Promise<void>;
   reload: () => Promise<void>;
   loading: boolean;
+  /**
+   * True while the configuration holds edits the file does not, which is exactly when the board's Save lights.
+   */
+  hasUnsavedEdits: boolean;
 };
 
 const SdpConfigContext = createContext<SdpConfigContextValue | null>(null);
@@ -23,7 +28,13 @@ function SdpsProvider({ children }: { children: ReactNode })
     rmmzDataPath,
     projectReloadGeneration,
   } = useProjectPath();
-  const [ config, setConfig ] = useState<Sdp.Configuration | null>(null);
+  const {
+    value: config,
+    edit: setConfig,
+    loaded,
+    beginSave,
+    hasUnsavedEdits,
+  } = useFileBackedState<Sdp.Configuration | null>(null);
   const [ loading, setLoading ] = useState(true);
 
   const reload = useCallback(async () =>
@@ -40,7 +51,7 @@ function SdpsProvider({ children }: { children: ReactNode })
         rmmzDataPath,
         ConfigFilenames.Sdps
       );
-      setConfig(normalizeSdpConfigurationFromDisk(result));
+      loaded(normalizeSdpConfigurationFromDisk(result));
     }
     catch (error)
     {
@@ -50,7 +61,7 @@ function SdpsProvider({ children }: { children: ReactNode })
     {
       setLoading(false);
     }
-  }, [ rmmzDataPath ]);
+  }, [ rmmzDataPath, loaded ]);
 
   const save = useCallback(async (updatedConfig: Sdp.Configuration) =>
   {
@@ -59,18 +70,20 @@ function SdpsProvider({ children }: { children: ReactNode })
       return;
     }
 
+    // the edits made by now are the ones this save carries.
+    const saved = beginSave();
     try
     {
       const payload = serializeSdpConfigurationForDisk(updatedConfig);
       await executeSave(rmmzDataPath, ConfigFilenames.Sdps, payload);
-      setConfig(normalizeSdpConfigurationFromDisk(payload));
+      saved(normalizeSdpConfigurationFromDisk(payload));
     }
     catch (error)
     {
       console.error("Failed to save Sdps:", error);
       throw error;
     }
-  }, [ rmmzDataPath ]);
+  }, [ rmmzDataPath, beginSave ]);
 
   useEffect(() =>
   {
@@ -84,8 +97,9 @@ function SdpsProvider({ children }: { children: ReactNode })
       save,
       reload,
       loading,
+      hasUnsavedEdits,
     }
-  ), [ config, save, reload, loading ]);
+  ), [ config, setConfig, save, reload, loading, hasUnsavedEdits ]);
 
   return (
     <SdpConfigContext.Provider value={value}>
@@ -117,6 +131,7 @@ export function useSdps()
     save,
     reload,
     loading,
+    hasUnsavedEdits,
   } = useSdpsInternal();
 
   const sdps = config?.sdps ?? [];
@@ -191,6 +206,7 @@ export function useSdps()
     savePanels,
     reload,
     loading,
+    hasUnsavedEdits,
     config,
     setConfig,
   } as const;

@@ -213,6 +213,7 @@ const SdpBoard = () =>
     save,
     reload,
     config,
+    hasUnsavedEdits,
   } = useSdps();
 
   const { skills, byId: skillsById } = useSkills();
@@ -240,7 +241,6 @@ const SdpBoard = () =>
 
   const [ searchTerm, setSearchTerm ] = useState<string>('');
 
-  const [ canSave, setCanSave ] = useState<boolean>(false);
   const [ manualAutoNameOff, setManualAutoNameOff ] = useState<Set<number>>(new Set());
 
   const [ rankupCostProjectionDialog, setRankupCostProjectionDialog ] = useState<boolean>(false);
@@ -476,25 +476,22 @@ const SdpBoard = () =>
 
   //region updates
   /**
-   * Centralized helper to apply updated panels to the context and enable saving.
+   * Centralized helper to apply updated panels to the context, which lights Save.
    * @param {Panel[]} updatedPanels The updated list of SDP panels.
    */
   const applyPanels = (updatedPanels: Panel[]) =>
   {
     setSdps(updatedPanels);
-    setCanSave(true);
   };
 
   const applySubgroups = (updatedSubgroups: Sdp.PanelSubgroup[]) =>
   {
     setSubgroups(updatedSubgroups);
-    setCanSave(true);
   };
 
   const applyFamilies = (updatedFamilies: Sdp.PanelFamily[]) =>
   {
     setFamilies(updatedFamilies);
-    setCanSave(true);
   };
 
   const handlePanelKeyChange = (input: string) =>
@@ -1214,7 +1211,6 @@ const SdpBoard = () =>
         return;
       }
 
-      setCanSave(false);
       const resolvedSdps = sdps.map(panel => ({
         ...panel,
         panelRewards: panel.panelRewards.map(reward =>
@@ -1231,7 +1227,7 @@ const SdpBoard = () =>
       });
       handleSnack('SDP data has been saved successfully.', MuiSnackbarSeverity.Success);
     },
-    canSave: canSave && !loading,
+    canSave: hasUnsavedEdits && !loading,
     onReload: handleReloadButtonOnClickEvent,
     canReload: !loading,
   });

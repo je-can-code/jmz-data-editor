@@ -71,7 +71,8 @@ const EnemiesBoard = () =>
     setData: setEnemies,
     loading,
     save,
-    reload
+    reload,
+    hasUnsavedEdits,
   } = useEnemies();
   const [ selectedEnemy, setSelectedEnemy ] = useState<RPG_EnemyDomainModel | null>(null);
   const [ selectedEnemyIndex, setSelectedEnemyIndex ] = useState<number>(0);
@@ -87,7 +88,6 @@ const EnemiesBoard = () =>
   const enemyPlacements = useEnemyPlacements(selectedEnemy?.id ?? null);
 
   const [ isSaving, setIsSaving ] = useState<boolean>(false);
-  const [ canSave, setCanSave ] = useState<boolean>(false);
   const [ snackOpen, setSnackOpen ] = useState<boolean>(false);
   const [ snackMessage, setSnackMessage ] = useState<string>('');
   const [ snackSeverity, setSnackSeverity ] = useState<MuiSnackbarSeverity>(MuiSnackbarSeverity.Info);
@@ -449,7 +449,6 @@ const EnemiesBoard = () =>
       );
 
       setSelectedEnemy(clonedEnemy);
-      setCanSave(true);
 
       setEnemies((prevEnemies) =>
       {
@@ -496,11 +495,7 @@ const EnemiesBoard = () =>
     toRow: (enemy) => enemy.toRmmz(),
     fromRow: (row) => new RPG_EnemyDomainModel(row),
     blankRow: BLANK_ENEMY_ROW,
-    applyPaste: (update) =>
-    {
-      setEnemies(update);
-      setCanSave(true);
-    },
+    applyPaste: setEnemies,
     notify: (message, severity) => handleSnack(message, severity),
   });
   //endregion updates
@@ -705,14 +700,13 @@ const EnemiesBoard = () =>
       try
       {
         await handleSaveButtonOnClickEvent();
-        setCanSave(false);
       }
       finally
       {
         setIsSaving(false);
       }
     },
-    canSave,
+    canSave: hasUnsavedEdits,
     isSaving,
     onReload: handleReloadButtonOnClickEvent,
     canReload: !loading,

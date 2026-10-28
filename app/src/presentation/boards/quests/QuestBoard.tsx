@@ -90,6 +90,7 @@ const QuestBoard = () =>
     save,
     reload,
     loading,
+    hasUnsavedEdits,
   } = useQuests();
 
   const listRef = useRef<FixedSizeList>(null);
@@ -521,7 +522,7 @@ const QuestBoard = () =>
     {
       await save({ quests, tags, categories } as Configuration);
     },
-    canSave: !loading,
+    canSave: hasUnsavedEdits && !loading,
     onReload: handleReloadButtonOnClickEvent,
     canReload: !loading,
   });

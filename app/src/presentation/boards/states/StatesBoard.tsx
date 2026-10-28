@@ -382,6 +382,7 @@ const StatesBoard = () =>
     save,
     reload,
     loading,
+    hasUnsavedEdits,
   } = useStates();
 
   const { skills } = useSkills();
@@ -395,7 +396,6 @@ const StatesBoard = () =>
   const listWrapperRef = useRef<HTMLDivElement>(null);
 
   const [ isSaving, setIsSaving ] = useState<boolean>(false);
-  const [ canSave, setCanSave ] = useState<boolean>(false);
   const [ snackOpen, setSnackOpen ] = useState<boolean>(false);
   const [ snackMessage, setSnackMessage ] = useState<string>('');
   const [ snackSeverity, setSnackSeverity ] = useState<MuiSnackbarSeverity>(MuiSnackbarSeverity.Info);
@@ -727,7 +727,7 @@ const StatesBoard = () =>
   ]);
 
   /**
-   * Clones the given state into selection and list slot, and enables save.
+   * Clones the given state into selection and list slot, which lights Save.
    *
    * @param updatedState Domain model after in-place edits (typically current selection).
    * @returns {void}
@@ -741,7 +741,6 @@ const StatesBoard = () =>
       );
 
       setSelectedState(clonedState);
-      setCanSave(true);
 
       setStates((prevStates) =>
       {
@@ -2864,7 +2863,7 @@ const StatesBoard = () =>
   };
 
   /**
-   * Reloads states from disk and clears the dirty flag on success.
+   * Reloads states from disk, which leaves nothing unsaved.
    *
    * @returns Promise resolved when reload completes or rejected on failure.
    */
@@ -2873,7 +2872,6 @@ const StatesBoard = () =>
     try
     {
       await reload();
-      setCanSave(false);
       handleSnack('States data has been reloaded successfully.', MuiSnackbarSeverity.Success);
     }
     catch (error)
@@ -2982,11 +2980,7 @@ const StatesBoard = () =>
     toRow: (state) => state.toRmmz(),
     fromRow: (row) => new RPG_StateDomainModel(row),
     blankRow: BLANK_STATE_ROW,
-    applyPaste: (update) =>
-    {
-      setStates(update);
-      setCanSave(true);
-    },
+    applyPaste: setStates,
     notify: (message, severity) => handleSnack(message, severity),
   });
 
@@ -2997,14 +2991,13 @@ const StatesBoard = () =>
       try
       {
         await handleSaveButtonOnClickEvent();
-        setCanSave(false);
       }
       finally
       {
         setIsSaving(false);
       }
     },
-    canSave,
+    canSave: hasUnsavedEdits,
     isSaving,
     onReload: handleReloadButtonOnClickEvent,
     canReload: !loading,
