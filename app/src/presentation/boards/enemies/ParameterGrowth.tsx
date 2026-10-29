@@ -28,6 +28,9 @@ function ParameterGrowth({
   const [ selectedSource, setSelectedSource ] = useState<RPG_EnemyDomainModel | null>(null);
   const [ workingNote, setWorkingNote ] = useState('');
 
+  // count the copies brought into the dialog, so each one starts every growth field over.
+  const [ copyRevision, setCopyRevision ] = useState(0);
+
   const handleOpenDialog = () =>
   {
     setWorkingNote(selectedEnemy.note);
@@ -50,6 +53,9 @@ function ParameterGrowth({
       n = GrowthParser.write(n, p, GrowthParser.read(sourceEnemy.note, p));
     }
     setWorkingNote(n);
+
+    // a copy replaces every growth at once, so nothing typed before it stays on screen.
+    setCopyRevision((current) => current + 1);
     setCopyDialogOpen(false);
   };
 
@@ -80,6 +86,8 @@ function ParameterGrowth({
           <NaturalGrowthQuadrantsEditor
             note={workingNote}
             onNoteChange={setWorkingNote}
+            subjectId={selectedEnemy.id}
+            revision={copyRevision}
             visibleQuadrants={[ NaturalGrowthQuadrant.BuffPlus ]}
             constrainFormColumnWidth={false}
             suggestedLevel={suggestedLevel}

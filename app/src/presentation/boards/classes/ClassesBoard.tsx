@@ -316,6 +316,8 @@ function ClassesBoard()
           <NaturalGrowthQuadrantsEditor
             note={selectedClass.note}
             onNoteChange={(note: string) => patch({ note })}
+            subjectId={selectedClass.id}
+            revision={rowClipboard.pasteRevision}
           />
         </Box>
       )}

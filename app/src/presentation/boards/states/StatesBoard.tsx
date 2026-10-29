@@ -4047,6 +4047,8 @@ const StatesBoard = () =>
                     <NaturalGrowthQuadrantsEditor
                       note={selectedState.note}
                       onNoteChange={patchStateNaturalGrowthNote}
+                      subjectId={selectedState.id}
+                      revision={rowClipboard.pasteRevision}
                     />
                   </Stack>
                 </Box>
