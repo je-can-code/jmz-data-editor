@@ -352,6 +352,19 @@ describe('NaturalGrowthQuadrantsParser.withQuadrant', () =>
     expect(map.get(28)![ NaturalGrowthQuadrant.GrowthRate ])
       .toBe('b');
   });
+
+  it('keeps the spaces inside a formula and drops the whitespace around it', () =>
+  {
+    // Arrange- an attack growth typed with spaces inside it and around it.
+    const typed = '  (a.level * 1.75) ';
+
+    // Act
+    const note = NaturalGrowthQuadrantsParser.withQuadrant('<level:15>', 2, NaturalGrowthQuadrant.BuffPlus, typed);
+
+    // Assert
+    expect(note)
+      .toBe('<level:15>\n<atkBuffPlus:[(a.level * 1.75)]>');
+  });
 });
 
 describe('NaturalGrowthQuadrantsParser.isValidFormula', () =>
@@ -376,6 +389,46 @@ describe('NaturalGrowthQuadrantsParser.isValidFormula', () =>
       .toBe(false);
     expect(NaturalGrowthQuadrantsParser.isValidFormula('a&b'))
       .toBe(false);
+  });
+});
+
+/**
+ * A growth field shows a formula exactly as it is typed, and tells its own formula coming back from the note apart
+ * from one that arrived from elsewhere by comparing against this. Serialize keeps the very same thing. So the answer
+ * has to be what a note really keeps: the formula without the whitespace around it, every space inside it intact,
+ * or nothing for a formula the tag cannot hold. Get it wrong and a field either wipes what the author is typing or
+ * holds on to a formula a copy replaced.
+ */
+describe('NaturalGrowthQuadrantsParser.storedFormula', () =>
+{
+  it('keeps a formula without the whitespace around it, and every space inside it', () =>
+  {
+    // Arrange- a formula typed with spaces around it and inside it.
+    const typed = '  (a.level * 1.75) ';
+
+    // Act
+    const stored = NaturalGrowthQuadrantsParser.storedFormula(typed);
+
+    // Assert
+    expect(stored)
+      .toBe('(a.level * 1.75)');
+  });
+
+  it('keeps nothing of a formula using a character a growth tag cannot hold', () =>
+  {
+    // Arrange- a call with a comma in it, beside the same call without one.
+    const withComma = 'Math.max(a.level, 1)';
+    const withoutComma = 'Math.max(a.level)';
+
+    // Act
+    const storedWithComma = NaturalGrowthQuadrantsParser.storedFormula(withComma);
+    const storedWithoutComma = NaturalGrowthQuadrantsParser.storedFormula(withoutComma);
+
+    // Assert- the comma alone keeps it out.
+    expect(storedWithComma)
+      .toBe('');
+    expect(storedWithoutComma)
+      .toBe('Math.max(a.level)');
   });
 });
 

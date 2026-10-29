@@ -132,6 +132,27 @@ class NaturalGrowthQuadrantsParser
   }
 
   /**
+   * The formula a note keeps for one typed into a growth field: the same formula without the whitespace around
+   * it, or nothing at all when it is blank or uses a character a growth tag cannot hold. A field showing what was
+   * typed compares against this to tell its own formula, coming back tidied, from one that arrived from elsewhere.
+   * @param {string} typed The formula exactly as it was typed.
+   * @returns {string} The formula the note keeps, or an empty string when it keeps none.
+   */
+  static storedFormula(typed: string): string
+  {
+    // a growth tag holds its formula without the whitespace around it.
+    const formula = typed.trim();
+
+    // a formula using a character the tag cannot hold is not kept at all.
+    if (NaturalGrowthQuadrantsParser.isValidFormula(formula) === false)
+    {
+      return '';
+    }
+
+    return formula;
+  }
+
+  /**
    * Removes all managed natural-growth lines, then appends tags from {@code map} in stable order.
    */
   static serialize(
@@ -152,15 +173,18 @@ class NaturalGrowthQuadrantsParser
         {
           continue;
         }
-        const formula = quad[ q ].trim();
-        if (formula === '')
+        const typed = quad[ q ].trim();
+        if (typed === '')
         {
           continue;
         }
-        if (NaturalGrowthQuadrantsParser.isValidFormula(formula) === false)
+
+        // keep exactly what a growth field expects the note to keep, so the two can never disagree.
+        const formula = NaturalGrowthQuadrantsParser.storedFormula(typed);
+        if (formula === '')
         {
           console.warn(
-            `[NaturalGrowthQuadrantsParser] Skipping invalid formula for ${tag}: ${formula}`
+            `[NaturalGrowthQuadrantsParser] Skipping invalid formula for ${tag}: ${typed}`
           );
           continue;
         }

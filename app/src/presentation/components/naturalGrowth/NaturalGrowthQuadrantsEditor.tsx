@@ -69,6 +69,16 @@ type NaturalGrowthQuadrantsEditorProps = {
   note: string;
   onNoteChange: (note: string) => void;
   /**
+   * The id of the enemy, class or state the note belongs to. Each field holds what was typed into it, so selecting
+   * another one starts every field over from the newly selected note rather than carrying a formula across.
+   */
+  subjectId: number;
+  /**
+   * A count the board bumps whenever it replaces the note wholesale under the same id, such as by pasting a row over
+   * it or copying in another's growths. Each bump starts every field over too.
+   */
+  revision: number;
+  /**
    * Which quadrants to show as tabs, in tab order. Omit for all four ({@link NATURAL_GROWTH_QUADRANT_ORDER}).
    */
   visibleQuadrants?: readonly NaturalGrowthQuadrant[];
@@ -94,6 +104,8 @@ function paramsForLongIds(ids: number[]): KnownParameter[]
 function NaturalGrowthQuadrantsEditor({
   note,
   onNoteChange,
+  subjectId,
+  revision,
   visibleQuadrants,
   constrainFormColumnWidth,
   suggestedLevel,
@@ -164,9 +176,10 @@ function NaturalGrowthQuadrantsEditor({
     const formula = quad === undefined
       ? ''
       : quad[ quadrant ];
+    // a field starts over for another enemy, class or state, for a paste over this one, and for each quadrant.
     return (
       <NaturalFormulaWithGraphRow
-        key={`${param.longParamId}-${quadrant}`}
+        key={`${subjectId}:${revision}:${param.longParamId}-${quadrant}`}
         paramName={param.name}
         quadrantLabel={quadrantLabel}
         formula={formula}
