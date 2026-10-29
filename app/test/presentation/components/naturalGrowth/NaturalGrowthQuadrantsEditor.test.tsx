@@ -18,7 +18,8 @@ import { NaturalGrowthQuadrantsEditor } from '@presentation/components/naturalGr
  * changes from anywhere but its field, such as the graph, replaces what the field shows, and nothing typed is ever
  * left showing once the board selects another enemy, class or state, or pastes or copies a set of growths over it.
  */
-describe('NaturalGrowthQuadrantsEditor', () =>
+// each test types a key at a time and the editor redraws with each, which takes CI's slower runner past five seconds.
+describe('NaturalGrowthQuadrantsEditor', { timeout: 20_000 }, () =>
 {
   /**
    * Renders the editor on a stand-in board that keeps the selected enemy and its note in state, and takes every
