@@ -40,6 +40,7 @@ const API_PATHNAMES_BY_BASENAME: ReadonlyMap<string, string> = new Map([
   [ 'config.motion.json', '/api/config/motion' ],
   [ 'config.weather.json', '/api/config/weather' ],
   [ 'config.notetag-lines.json', '/api/config/notetag-lines' ],
+  [ 'config.omni.json', '/api/config/omni' ],
 ]);
 
 /**

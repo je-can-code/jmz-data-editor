@@ -10,6 +10,7 @@ enum ConfigFilenames
   Motion = 'config.motion.json',
   Weather = 'config.weather.json',
   NotetagLines = 'config.notetag-lines.json',
+  Omni = 'config.omni.json',
   System = 'System.json',
 }
 

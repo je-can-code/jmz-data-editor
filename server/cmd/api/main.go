@@ -191,6 +191,8 @@ func routes(changes *watch.Hub, policy middleware.Policy) http.Handler {
 
 	mux.HandleFunc("GET /api/config/notetag-lines", api.Load[plugins.NotetagLinesConfiguration]("data/config.notetag-lines.json"))
 	mux.HandleFunc("POST /api/config/notetag-lines", api.Save[plugins.NotetagLinesConfiguration]("data/config.notetag-lines.json"))
+	mux.HandleFunc("GET /api/config/omni", api.Load[plugins.OmniConfiguration]("data/config.omni.json"))
+	mux.HandleFunc("POST /api/config/omni", api.Save[plugins.OmniConfiguration]("data/config.omni.json"))
 
 	// the map editor draws lights with these defaults; no board edits them, so there is nothing to save.
 	mux.HandleFunc("GET /api/config/lighting", api.Load[plugins.LightingConfiguration]("data/config.lighting.json"))

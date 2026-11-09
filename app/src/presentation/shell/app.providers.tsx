@@ -21,6 +21,7 @@ import { DifficultyProvider } from '@presentation/context/resources/difficulty.c
 import { MotionProvider } from '@presentation/context/resources/motion.context.tsx';
 import { WeatherProvider } from '@presentation/context/resources/weather.context.tsx';
 import { NotetagLinesProvider } from '@presentation/context/resources/notetag-lines.context.tsx';
+import { OmniProvider } from '@presentation/context/resources/omni.context.tsx';
 
 const AppProviders = ({ children }: { children: React.ReactNode }) =>
 {
@@ -40,6 +41,7 @@ const AppProviders = ({ children }: { children: React.ReactNode }) =>
         MotionProvider,
         WeatherProvider,
         NotetagLinesProvider,
+        OmniProvider,
         ItemsProvider,
         WeaponsProvider,
         ArmorsProvider,

@@ -11,7 +11,8 @@ import DifficultyBoard from '@boards/difficulty/DifficultyBoard.tsx';
 import MotionConfigBoard from '@boards/motion/MotionConfigBoard.tsx';
 import WeatherConfigBoard from '@boards/weather/WeatherConfigBoard.tsx';
 import NotetagLinesBoard from '@boards/notetagLines/NotetagLinesBoard.tsx';
-import { AccountTree, Android, Build, Construction, Diversity3, Hub, Inventory2, LocalHospital, Rule, School, Groups, Shield, ShortText, Thunderstorm, TrendingUp, Waves, Whatshot, } from '@mui/icons-material';
+import OmniBoard from '@boards/omni/OmniBoard.tsx';
+import { AccountTree, Android, Build, Construction, Diversity3, Hub, Inventory2, LocalHospital, MenuBook, Rule, School, Groups, Shield, ShortText, Thunderstorm, TrendingUp, Waves, Whatshot, } from '@mui/icons-material';
 import IndexBoard from '@boards/_index/IndexBoard.tsx';
 import SkillsBoard from '@boards/skills/SkillsBoard.tsx';
 import StatesBoard from '@boards/states/StatesBoard.tsx';
@@ -184,6 +185,17 @@ const notetagLinesBoard: BoardDefinition = {
   group: 'Systems',
 };
 
+const omniConfigBoard: BoardDefinition = {
+  id: 'omni-config',
+  title: 'Omnipedia',
+  path: '/omnipedia',
+  component: OmniBoard,
+  guard: () => true,
+  icon: <MenuBook fontSize={'small'}/>,
+  featureFlag: 'omni',
+  group: 'Systems',
+};
+
 const weaponsBoard: BoardDefinition = {
   id: 'weapons',
   title: 'Weapons',
@@ -236,6 +248,7 @@ const APP_ROUTES: BoardDefinition[] = [
   motionConfigBoard,
   weatherConfigBoard,
   notetagLinesBoard,
+  omniConfigBoard,
 ];
 
 export { APP_ROUTES };
