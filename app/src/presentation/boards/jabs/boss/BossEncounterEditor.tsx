@@ -1,17 +1,17 @@
-import { useEffect, useState } from 'react';
-import { Alert, Button, Grid, IconButton, MenuItem, Stack, TextField, Tooltip, Typography } from '@mui/material';
+import { Button, Grid, IconButton, MenuItem, Stack, TextField, Tooltip, Typography } from '@mui/material';
 import { Add, Delete } from '@mui/icons-material';
 import { BoardSectionCard } from '@presentation/components/board/BoardSectionCard.tsx';
-import { useProjectPath } from '@presentation/context/project-path.context.tsx';
 import { useEnemies } from '@presentation/context/resources/enemies.context.tsx';
-import { loadMapJson } from '@services/DataService.ts';
+import BossReactionCard from './BossReactionCard.tsx';
 import BossRoutineCard from './BossRoutineCard.tsx';
 import {
   AI_CONTROL_MODES,
   type BossEncounter,
   type BossParticipant,
+  type BossReaction,
   type BossRoutine,
   createBossParticipant,
+  createBossReaction,
   createBossRoutine,
   withEnemySelection,
 } from '@core/domain/valueObjects/boss-config.ts';
@@ -24,14 +24,6 @@ const AI_CONTROL_LABELS: Record<string, string> = {
   scripted: 'These behaviors drive the fight completely',
 };
 
-/**
- * One row from the chosen map's event list, used to pick which event hosts a participant.
- */
-type MapEventOption = {
-  id: number;
-  name: string;
-};
-
 type BossEncounterEditorProps = {
   encounter: BossEncounter;
   onChange: (updated: BossEncounter) => void;
@@ -42,60 +34,7 @@ type BossEncounterEditorProps = {
  */
 const BossEncounterEditor = ({ encounter, onChange }: BossEncounterEditorProps) =>
 {
-  const { rmmzDataPath } = useProjectPath();
   const { data: enemies, byId: enemiesById } = useEnemies();
-  const [ mapEvents, setMapEvents ] = useState<MapEventOption[]>([]);
-  const [ mapError, setMapError ] = useState<string>('');
-
-  // whenever the chosen map changes, pull its event list so participants can be picked by name
-  // instead of by an id an author would otherwise have to go look up in the RMMZ editor.
-  useEffect(() =>
-  {
-    let cancelled = false;
-
-    const loadEvents = async () =>
-    {
-      setMapError('');
-      setMapEvents([]);
-
-      if (!rmmzDataPath || encounter.map <= 0)
-      {
-        return;
-      }
-
-      try
-      {
-        const map = await loadMapJson(rmmzDataPath, encounter.map);
-        if (cancelled)
-        {
-          return;
-        }
-
-        // RMMZ leaves holes in the event list where events were deleted, and index zero is never a
-        // real event, so both get dropped before any of this reaches a dropdown.
-        const options = (map.events ?? [])
-          .filter((event): event is NonNullable<typeof event> => event !== null && event !== undefined)
-          .map(event => ({ id: event.id ?? 0, name: event.name ?? '' }))
-          .filter(option => option.id > 0);
-
-        setMapEvents(options);
-      }
-      catch
-      {
-        if (cancelled === false)
-        {
-          setMapError(`Could not read map ${encounter.map}.`);
-        }
-      }
-    };
-
-    loadEvents();
-
-    return () =>
-    {
-      cancelled = true;
-    };
-  }, [ rmmzDataPath, encounter.map ]);
 
   const patchParticipant = (index: number, updated: BossParticipant) =>
   {
@@ -123,6 +62,15 @@ const BossEncounterEditor = ({ encounter, onChange }: BossEncounterEditorProps) 
     onChange({ ...encounter, routines });
   };
 
+  const patchReaction = (index: number, updated: BossReaction) =>
+  {
+    const reactions = encounter.reactions.map((reaction, at) => (at === index
+      ? updated
+      : reaction));
+
+    onChange({ ...encounter, reactions });
+  };
+
   const selectableEnemies = enemies.filter(enemy => enemy.name.trim() !== '');
 
   return (
@@ -147,7 +95,7 @@ const BossEncounterEditor = ({ encounter, onChange }: BossEncounterEditorProps) 
                 size={'small'}
                 fullWidth
                 value={encounter.map}
-                helperText={'The map this fight happens on.'}
+                helperText={'The map holding this fight\'s arena.'}
                 onChange={event => onChange({ ...encounter, map: Number(event.target.value) })}
                 slotProps={{ htmlInput: { min: 0 } }}
               />
@@ -169,19 +117,27 @@ const BossEncounterEditor = ({ encounter, onChange }: BossEncounterEditorProps) 
                 ))}
               </TextField>
             </Grid>
+            <Grid size={5}>
+              <TextField
+                label={'Defeat switch'}
+                type={'number'}
+                size={'small'}
+                fullWidth
+                value={encounter.defeatSwitch}
+                helperText={'Turned on once every body falls in this arena. Leave at 0 for none.'}
+                onChange={event => onChange({ ...encounter, defeatSwitch: Number(event.target.value) })}
+                slotProps={{ htmlInput: { min: 0 } }}
+              />
+            </Grid>
           </Grid>
 
-          {mapError !== '' && (
-            <Alert severity={'warning'}>{mapError}</Alert>
-          )}
-
           <Typography variant={'subtitle2'} color={'text.secondary'}>
-            Bodies in this fight
+            Bodies in this fight. Each one appears on its tile when the fight starts.
           </Typography>
 
           {encounter.participants.map((participant, index) => (
             <Grid container spacing={2} key={index} alignItems={'flex-start'}>
-              <Grid size={3}>
+              <Grid size={2}>
                 <TextField
                   label={'Name'}
                   size={'small'}
@@ -190,31 +146,7 @@ const BossEncounterEditor = ({ encounter, onChange }: BossEncounterEditorProps) 
                   onChange={event => patchParticipant(index, { ...participant, key: event.target.value })}
                 />
               </Grid>
-              <Grid size={4}>
-                <TextField
-                  select
-                  label={'Event'}
-                  size={'small'}
-                  fullWidth
-                  value={mapEvents.length === 0 || participant.eventId === 0
-                    ? ''
-                    : participant.eventId}
-                  helperText={mapEvents.length === 0
-                    ? 'Choose a map first.'
-                    : 'The event that becomes this body.'}
-                  onChange={event => patchParticipant(index, {
-                    ...participant,
-                    eventId: Number(event.target.value),
-                  })}
-                >
-                  {mapEvents.map(option => (
-                    <MenuItem key={option.id} value={option.id}>
-                      {`${option.name} (${option.id})`}
-                    </MenuItem>
-                  ))}
-                </TextField>
-              </Grid>
-              <Grid size={4}>
+              <Grid size={3}>
                 <TextField
                   select
                   label={'Enemy'}
@@ -232,6 +164,40 @@ const BossEncounterEditor = ({ encounter, onChange }: BossEncounterEditorProps) 
                     </MenuItem>
                   ))}
                 </TextField>
+              </Grid>
+              <Grid size={2}>
+                <TextField
+                  label={'X'}
+                  type={'number'}
+                  size={'small'}
+                  fullWidth
+                  value={participant.x}
+                  onChange={event => patchParticipant(index, { ...participant, x: Number(event.target.value) })}
+                  slotProps={{ htmlInput: { min: 0 } }}
+                />
+              </Grid>
+              <Grid size={2}>
+                <TextField
+                  label={'Y'}
+                  type={'number'}
+                  size={'small'}
+                  fullWidth
+                  value={participant.y}
+                  onChange={event => patchParticipant(index, { ...participant, y: Number(event.target.value) })}
+                  slotProps={{ htmlInput: { min: 0 } }}
+                />
+              </Grid>
+              <Grid size={2}>
+                <TextField
+                  label={'Template'}
+                  type={'number'}
+                  size={'small'}
+                  fullWidth
+                  value={participant.template}
+                  helperText={'A dressed-up copy on the enemy map. 0 for the usual one.'}
+                  onChange={event => patchParticipant(index, { ...participant, template: Number(event.target.value) })}
+                  slotProps={{ htmlInput: { min: 0 } }}
+                />
               </Grid>
               <Grid size={1}>
                 <Tooltip title={'Remove this body'}>
@@ -270,6 +236,8 @@ const BossEncounterEditor = ({ encounter, onChange }: BossEncounterEditorProps) 
         <BossRoutineCard
           key={index}
           routine={routine}
+          participants={encounter.participants}
+          routines={encounter.routines}
           onChange={updated => patchRoutine(index, updated)}
           onRemove={() => onChange({
             ...encounter,
@@ -285,6 +253,29 @@ const BossEncounterEditor = ({ encounter, onChange }: BossEncounterEditorProps) 
         onClick={() => onChange({ ...encounter, routines: [ ...encounter.routines, createBossRoutine() ] })}
       >
         Add routine
+      </Button>
+
+      {encounter.reactions.map((reaction, index) => (
+        <BossReactionCard
+          key={index}
+          reaction={reaction}
+          participants={encounter.participants}
+          routines={encounter.routines}
+          onChange={updated => patchReaction(index, updated)}
+          onRemove={() => onChange({
+            ...encounter,
+            reactions: encounter.reactions.filter((_r, at) => at !== index),
+          })}
+        />
+      ))}
+
+      <Button
+        startIcon={<Add/>}
+        variant={'outlined'}
+        sx={{ alignSelf: 'flex-start' }}
+        onClick={() => onChange({ ...encounter, reactions: [ ...encounter.reactions, createBossReaction() ] })}
+      >
+        Add reaction
       </Button>
     </Stack>
   );

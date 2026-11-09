@@ -1,40 +1,350 @@
 import { Box, Card, CardContent, FormControlLabel, IconButton, MenuItem, Stack, Switch, TextField, Tooltip, Typography } from '@mui/material';
 import { Delete } from '@mui/icons-material';
+import { useEnemies } from '@presentation/context/resources/enemies.context.tsx';
 import { useSkills } from '@presentation/context/resources/skills.context.tsx';
-import { type BossStep, withSkillSelection } from '@core/domain/valueObjects/boss-config.ts';
+import { useStates } from '@presentation/context/resources/states.context.tsx';
+import {
+  type BossParticipant,
+  type BossRoutine,
+  type BossStep,
+  withSkillSelection,
+  withSpawnSelection,
+  withStateSelection,
+} from '@core/domain/valueObjects/boss-config.ts';
 
 /**
  * The label shown for each verb a step can perform. Authors think in terms of what the boss does, not
  * in terms of the property name the file stores.
  */
-const VERB_LABELS: Record<string, string> = {
+const VERB_LABELS: Record<BossStep['verb'], string> = {
   forceSkill: 'Use a skill',
+  addState: 'Put a state on a body',
+  removeState: 'Take a state off a body',
+  changeImage: 'Change how a body looks',
+  quickenRoutine: 'Speed up a routine',
+  spawn: 'Put something on a tile',
+  tint: 'Tint the screen',
+  animation: 'Play an animation over a body',
+  dialogue: 'Have a body say a line',
 };
+
+/**
+ * The four channels of a screen tone, in the order the file stores them, with the range each one takes.
+ */
+const TONE_CHANNELS = [
+  { label: 'Red', min: -255, max: 255 },
+  { label: 'Green', min: -255, max: 255 },
+  { label: 'Blue', min: -255, max: 255 },
+  { label: 'Gray', min: 0, max: 255 },
+] as const;
+
+/**
+ * The verbs that act on nobody in particular, so they have no use for choosing a body.
+ */
+const VERBS_WITHOUT_A_BODY: BossStep['verb'][] = [ 'quickenRoutine', 'spawn', 'tint' ];
 
 type BossStepCardProps = {
   step: BossStep;
   index: number;
+  /** The bodies in this fight, any of which a step can act on. */
+  participants: BossParticipant[];
+  /** The routines in this fight, any of which a step can speed up. */
+  routines: BossRoutine[];
   onChange: (updated: BossStep) => void;
   onRemove: () => void;
 };
 
 /**
- * One instruction inside a routine, always expanded so a whole routine reads top to bottom without
- * clicking anything.
+ * One instruction inside a routine or a reaction, always expanded so the whole sequence reads top to
+ * bottom without clicking anything. Only the fields the chosen verb uses are shown.
  */
-const BossStepCard = ({ step, index, onChange, onRemove }: BossStepCardProps) =>
+const BossStepCard = ({ step, index, participants, routines, onChange, onRemove }: BossStepCardProps) =>
 {
-  const { skills, byId } = useSkills();
+  const { skills, byId: skillsById } = useSkills();
+  const { states, byId: statesById } = useStates();
+  const { data: enemies, byId: enemiesById } = useEnemies();
 
   const handleSkillChange = (skillId: number) =>
   {
-    const selected = byId.get(skillId);
+    const selected = skillsById.get(skillId);
     const name = selected ? selected.name : '';
 
     onChange(withSkillSelection(step, skillId, name));
   };
 
+  const handleStateChange = (stateId: number) =>
+  {
+    const selected = statesById.get(stateId);
+    const name = selected ? selected.name : '';
+
+    onChange(withStateSelection(step, stateId, name));
+  };
+
+  const handleSpawnChange = (enemyId: number) =>
+  {
+    const selected = enemiesById.get(enemyId);
+    const name = selected ? selected.name : '';
+
+    onChange(withSpawnSelection(step, enemyId, name));
+  };
+
+  const handleToneChange = (channel: number, value: number) =>
+  {
+    // a tone always holds all four channels, so a step tinted for the first time starts from no tint at all.
+    const tone = TONE_CHANNELS.map((_channel, at) => (at === channel
+      ? value
+      : step.tone[ at ] ?? 0));
+
+    onChange({ ...step, tone });
+  };
+
   const selectableSkills = skills.filter(skill => skill.name.trim() !== '');
+  const selectableStates = states.filter(state => state.name.trim() !== '');
+  const selectableEnemies = enemies.filter(enemy => enemy.name.trim() !== '');
+  const namedBodies = participants.filter(participant => participant.key.trim() !== '');
+  const namedRoutines = routines.filter(routine => routine.key.trim() !== '');
+
+  const whoField = (
+    <TextField
+      select
+      label={'Who'}
+      size={'small'}
+      fullWidth
+      value={step.participant}
+      helperText={'Which body this happens to.'}
+      onChange={event => onChange({ ...step, participant: event.target.value })}
+    >
+      <MenuItem value={''}>The boss (the first body)</MenuItem>
+      {namedBodies.map(participant => (
+        <MenuItem key={participant.key} value={participant.key}>{participant.key}</MenuItem>
+      ))}
+    </TextField>
+  );
+
+  const skillFields = (
+    <>
+      <TextField
+        select
+        label={'Skill'}
+        size={'small'}
+        fullWidth
+        value={step.skill === 0 ? '' : step.skill}
+        onChange={event => handleSkillChange(Number(event.target.value))}
+      >
+        {selectableSkills.map(skill => (
+          <MenuItem key={skill.id} value={skill.id}>
+            {`${skill.name} (${skill.id})`}
+          </MenuItem>
+        ))}
+      </TextField>
+
+      <Box>
+        <FormControlLabel
+          control={
+            <Switch
+              checked={step.cast}
+              onChange={event => onChange({ ...step, cast: event.target.checked })}
+            />
+          }
+          label={step.cast
+            ? 'Winds up before striking, so it can be seen coming and dodged.'
+            : 'Strikes instantly, with no wind-up to react to.'}
+        />
+      </Box>
+    </>
+  );
+
+  const stateField = (
+    <TextField
+      select
+      label={'State'}
+      size={'small'}
+      fullWidth
+      value={step.state === 0 ? '' : step.state}
+      onChange={event => handleStateChange(Number(event.target.value))}
+    >
+      {selectableStates.map(state => (
+        <MenuItem key={state.id} value={state.id}>
+          {`${state.name} (${state.id})`}
+        </MenuItem>
+      ))}
+    </TextField>
+  );
+
+  const imageFields = (
+    <Stack direction={'row'} spacing={2} alignItems={'flex-start'}>
+      <TextField
+        label={'Character sheet'}
+        size={'small'}
+        fullWidth
+        value={step.image}
+        helperText={'The sheet\'s file name, as it appears in the characters folder.'}
+        onChange={event => onChange({ ...step, image: event.target.value })}
+      />
+      <TextField
+        label={'Character'}
+        type={'number'}
+        size={'small'}
+        value={step.index}
+        helperText={'Which character on the sheet.'}
+        onChange={event => onChange({ ...step, index: Number(event.target.value) })}
+        slotProps={{ htmlInput: { step: 1, min: 0, max: 7 } }}
+        sx={{ width: 160 }}
+      />
+    </Stack>
+  );
+
+  const quickenFields = (
+    <Stack direction={'row'} spacing={2} alignItems={'flex-start'}>
+      <TextField
+        select
+        label={'Routine'}
+        size={'small'}
+        fullWidth
+        value={step.routine}
+        helperText={'From now on, this happens sooner each time.'}
+        onChange={event => onChange({ ...step, routine: event.target.value })}
+      >
+        {namedRoutines.map(routine => (
+          <MenuItem key={routine.key} value={routine.key}>{routine.key}</MenuItem>
+        ))}
+      </TextField>
+      <TextField
+        label={'Faster by'}
+        type={'number'}
+        size={'small'}
+        value={step.seconds}
+        helperText={'Seconds taken off each wait.'}
+        onChange={event => onChange({ ...step, seconds: Number(event.target.value) })}
+        slotProps={{ htmlInput: { step: 0.5, min: 0 } }}
+        sx={{ width: 160 }}
+      />
+    </Stack>
+  );
+
+  const spawnFields = (
+    <Stack spacing={2}>
+      <TextField
+        select
+        label={'Enemy'}
+        size={'small'}
+        fullWidth
+        value={step.enemyId === 0 ? '' : step.enemyId}
+        helperText={'Part of the fight, but nobody has to fell it to win. Whatever still stands leaves with the fight.'}
+        onChange={event => handleSpawnChange(Number(event.target.value))}
+      >
+        {selectableEnemies.map(enemy => (
+          <MenuItem key={enemy.id} value={enemy.id}>
+            {`${enemy.name} (${enemy.id})`}
+          </MenuItem>
+        ))}
+      </TextField>
+      <Stack direction={'row'} spacing={2} alignItems={'flex-start'}>
+        <TextField
+          label={'X'}
+          type={'number'}
+          size={'small'}
+          value={step.x}
+          helperText={'The tile it appears on.'}
+          onChange={event => onChange({ ...step, x: Number(event.target.value) })}
+          slotProps={{ htmlInput: { step: 1, min: 0 } }}
+          sx={{ width: 120 }}
+        />
+        <TextField
+          label={'Y'}
+          type={'number'}
+          size={'small'}
+          value={step.y}
+          onChange={event => onChange({ ...step, y: Number(event.target.value) })}
+          slotProps={{ htmlInput: { step: 1, min: 0 } }}
+          sx={{ width: 120 }}
+        />
+        <TextField
+          label={'Template'}
+          type={'number'}
+          size={'small'}
+          value={step.template}
+          helperText={'A clone map event to copy instead of the enemy\'s own, or 0.'}
+          onChange={event => onChange({ ...step, template: Number(event.target.value) })}
+          slotProps={{ htmlInput: { step: 1, min: 0 } }}
+          fullWidth
+        />
+      </Stack>
+    </Stack>
+  );
+
+  const tintFields = (
+    <Stack direction={'row'} spacing={2} alignItems={'flex-start'}>
+      {TONE_CHANNELS.map((channel, at) => (
+        <TextField
+          key={channel.label}
+          label={channel.label}
+          type={'number'}
+          size={'small'}
+          value={step.tone[ at ] ?? 0}
+          onChange={event => handleToneChange(at, Number(event.target.value))}
+          slotProps={{ htmlInput: { step: 1, min: channel.min, max: channel.max } }}
+          sx={{ width: 110 }}
+        />
+      ))}
+      <TextField
+        label={'Over'}
+        type={'number'}
+        size={'small'}
+        value={step.seconds}
+        helperText={'Seconds to settle.'}
+        onChange={event => onChange({ ...step, seconds: Number(event.target.value) })}
+        slotProps={{ htmlInput: { step: 0.5, min: 0 } }}
+        sx={{ width: 140 }}
+      />
+    </Stack>
+  );
+
+  const animationField = (
+    <TextField
+      label={'Animation'}
+      type={'number'}
+      size={'small'}
+      value={step.animation}
+      helperText={'The animation\'s id in the database.'}
+      onChange={event => onChange({ ...step, animation: Number(event.target.value) })}
+      slotProps={{ htmlInput: { step: 1, min: 1 } }}
+      sx={{ width: 200 }}
+    />
+  );
+
+  const dialogueFields = (
+    <Stack spacing={2}>
+      <TextField
+        label={'Speaker'}
+        size={'small'}
+        fullWidth
+        value={step.speaker}
+        helperText={'The name shown with the line. Text codes work here.'}
+        onChange={event => onChange({ ...step, speaker: event.target.value })}
+      />
+      <TextField
+        label={'Line'}
+        size={'small'}
+        fullWidth
+        multiline
+        minRows={2}
+        value={step.lines.join('\n')}
+        helperText={'One message; each row is a row of it. The fight holds until the player has read it.'}
+        onChange={event => onChange({ ...step, lines: event.target.value.split('\n') })}
+      />
+    </Stack>
+  );
+
+  const usesWho = VERBS_WITHOUT_A_BODY.includes(step.verb) === false;
+  const usesSkill = step.verb === 'forceSkill';
+  const usesState = step.verb === 'addState' || step.verb === 'removeState';
+  const usesImage = step.verb === 'changeImage';
+  const usesQuicken = step.verb === 'quickenRoutine';
+  const usesSpawn = step.verb === 'spawn';
+  const usesTint = step.verb === 'tint';
+  const usesAnimation = step.verb === 'animation';
+  const usesDialogue = step.verb === 'dialogue';
 
   return (
     <Card variant={'outlined'}>
@@ -65,34 +375,15 @@ const BossStepCard = ({ step, index, onChange, onRemove }: BossStepCardProps) =>
               ))}
           </TextField>
 
-          <TextField
-            select
-            label={'Skill'}
-            size={'small'}
-            fullWidth
-            value={step.skill === 0 ? '' : step.skill}
-            onChange={event => handleSkillChange(Number(event.target.value))}
-          >
-            {selectableSkills.map(skill => (
-              <MenuItem key={skill.id} value={skill.id}>
-                {`${skill.name} (${skill.id})`}
-              </MenuItem>
-            ))}
-          </TextField>
-
-          <Box>
-            <FormControlLabel
-              control={
-                <Switch
-                  checked={step.cast}
-                  onChange={event => onChange({ ...step, cast: event.target.checked })}
-                />
-              }
-              label={step.cast
-                ? 'Winds up before striking, so it can be seen coming and dodged.'
-                : 'Strikes instantly, with no wind-up to react to.'}
-            />
-          </Box>
+          {usesWho && whoField}
+          {usesSkill && skillFields}
+          {usesState && stateField}
+          {usesImage && imageFields}
+          {usesQuicken && quickenFields}
+          {usesSpawn && spawnFields}
+          {usesTint && tintFields}
+          {usesAnimation && animationField}
+          {usesDialogue && dialogueFields}
         </Stack>
       </CardContent>
     </Card>

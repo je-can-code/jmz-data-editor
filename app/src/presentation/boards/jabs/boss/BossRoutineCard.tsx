@@ -2,10 +2,19 @@ import { Button, Divider, IconButton, Stack, TextField, Tooltip, Typography } fr
 import { Add, Delete } from '@mui/icons-material';
 import { BoardSectionCard } from '@presentation/components/board/BoardSectionCard.tsx';
 import BossStepCard from './BossStepCard.tsx';
-import { type BossRoutine, type BossStep, createBossStep } from '@core/domain/valueObjects/boss-config.ts';
+import {
+  type BossParticipant,
+  type BossRoutine,
+  type BossStep,
+  createBossStep,
+} from '@core/domain/valueObjects/boss-config.ts';
 
 type BossRoutineCardProps = {
   routine: BossRoutine;
+  /** The bodies in this fight, any of which a step can act on. */
+  participants: BossParticipant[];
+  /** The routines in this fight, any of which a step can speed up. */
+  routines: BossRoutine[];
   onChange: (updated: BossRoutine) => void;
   onRemove: () => void;
 };
@@ -13,7 +22,7 @@ type BossRoutineCardProps = {
 /**
  * A repeating sequence the boss performs for as long as the fight lasts.
  */
-const BossRoutineCard = ({ routine, onChange, onRemove }: BossRoutineCardProps) =>
+const BossRoutineCard = ({ routine, participants, routines, onChange, onRemove }: BossRoutineCardProps) =>
 {
   const patchStep = (index: number, updated: BossStep) =>
   {
@@ -89,6 +98,8 @@ const BossRoutineCard = ({ routine, onChange, onRemove }: BossRoutineCardProps) 
             key={index}
             step={step}
             index={index}
+            participants={participants}
+            routines={routines}
             onChange={updated => patchStep(index, updated)}
             onRemove={() => removeStep(index)}
           />

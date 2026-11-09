@@ -2,12 +2,30 @@ import { describe, expect, it } from "vitest";
 import {
   createBossEncounter,
   createBossParticipant,
+  createBossReaction,
   createBossRoutine,
   createBossStep,
   hydrateBossEncounters,
   withEnemySelection,
   withSkillSelection,
+  withSpawnSelection,
+  withStateSelection,
 } from "@core/domain/valueObjects/boss-config.ts";
+
+/**
+ * The fields the spawn, tint, animation and dialogue verbs read, each at its "none", as every step that
+ * performs some other verb carries them.
+ */
+const SPAWN_TINT_ANIMATION_DIALOGUE_NONES = {
+  enemyId: 0,
+  template: 0,
+  x: 0,
+  y: 0,
+  tone: [],
+  animation: 0,
+  speaker: "",
+  lines: [],
+};
 
 /**
  * Editor-side counterpart to J-ABS-Boss's configuration loader. Encounters are the `bosses` block of
@@ -19,6 +37,12 @@ import {
  *     writes is what the plugin reads back at game load
  *   - default a step to observing its cast time, matching the plugin, so a telegraph is never
  *     removed by omission
+ *   - read a body still naming an event, from before the plugin spawned its bodies, as a body with no
+ *     tile chosen yet, since the event id it carries no longer means anything to the plugin
+ *   - read an encounter that names no defeat switch as turning none on, since one written before fights
+ *     could name a switch has no key for it
+ *   - fill every field any verb reads on every step, so switching a step's verb never meets a missing
+ *     field, and read an encounter written before reactions as reacting to nothing
  */
 describe("hydrateBossEncounters", () =>
 {
@@ -81,12 +105,23 @@ describe("hydrateBossEncounters", () =>
       {
         key: "gluttonwolf",
         map: 75,
+        defeatSwitch: 24,
         participants: [
           {
             key: "mayor",
-            eventId: 4,
             enemyId: 581,
             expect: "Gluttonwolf Mayor",
+            x: 8,
+            y: 14,
+            template: 0,
+          },
+          {
+            key: "golem",
+            enemyId: 501,
+            expect: "Golem",
+            x: 4,
+            y: 3,
+            template: 601,
           },
         ],
         aiControl: "shared",
@@ -97,9 +132,131 @@ describe("hydrateBossEncounters", () =>
             steps: [
               {
                 verb: "forceSkill",
+                participant: "",
                 skill: 2584,
+                state: 0,
                 expect: "Devour",
                 cast: true,
+                image: "",
+                index: 0,
+                routine: "",
+                seconds: 0,
+                ...SPAWN_TINT_ANIMATION_DIALOGUE_NONES,
+              },
+            ],
+          },
+        ],
+        reactions: [
+          {
+            key: "seal",
+            on: "start",
+            participants: [],
+            below: 0,
+            steps: [
+              {
+                verb: "addState",
+                participant: "mayor",
+                skill: 0,
+                state: 2072,
+                expect: "Sealed",
+                cast: true,
+                image: "",
+                index: 0,
+                routine: "",
+                seconds: 0,
+                ...SPAWN_TINT_ANIMATION_DIALOGUE_NONES,
+              },
+              {
+                verb: "changeImage",
+                participant: "mayor",
+                skill: 0,
+                state: 0,
+                expect: "",
+                cast: true,
+                image: "$m_elemental-earthie-sealed",
+                index: 2,
+                routine: "",
+                seconds: 0,
+                ...SPAWN_TINT_ANIMATION_DIALOGUE_NONES,
+              },
+            ],
+          },
+          {
+            key: "enrage",
+            on: "fallen",
+            participants: [ "golem" ],
+            below: 0,
+            steps: [
+              {
+                verb: "quickenRoutine",
+                participant: "",
+                skill: 0,
+                state: 0,
+                expect: "",
+                cast: true,
+                image: "",
+                index: 0,
+                routine: "devour",
+                seconds: 1.5,
+                ...SPAWN_TINT_ANIMATION_DIALOGUE_NONES,
+              },
+            ],
+          },
+          {
+            key: "two-thirds",
+            on: "health",
+            participants: [],
+            below: 66,
+            steps: [
+              {
+                verb: "spawn",
+                participant: "",
+                skill: 0,
+                state: 0,
+                expect: "Ignihazard",
+                cast: true,
+                image: "",
+                index: 0,
+                routine: "",
+                seconds: 0,
+                enemyId: 511,
+                template: 605,
+                x: 44,
+                y: 16,
+                tone: [],
+                animation: 0,
+                speaker: "",
+                lines: [],
+              },
+              {
+                verb: "tint",
+                participant: "",
+                skill: 0,
+                state: 0,
+                expect: "",
+                cast: true,
+                image: "",
+                index: 0,
+                routine: "",
+                seconds: 2,
+                ...SPAWN_TINT_ANIMATION_DIALOGUE_NONES,
+                tone: [ 17, -68, -68, 0 ],
+              },
+              {
+                verb: "dialogue",
+                participant: "mayor",
+                skill: 0,
+                state: 0,
+                expect: "",
+                cast: true,
+                image: "",
+                index: 0,
+                routine: "",
+                seconds: 0,
+                ...SPAWN_TINT_ANIMATION_DIALOGUE_NONES,
+                animation: 56,
+                speaker: "\\C[10]Cynder\\C[0]",
+                lines: [ "\\pop[self]BRING IT", "second line" ],
               },
             ],
           },
@@ -115,7 +272,7 @@ describe("hydrateBossEncounters", () =>
       .toEqual(authored);
   });
 
-  it("fills participants and routines with empty lists when an encounter omits them", () =>
+  it("fills in an encounter that omits everything but its name and map, turning no switch on", () =>
   {
     // Arrange
     const sparse = [ { key: "bare", map: 1 } ];
@@ -128,9 +285,11 @@ describe("hydrateBossEncounters", () =>
       .toEqual({
         key: "bare",
         map: 1,
+        defeatSwitch: 0,
         participants: [],
         aiControl: "shared",
         routines: [],
+        reactions: [],
       });
   });
 
@@ -201,7 +360,7 @@ describe("hydrateBossEncounters", () =>
       .toBe(false);
   });
 
-  it("falls back to the only implemented verb when the authored verb is unknown", () =>
+  it("falls back to using a skill when the authored verb is not one the plugin implements", () =>
   {
     // Arrange
     const unknownVerb = [ { key: "x", routines: [ { key: "r", steps: [ { verb: "teleport" } ] } ] } ];
@@ -212,6 +371,109 @@ describe("hydrateBossEncounters", () =>
     // Assert
     expect(hydrated[ 0 ].routines[ 0 ].steps[ 0 ].verb)
       .toBe("forceSkill");
+  });
+
+  it("keeps a verb the plugin implements rather than falling back", () =>
+  {
+    // Arrange
+    const quickening = [ { key: "x", routines: [ { key: "r", steps: [ { verb: "quickenRoutine" } ] } ] } ];
+
+    // Act
+    const hydrated = hydrateBossEncounters(quickening);
+
+    // Assert
+    expect(hydrated[ 0 ].routines[ 0 ].steps[ 0 ].verb)
+      .toBe("quickenRoutine");
+  });
+
+  it("fills every field a step leaves out with its none, so switching verbs never meets a missing field", () =>
+  {
+    // Arrange
+    const bareStep = [ { key: "x", routines: [ { key: "r", steps: [ { verb: "removeState" } ] } ] } ];
+
+    // Act
+    const hydrated = hydrateBossEncounters(bareStep);
+
+    // Assert
+    expect(hydrated[ 0 ].routines[ 0 ].steps[ 0 ])
+      .toEqual({
+        verb: "removeState",
+        participant: "",
+        skill: 0,
+        state: 0,
+        expect: "",
+        cast: true,
+        image: "",
+        index: 0,
+        routine: "",
+        seconds: 0,
+        ...SPAWN_TINT_ANIMATION_DIALOGUE_NONES,
+      });
+  });
+
+  it("keeps only numbers in a tone, since nothing else could be a color", () =>
+  {
+    // Arrange
+    const mixedTone = [ { key: "x", routines: [ { key: "r", steps: [ { verb: "tint", tone: [ 17, "red", null, 0 ] } ] } ] } ];
+
+    // Act
+    const hydrated = hydrateBossEncounters(mixedTone);
+
+    // Assert
+    expect(hydrated[ 0 ].routines[ 0 ].steps[ 0 ].tone)
+      .toEqual([ 17, 0 ]);
+  });
+
+  it("keeps only text in a line, since nothing else could be said", () =>
+  {
+    // Arrange
+    const mixedLines = [ { key: "x", routines: [ { key: "r", steps: [ { verb: "dialogue", lines: [ "BRING IT", 7, "again" ] } ] } ] } ];
+
+    // Act
+    const hydrated = hydrateBossEncounters(mixedLines);
+
+    // Assert
+    expect(hydrated[ 0 ].routines[ 0 ].steps[ 0 ].lines)
+      .toEqual([ "BRING IT", "again" ]);
+  });
+
+  it("fills in a reaction that omits everything as one to the fight beginning, doing nothing yet", () =>
+  {
+    // Arrange
+    const bareReaction = [ { key: "x", reactions: [ {} ] } ];
+
+    // Act
+    const hydrated = hydrateBossEncounters(bareReaction);
+
+    // Assert
+    expect(hydrated[ 0 ].reactions[ 0 ])
+      .toEqual({ key: "", on: "start", participants: [], below: 0, steps: [] });
+  });
+
+  it("falls back to the fight beginning when a reaction answers a moment the plugin does not have", () =>
+  {
+    // Arrange
+    const unknownMoment = [ { key: "x", reactions: [ { key: "typo", on: "fell" } ] } ];
+
+    // Act
+    const hydrated = hydrateBossEncounters(unknownMoment);
+
+    // Assert
+    expect(hydrated[ 0 ].reactions[ 0 ].on)
+      .toBe("start");
+  });
+
+  it("keeps only names in the bodies a reaction waits on, since nothing else could match a body", () =>
+  {
+    // Arrange
+    const mixedBodies = [ { key: "x", reactions: [ { on: "fallen", participants: [ "golem", 3, null, "earthie" ] } ] } ];
+
+    // Act
+    const hydrated = hydrateBossEncounters(mixedBodies);
+
+    // Assert
+    expect(hydrated[ 0 ].reactions[ 0 ].participants)
+      .toEqual([ "golem", "earthie" ]);
   });
 
   it("leaves the recorded name blank rather than inventing one when a step omits it", () =>
@@ -225,6 +487,31 @@ describe("hydrateBossEncounters", () =>
     // Assert
     expect(hydrated[ 0 ].routines[ 0 ].steps[ 0 ].expect)
       .toBe("");
+  });
+
+  it("reads a body written against an event as one with no tile chosen yet, leaving the event id behind", () =>
+  {
+    // Arrange- the shape bodies had before the plugin spawned them, when each one named an event.
+    const retiredShape = [
+      {
+        key: "gluttonwolf",
+        participants: [ { key: "mayor", eventId: 4, enemyId: 581, expect: "Gluttonwolf Mayor" } ],
+      },
+    ];
+
+    // Act
+    const hydrated = hydrateBossEncounters(retiredShape);
+
+    // Assert
+    expect(hydrated[ 0 ].participants[ 0 ])
+      .toEqual({
+        key: "mayor",
+        enemyId: 581,
+        expect: "Gluttonwolf Mayor",
+        x: 0,
+        y: 0,
+        template: 0,
+      });
   });
 
   it("replaces a non-object entry in the list with a fully defaulted one", () =>
@@ -312,6 +599,57 @@ describe("withSkillSelection", () =>
 });
 
 /**
+ * Same contract as {@link withSkillSelection}, applied to the state a step puts on or takes off a body.
+ */
+describe("withStateSelection", () =>
+{
+  it("records the id and the name it was chosen under together", () =>
+  {
+    // Arrange
+    const step = { ...createBossStep(), verb: "addState" as const };
+
+    // Act
+    const updated = withStateSelection(step, 2072, "Sealed");
+
+    // Assert
+    expect(updated.state)
+      .toBe(2072);
+    expect(updated.expect)
+      .toBe("Sealed");
+  });
+
+  it("leaves the rest of the step untouched", () =>
+  {
+    // Arrange
+    const step = { ...createBossStep(), verb: "addState" as const, participant: "earthie" };
+
+    // Act
+    const updated = withStateSelection(step, 2072, "Sealed");
+
+    // Assert
+    expect(updated.participant)
+      .toBe("earthie");
+    expect(updated.verb)
+      .toBe("addState");
+  });
+
+  it("does not mutate the step it was given", () =>
+  {
+    // Arrange
+    const step = createBossStep();
+
+    // Act
+    withStateSelection(step, 2072, "Sealed");
+
+    // Assert
+    expect(step.state)
+      .toBe(0);
+    expect(step.expect)
+      .toBe("");
+  });
+});
+
+/**
  * Same contract as {@link withSkillSelection}, applied to the body a fight is fought against.
  */
 describe("withEnemySelection", () =>
@@ -331,10 +669,10 @@ describe("withEnemySelection", () =>
       .toBe("Gluttonwolf Mayor");
   });
 
-  it("leaves the participant's own identity and event untouched", () =>
+  it("leaves the participant's own identity and tile untouched", () =>
   {
     // Arrange
-    const participant = { ...createBossParticipant(), key: "mayor", eventId: 4 };
+    const participant = { ...createBossParticipant(), key: "mayor", x: 8, y: 14 };
 
     // Act
     const updated = withEnemySelection(participant, 582, "Vampire King");
@@ -342,8 +680,10 @@ describe("withEnemySelection", () =>
     // Assert
     expect(updated.key)
       .toBe("mayor");
-    expect(updated.eventId)
-      .toBe(4);
+    expect(updated.x)
+      .toBe(8);
+    expect(updated.y)
+      .toBe(14);
   });
 
   it("does not mutate the participant it was given", () =>
@@ -357,6 +697,58 @@ describe("withEnemySelection", () =>
     // Assert
     expect(participant.enemyId)
       .toBe(0);
+  });
+});
+
+describe("withSpawnSelection", () =>
+{
+  it("records the id and the name it was chosen under together", () =>
+  {
+    // Arrange
+    const step = { ...createBossStep(), verb: "spawn" as const };
+
+    // Act
+    const updated = withSpawnSelection(step, 511, "Ignihazard");
+
+    // Assert
+    expect(updated.enemyId)
+      .toBe(511);
+    expect(updated.expect)
+      .toBe("Ignihazard");
+  });
+
+  it("leaves the rest of the step, its tile and template included, untouched", () =>
+  {
+    // Arrange
+    const step = { ...createBossStep(), verb: "spawn" as const, x: 44, y: 16, template: 605 };
+
+    // Act
+    const updated = withSpawnSelection(step, 511, "Ignihazard");
+
+    // Assert
+    expect(updated.verb)
+      .toBe("spawn");
+    expect(updated.x)
+      .toBe(44);
+    expect(updated.y)
+      .toBe(16);
+    expect(updated.template)
+      .toBe(605);
+  });
+
+  it("does not mutate the step it was given", () =>
+  {
+    // Arrange
+    const step = createBossStep();
+
+    // Act
+    withSpawnSelection(step, 511, "Ignihazard");
+
+    // Assert
+    expect(step.enemyId)
+      .toBe(0);
+    expect(step.expect)
+      .toBe("");
   });
 });
 
@@ -378,10 +770,64 @@ describe("boss config factories", () =>
     expect(step)
       .toEqual({
         verb: "forceSkill",
+        participant: "",
         skill: 0,
+        state: 0,
         expect: "",
         cast: true,
+        image: "",
+        index: 0,
+        routine: "",
+        seconds: 0,
+        ...SPAWN_TINT_ANIMATION_DIALOGUE_NONES,
       });
+  });
+
+  it("starts a new reaction at the fight beginning, with one step so it is never empty on arrival", () =>
+  {
+    // Arrange
+    // nothing to arrange; the factory takes no inputs.
+
+    // Act
+    const reaction = createBossReaction();
+
+    // Assert
+    expect(reaction.on)
+      .toBe("start");
+    expect(reaction.participants)
+      .toEqual([]);
+    expect(reaction.steps)
+      .toHaveLength(1);
+  });
+
+  it("does not share nested structure between two new reactions", () =>
+  {
+    // Arrange
+    const first = createBossReaction();
+    const second = createBossReaction();
+
+    // Act
+    first.steps[ 0 ].state = 2072;
+    first.participants.push("golem");
+
+    // Assert
+    expect(second.steps[ 0 ].state)
+      .toBe(0);
+    expect(second.participants)
+      .toEqual([]);
+  });
+
+  it("starts a new body spawning from its enemy's own slot", () =>
+  {
+    // Arrange
+    // nothing to arrange; the factory takes no inputs.
+
+    // Act
+    const participant = createBossParticipant();
+
+    // Assert
+    expect(participant.template)
+      .toBe(0);
   });
 
   it("starts a new routine with one step so it is never empty on arrival", () =>
@@ -399,7 +845,7 @@ describe("boss config factories", () =>
       .toHaveLength(1);
   });
 
-  it("starts a new encounter with one body and no routines", () =>
+  it("starts a new encounter with one body, no routines, no reactions, and no defeat switch", () =>
   {
     // Arrange
     // nothing to arrange; the factory takes no inputs.
@@ -412,8 +858,12 @@ describe("boss config factories", () =>
       .toHaveLength(1);
     expect(encounter.routines)
       .toEqual([]);
+    expect(encounter.reactions)
+      .toEqual([]);
     expect(encounter.aiControl)
       .toBe("shared");
+    expect(encounter.defeatSwitch)
+      .toBe(0);
   });
 
   it("does not share nested structure between two new encounters", () =>
