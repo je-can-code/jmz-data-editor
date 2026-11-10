@@ -39,6 +39,10 @@ const BOSS_STEP_VERBS = [
   'tint',
   'animation',
   'dialogue',
+  'blink',
+  'wait',
+  'learnSkill',
+  'startRoutine',
 ] as const;
 
 type BossStepVerb = typeof BOSS_STEP_VERBS[number];
@@ -68,20 +72,26 @@ type BossStep = {
   index: number;
   /** The routine a quickening speeds up, by its name. */
   routine: string;
-  /** How many seconds a quickening takes off that routine's wait, or a tint takes to settle. */
+  /** How many seconds a quickening takes off that routine's wait, a tint takes to settle, or a pause lasts. */
   seconds: number;
   /** The foe a spawn puts on the map. The plugin copies it from the enemy clone map slot with this id. */
   enemyId: number;
   /** The clone map event a spawn copies its body from instead of its enemy's own slot, or 0 for the enemy's own. */
   template: number;
-  /** The x coordinate of the tile a spawn puts its body on. */
+  /** The x coordinate of the tile a spawn puts its body on, or a blink takes its body to. */
   x: number;
-  /** The y coordinate of the tile a spawn puts its body on. */
+  /** The y coordinate of the tile a spawn puts its body on, or a blink takes its body to. */
   y: number;
+  /** The way a blink leaves its body facing: 2, 4, 6 or 8 for down, left, right or up, or 0 to keep its facing. */
+  direction: number;
   /** The screen tone a tint settles on: red, green and blue from -255 to 255, then gray from 0 to 255. */
   tone: number[];
-  /** The animation played over a body, by its id. */
+  /** The animation played over a body, a blink's flare, or a spawn's arrival, by its id; 0 plays none. */
   animation: number;
+  /** The face image shown with a body's line, by its file name, or empty for none. */
+  face: string;
+  /** The face on that image. */
+  faceIndex: number;
   /** The name shown with a body's line. */
   speaker: string;
   /** The text a body says, shown together as one message. */
@@ -92,6 +102,11 @@ type BossRoutine = {
   key: string;
   /** The interval between executions, in seconds. The plugin converts to frames when it loads. */
   cadence: number;
+  /**
+   * Whether the routine waits, not running at all, until a step starts it: something the fight only begins doing
+   * once it turns a corner.
+   */
+  dormant: boolean;
   steps: BossStep[];
 };
 
@@ -269,10 +284,14 @@ function hydrateStep(rawStep: unknown): BossStep
     template: pickNumber(source, 'template', 0),
     x: pickNumber(source, 'x', 0),
     y: pickNumber(source, 'y', 0),
+    // a blink that names no facing keeps the one it had.
+    direction: pickNumber(source, 'direction', 0),
     // only numbers survive; anything else in a tone could never be a color.
     tone: pickArray(source, 'tone')
       .filter((channel): channel is number => typeof channel === 'number' && Number.isFinite(channel)),
     animation: pickNumber(source, 'animation', 0),
+    face: pickString(source, 'face', ''),
+    faceIndex: pickNumber(source, 'faceIndex', 0),
     speaker: pickString(source, 'speaker', ''),
     // only text survives; anything else in a line could never be said.
     lines: pickArray(source, 'lines')
@@ -325,6 +344,8 @@ function hydrateRoutine(rawRoutine: unknown): BossRoutine
   return {
     key: pickString(source, 'key', ''),
     cadence: pickNumber(source, 'cadence', DEFAULT_ROUTINE_CADENCE),
+    // a routine written before routines could wait to be started runs from the first frame.
+    dormant: pickBoolean(source, 'dormant', false),
     steps: pickArray(source, 'steps')
       .map(hydrateStep),
   };
@@ -501,8 +522,11 @@ function createBossStep(): BossStep
     template: 0,
     x: 0,
     y: 0,
+    direction: 0,
     tone: [],
     animation: 0,
+    face: '',
+    faceIndex: 0,
     speaker: '',
     lines: [],
   };
@@ -532,6 +556,7 @@ function createBossRoutine(): BossRoutine
   return {
     key: '',
     cadence: DEFAULT_ROUTINE_CADENCE,
+    dormant: false,
     steps: [ createBossStep() ],
   };
 }

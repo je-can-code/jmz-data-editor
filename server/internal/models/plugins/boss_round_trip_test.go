@@ -175,7 +175,7 @@ func TestBossStepRoundTripLeavesUnusedFieldsOff(t *testing.T) {
 
 	unusedFields := []string{
 		"participant", "state", "image", "index", "routine", "seconds",
-		"enemyId", "template", "x", "y", "tone", "animation", "speaker", "lines",
+		"enemyId", "template", "x", "y", "direction", "tone", "animation", "face", "faceIndex", "speaker", "lines",
 	}
 	for _, unused := range unusedFields {
 		if _, written := reloaded[unused]; written {
@@ -196,6 +196,41 @@ func TestBossReactionRoundTripKeepsItsHealthPercent(t *testing.T) {
 	// Assert
 	if reloaded["on"] != "health" || reloaded["below"] != float64(66) {
 		t.Errorf("the health trigger did not survive a save: got %v", reloaded)
+	}
+}
+
+// TestBossRoutineRoundTripKeepsItDormant guards a routine that waits to be started through a save. A routine
+// that lost the flag would start with the fight, so a summoner meant for the last third would run from the first.
+func TestBossRoutineRoundTripKeepsItDormant(t *testing.T) {
+	// Arrange- a tour of the room that waits for a turning point to start it.
+	original := []byte(`{ "key": "waves", "cadence": 15, "dormant": true, "steps": [] }`)
+
+	// Act
+	reloaded := roundTrip[BossRoutine](t, original)
+
+	// Assert
+	if reloaded["dormant"] != true || reloaded["cadence"] != float64(15) {
+		t.Errorf("the dormant routine did not survive a save: got %v", reloaded)
+	}
+}
+
+// TestBossStepRoundTripKeepsWhereABlinkLandsAndWhoseFaceSpeaks guards a blink's tile and facing, and a line's
+// face, through a save. A facing lost here leaves a boss firing its next wave the wrong way.
+func TestBossStepRoundTripKeepsWhereABlinkLandsAndWhoseFaceSpeaks(t *testing.T) {
+	// Arrange- one step carrying everything a blink and a faced line read, so one save proves both.
+	original := []byte(`{ "verb": "blink", "skill": 0, "expect": "", "cast": true,
+		"x": 8, "y": 19, "direction": 6, "animation": 40, "face": "KH06-2_faces_MV_07", "faceIndex": 3 }`)
+
+	// Act
+	reloaded := roundTrip[BossStep](t, original)
+
+	// Assert
+	if reloaded["x"] != float64(8) || reloaded["y"] != float64(19) || reloaded["direction"] != float64(6) {
+		t.Errorf("the blink did not survive a save: got %v", reloaded)
+	}
+
+	if reloaded["face"] != "KH06-2_faces_MV_07" || reloaded["faceIndex"] != float64(3) {
+		t.Errorf("the face did not survive a save: got face %v index %v", reloaded["face"], reloaded["faceIndex"])
 	}
 }
 

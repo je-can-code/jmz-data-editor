@@ -59,6 +59,10 @@ type BossRoutine struct {
 	// seconds; the plugin converts to frames exactly once when it loads this file.
 	Cadence float64 `json:"cadence"`
 
+	// Dormant is true for a routine that does not run at all until a startRoutine step wakes it: something
+	// the fight only begins doing once it turns a corner.
+	Dormant bool `json:"dormant,omitempty"`
+
 	Steps []BossStep `json:"steps"`
 }
 
@@ -115,20 +119,26 @@ type BossStep struct {
 
 	// EnemyId, Template, X and Y are what spawn puts on the map and where: an enemy copied from the clone
 	// map slot with its id, unless Template names another, onto the tile at X and Y. Expect records the
-	// enemy's name, the same as a participant's.
+	// enemy's name, the same as a participant's. X and Y are also the tile a blink takes its participant to.
 	EnemyId  int `json:"enemyId,omitempty"`
 	Template int `json:"template,omitempty"`
 	X        int `json:"x,omitempty"`
 	Y        int `json:"y,omitempty"`
 
+	// Direction is the way a blink leaves its participant facing: 2, 4, 6 or 8, or 0 to keep its facing.
+	Direction int `json:"direction,omitempty"`
+
 	// Tone is the screen tone tint settles on: red, green and blue from -255 to 255, then gray from 0 to 255.
 	Tone []int `json:"tone,omitempty"`
 
-	// Animation is the animation, by id, played over the participant.
+	// Animation is the animation, by id, played over the participant, as a blink's flare, or as a spawn's
+	// arrival.
 	Animation int `json:"animation,omitempty"`
 
-	// Speaker and Lines are dialogue: the name shown with the participant's line, and its text, shown
-	// together as one message.
-	Speaker string   `json:"speaker,omitempty"`
-	Lines   []string `json:"lines,omitempty"`
+	// Face, FaceIndex, Speaker and Lines are dialogue: the face image and the face on it, the name shown
+	// with the participant's line, and its text, shown together as one message.
+	Face      string   `json:"face,omitempty"`
+	FaceIndex int      `json:"faceIndex,omitempty"`
+	Speaker   string   `json:"speaker,omitempty"`
+	Lines     []string `json:"lines,omitempty"`
 }

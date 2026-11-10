@@ -1,4 +1,4 @@
-import { Button, Divider, IconButton, Stack, TextField, Tooltip, Typography } from '@mui/material';
+import { Button, Divider, FormControlLabel, IconButton, Stack, Switch, TextField, Tooltip, Typography } from '@mui/material';
 import { Add, Delete } from '@mui/icons-material';
 import { BoardSectionCard } from '@presentation/components/board/BoardSectionCard.tsx';
 import BossStepCard from './BossStepCard.tsx';
@@ -20,7 +20,29 @@ type BossRoutineCardProps = {
 };
 
 /**
- * A repeating sequence the boss performs for as long as the fight lasts.
+ * Describes when a routine happens, for the card's subtitle.
+ * @param {BossRoutine} routine The routine being described.
+ * @returns {string} One line saying when it happens.
+ */
+const describeCadence = (routine: BossRoutine): string =>
+{
+  // a routine with no cadence yet has nothing to say.
+  if (routine.cadence <= 0)
+  {
+    return 'Set how often this happens.';
+  }
+
+  // a dormant routine starts whenever a step wakes it, and plays at once when it does.
+  if (routine.dormant)
+  {
+    return `Happens every ${routine.cadence} seconds once a step starts it, the first time right away.`;
+  }
+
+  return `Happens every ${routine.cadence} seconds, starting ${routine.cadence} seconds into the fight.`;
+};
+
+/**
+ * A repeating sequence the boss performs for as long as the fight lasts, or from the moment a step starts it.
  */
 const BossRoutineCard = ({ routine, participants, routines, onChange, onRemove }: BossRoutineCardProps) =>
 {
@@ -45,9 +67,7 @@ const BossRoutineCard = ({ routine, participants, routines, onChange, onRemove }
     onChange({ ...routine, steps: [ ...routine.steps, createBossStep() ] });
   };
 
-  const cadenceHelper = routine.cadence > 0
-    ? `Happens every ${routine.cadence} seconds, starting ${routine.cadence} seconds into the fight.`
-    : 'Set how often this happens.';
+  const cadenceHelper = describeCadence(routine);
 
   return (
     <BoardSectionCard
@@ -84,6 +104,18 @@ const BossRoutineCard = ({ routine, participants, routines, onChange, onRemove }
             </IconButton>
           </Tooltip>
         </Stack>
+
+        <FormControlLabel
+          control={
+            <Switch
+              checked={routine.dormant}
+              onChange={event => onChange({ ...routine, dormant: event.target.checked })}
+            />
+          }
+          label={routine.dormant
+            ? 'Waits until a "Start a routine" step wakes it.'
+            : 'Runs from the moment the fight begins.'}
+        />
 
         <Divider/>
 

@@ -13,7 +13,7 @@ import {
 } from "@core/domain/valueObjects/boss-config.ts";
 
 /**
- * The fields the spawn, tint, animation and dialogue verbs read, each at its "none", as every step that
+ * The fields the spawn, blink, tint, animation and dialogue verbs read, each at its "none", as every step that
  * performs some other verb carries them.
  */
 const SPAWN_TINT_ANIMATION_DIALOGUE_NONES = {
@@ -21,8 +21,11 @@ const SPAWN_TINT_ANIMATION_DIALOGUE_NONES = {
   template: 0,
   x: 0,
   y: 0,
+  direction: 0,
   tone: [],
   animation: 0,
+  face: "",
+  faceIndex: 0,
   speaker: "",
   lines: [],
 };
@@ -129,6 +132,7 @@ describe("hydrateBossEncounters", () =>
           {
             key: "devour",
             cadence: 20,
+            dormant: true,
             steps: [
               {
                 verb: "forceSkill",
@@ -223,10 +227,30 @@ describe("hydrateBossEncounters", () =>
                 template: 605,
                 x: 44,
                 y: 16,
+                direction: 0,
                 tone: [],
-                animation: 0,
+                animation: 120,
+                face: "",
+                faceIndex: 0,
                 speaker: "",
                 lines: [],
+              },
+              {
+                verb: "blink",
+                participant: "mayor",
+                skill: 0,
+                state: 0,
+                expect: "",
+                cast: true,
+                image: "",
+                index: 0,
+                routine: "",
+                seconds: 0,
+                ...SPAWN_TINT_ANIMATION_DIALOGUE_NONES,
+                x: 8,
+                y: 19,
+                direction: 6,
+                animation: 40,
               },
               {
                 verb: "tint",
@@ -255,6 +279,8 @@ describe("hydrateBossEncounters", () =>
                 seconds: 0,
                 ...SPAWN_TINT_ANIMATION_DIALOGUE_NONES,
                 animation: 56,
+                face: "KH06-2_faces_MV_07",
+                faceIndex: 3,
                 speaker: "\\C[10]Cynder\\C[0]",
                 lines: [ "\\pop[self]BRING IT", "second line" ],
               },
@@ -332,6 +358,21 @@ describe("hydrateBossEncounters", () =>
       .toBe(20);
     expect(hydrated[ 0 ].routines[ 0 ].steps)
       .toEqual([]);
+  });
+
+  it("reads a routine written before routines could wait to be started as running from the first frame", () =>
+  {
+    // Arrange
+    const noDormant = [ { key: "x", routines: [ { key: "r", cadence: 15 } ] } ];
+
+    // Act
+    const hydrated = hydrateBossEncounters(noDormant);
+
+    // Assert- the cadence proves this is the parsed routine, not a blank stand-in.
+    expect(hydrated[ 0 ].routines[ 0 ].cadence)
+      .toBe(15);
+    expect(hydrated[ 0 ].routines[ 0 ].dormant)
+      .toBe(false);
   });
 
   it("defaults a step to observing its cast time, so a telegraph is never lost by omission", () =>

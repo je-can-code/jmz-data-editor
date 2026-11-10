@@ -26,7 +26,22 @@ const VERB_LABELS: Record<BossStep['verb'], string> = {
   tint: 'Tint the screen',
   animation: 'Play an animation over a body',
   dialogue: 'Have a body say a line',
+  blink: 'Blink a body to a tile',
+  wait: 'Pause before the next step',
+  learnSkill: 'Teach a body a skill',
+  startRoutine: 'Start a routine',
 };
+
+/**
+ * The ways a blink can leave a body facing, as an author reads them.
+ */
+const BLINK_FACINGS = [
+  { value: 0, label: 'Keep its facing' },
+  { value: 2, label: 'Down' },
+  { value: 4, label: 'Left' },
+  { value: 6, label: 'Right' },
+  { value: 8, label: 'Up' },
+] as const;
 
 /**
  * The four channels of a screen tone, in the order the file stores them, with the range each one takes.
@@ -41,7 +56,7 @@ const TONE_CHANNELS = [
 /**
  * The verbs that act on nobody in particular, so they have no use for choosing a body.
  */
-const VERBS_WITHOUT_A_BODY: BossStep['verb'][] = [ 'quickenRoutine', 'spawn', 'tint' ];
+const VERBS_WITHOUT_A_BODY: BossStep['verb'][] = [ 'quickenRoutine', 'spawn', 'tint', 'wait', 'startRoutine' ];
 
 type BossStepCardProps = {
   step: BossStep;
@@ -121,22 +136,26 @@ const BossStepCard = ({ step, index, participants, routines, onChange, onRemove 
     </TextField>
   );
 
+  const skillSelect = (
+    <TextField
+      select
+      label={'Skill'}
+      size={'small'}
+      fullWidth
+      value={step.skill === 0 ? '' : step.skill}
+      onChange={event => handleSkillChange(Number(event.target.value))}
+    >
+      {selectableSkills.map(skill => (
+        <MenuItem key={skill.id} value={skill.id}>
+          {`${skill.name} (${skill.id})`}
+        </MenuItem>
+      ))}
+    </TextField>
+  );
+
   const skillFields = (
     <>
-      <TextField
-        select
-        label={'Skill'}
-        size={'small'}
-        fullWidth
-        value={step.skill === 0 ? '' : step.skill}
-        onChange={event => handleSkillChange(Number(event.target.value))}
-      >
-        {selectableSkills.map(skill => (
-          <MenuItem key={skill.id} value={skill.id}>
-            {`${skill.name} (${skill.id})`}
-          </MenuItem>
-        ))}
-      </TextField>
+      {skillSelect}
 
       <Box>
         <FormControlLabel
@@ -336,8 +355,113 @@ const BossStepCard = ({ step, index, participants, routines, onChange, onRemove 
     </Stack>
   );
 
+  const animationNumberField = (label: string, helperText: string) => (
+    <TextField
+      label={label}
+      type={'number'}
+      size={'small'}
+      value={step.animation}
+      helperText={helperText}
+      onChange={event => onChange({ ...step, animation: Number(event.target.value) })}
+      slotProps={{ htmlInput: { step: 1, min: 0 } }}
+      sx={{ width: 200 }}
+    />
+  );
+
+  const blinkFields = (
+    <Stack direction={'row'} spacing={2} alignItems={'flex-start'}>
+      <TextField
+        label={'X'}
+        type={'number'}
+        size={'small'}
+        value={step.x}
+        helperText={'The tile it reappears on.'}
+        onChange={event => onChange({ ...step, x: Number(event.target.value) })}
+        slotProps={{ htmlInput: { step: 1, min: 0 } }}
+        sx={{ width: 120 }}
+      />
+      <TextField
+        label={'Y'}
+        type={'number'}
+        size={'small'}
+        value={step.y}
+        onChange={event => onChange({ ...step, y: Number(event.target.value) })}
+        slotProps={{ htmlInput: { step: 1, min: 0 } }}
+        sx={{ width: 120 }}
+      />
+      <TextField
+        select
+        label={'Facing'}
+        size={'small'}
+        value={step.direction}
+        onChange={event => onChange({ ...step, direction: Number(event.target.value) })}
+        sx={{ width: 180 }}
+      >
+        {BLINK_FACINGS.map(facing => (
+          <MenuItem key={facing.value} value={facing.value}>{facing.label}</MenuItem>
+        ))}
+      </TextField>
+      {animationNumberField('Flare', 'Plays where it vanishes and where it lands; 0 for none.')}
+    </Stack>
+  );
+
+  const waitField = (
+    <TextField
+      label={'For'}
+      type={'number'}
+      size={'small'}
+      value={step.seconds}
+      helperText={'Seconds before the next step. The fight carries on meanwhile.'}
+      onChange={event => onChange({ ...step, seconds: Number(event.target.value) })}
+      slotProps={{ htmlInput: { step: 0.5, min: 0 } }}
+      sx={{ width: 220 }}
+    />
+  );
+
+  const startRoutineField = (
+    <TextField
+      select
+      label={'Routine'}
+      size={'small'}
+      fullWidth
+      value={step.routine}
+      helperText={'It plays at once, then keeps its own cadence. Mark it as starting dormant.'}
+      onChange={event => onChange({ ...step, routine: event.target.value })}
+    >
+      {namedRoutines.map(routine => (
+        <MenuItem key={routine.key} value={routine.key}>{routine.key}</MenuItem>
+      ))}
+    </TextField>
+  );
+
+  const faceFields = (
+    <Stack direction={'row'} spacing={2} alignItems={'flex-start'}>
+      <TextField
+        label={'Face'}
+        size={'small'}
+        fullWidth
+        value={step.face}
+        helperText={'The face image\'s file name, or empty for none.'}
+        onChange={event => onChange({ ...step, face: event.target.value })}
+      />
+      <TextField
+        label={'Face index'}
+        type={'number'}
+        size={'small'}
+        value={step.faceIndex}
+        onChange={event => onChange({ ...step, faceIndex: Number(event.target.value) })}
+        slotProps={{ htmlInput: { step: 1, min: 0, max: 7 } }}
+        sx={{ width: 160 }}
+      />
+    </Stack>
+  );
+
   const usesWho = VERBS_WITHOUT_A_BODY.includes(step.verb) === false;
   const usesSkill = step.verb === 'forceSkill';
+  const usesLearnedSkill = step.verb === 'learnSkill';
+  const usesBlink = step.verb === 'blink';
+  const usesWait = step.verb === 'wait';
+  const usesStartRoutine = step.verb === 'startRoutine';
   const usesState = step.verb === 'addState' || step.verb === 'removeState';
   const usesImage = step.verb === 'changeImage';
   const usesQuicken = step.verb === 'quickenRoutine';
@@ -381,9 +505,15 @@ const BossStepCard = ({ step, index, participants, routines, onChange, onRemove 
           {usesImage && imageFields}
           {usesQuicken && quickenFields}
           {usesSpawn && spawnFields}
+          {usesSpawn && animationNumberField('Arrives in', 'An animation played over it as it arrives; 0 for none.')}
           {usesTint && tintFields}
           {usesAnimation && animationField}
+          {usesDialogue && faceFields}
           {usesDialogue && dialogueFields}
+          {usesBlink && blinkFields}
+          {usesWait && waitField}
+          {usesLearnedSkill && skillSelect}
+          {usesStartRoutine && startRoutineField}
         </Stack>
       </CardContent>
     </Card>
