@@ -117,6 +117,7 @@ describe("hydrateBossEncounters", () =>
             x: 8,
             y: 14,
             template: 0,
+            bystander: false,
           },
           {
             key: "golem",
@@ -125,6 +126,7 @@ describe("hydrateBossEncounters", () =>
             x: 4,
             y: 3,
             template: 601,
+            bystander: true,
           },
         ],
         aiControl: "shared",
@@ -283,6 +285,36 @@ describe("hydrateBossEncounters", () =>
                 faceIndex: 3,
                 speaker: "\\C[10]Cynder\\C[0]",
                 lines: [ "\\pop[self]BRING IT", "second line" ],
+              },
+              {
+                verb: "face",
+                participant: "golem",
+                skill: 0,
+                state: 0,
+                expect: "",
+                cast: true,
+                image: "",
+                index: 0,
+                routine: "",
+                seconds: 0,
+                ...SPAWN_TINT_ANIMATION_DIALOGUE_NONES,
+                direction: 8,
+              },
+              {
+                verb: "log",
+                participant: "",
+                skill: 0,
+                state: 0,
+                expect: "",
+                cast: true,
+                image: "",
+                index: 0,
+                routine: "",
+                seconds: 0,
+                ...SPAWN_TINT_ANIMATION_DIALOGUE_NONES,
+                face: "elemental-earth",
+                faceIndex: 3,
+                lines: [ "The barrage was powerful, but it appears weak!" ],
               },
             ],
           },
@@ -552,7 +584,23 @@ describe("hydrateBossEncounters", () =>
         x: 0,
         y: 0,
         template: 0,
+        bystander: false,
       });
+  });
+
+  it("reads a body that names something other than true or false for standing by as one the fight needs felled", () =>
+  {
+    // Arrange
+    const oddFlag = [ { key: "x", participants: [ { key: "skye", enemyId: 554, bystander: "yes" } ] } ];
+
+    // Act
+    const hydrated = hydrateBossEncounters(oddFlag);
+
+    // Assert
+    expect(hydrated[ 0 ].participants[ 0 ].bystander)
+      .toBe(false);
+    expect(hydrated[ 0 ].participants[ 0 ].enemyId)
+      .toBe(554);
   });
 
   it("replaces a non-object entry in the list with a fully defaulted one", () =>
@@ -869,6 +917,19 @@ describe("boss config factories", () =>
     // Assert
     expect(participant.template)
       .toBe(0);
+  });
+
+  it("starts a new body as one the fight needs felled, not one standing by", () =>
+  {
+    // Arrange
+    // nothing to arrange; the factory takes no inputs.
+
+    // Act
+    const participant = createBossParticipant();
+
+    // Assert
+    expect(participant.bystander)
+      .toBe(false);
   });
 
   it("starts a new routine with one step so it is never empty on arrival", () =>

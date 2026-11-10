@@ -43,6 +43,8 @@ const BOSS_STEP_VERBS = [
   'wait',
   'learnSkill',
   'startRoutine',
+  'face',
+  'log',
 ] as const;
 
 type BossStepVerb = typeof BOSS_STEP_VERBS[number];
@@ -82,19 +84,22 @@ type BossStep = {
   x: number;
   /** The y coordinate of the tile a spawn puts its body on, or a blink takes its body to. */
   y: number;
-  /** The way a blink leaves its body facing: 2, 4, 6 or 8 for down, left, right or up, or 0 to keep its facing. */
+  /**
+   * The way a blink leaves its body facing: 2, 4, 6 or 8 for down, left, right or up, or 0 to keep its facing. Also
+   * the way a turn faces its body, where 0 is no choice at all.
+   */
   direction: number;
   /** The screen tone a tint settles on: red, green and blue from -255 to 255, then gray from 0 to 255. */
   tone: number[];
   /** The animation played over a body, a blink's flare, or a spawn's arrival, by its id; 0 plays none. */
   animation: number;
-  /** The face image shown with a body's line, by its file name, or empty for none. */
+  /** The face image shown with a line, said or written to the dialogue log, by its file name, or empty for none. */
   face: string;
   /** The face on that image. */
   faceIndex: number;
   /** The name shown with a body's line. */
   speaker: string;
-  /** The text a body says, shown together as one message. */
+  /** The text of a line: what a body says, shown together as one message, or one entry in the dialogue log. */
   lines: string[];
 };
 
@@ -157,6 +162,12 @@ type BossParticipant = {
    * the same foe dressed for this one fight, with a prefix, a role or a level of its own.
    */
   template: number;
+  /**
+   * Whether this body stands in the fight without being part of winning it, like an elemental watching from the
+   * edge of the room. Steps can still name it; the fight is won once every other body falls, and it leaves then.
+   * The first body is the boss, so it never stands by.
+   */
+  bystander: boolean;
 };
 
 type BossEncounter = {
@@ -372,6 +383,8 @@ function hydrateParticipant(rawParticipant: unknown): BossParticipant
     y: pickNumber(source, 'y', 0),
     // a body that names no template of its own spawns from its enemy's slot.
     template: pickNumber(source, 'template', 0),
+    // a body written before bodies could stand by is one the fight is won by felling.
+    bystander: pickBoolean(source, 'bystander', false),
   };
 }
 
@@ -574,6 +587,7 @@ function createBossParticipant(): BossParticipant
     x: 0,
     y: 0,
     template: 0,
+    bystander: false,
   };
 }
 

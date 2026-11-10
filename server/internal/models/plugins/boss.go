@@ -49,6 +49,12 @@ type BossParticipant struct {
 	// the enemy's own. It lets the same enemy turn up dressed for one fight, with a prefix, a role or a
 	// level of its own, without touching the template every other spawn of that enemy uses.
 	Template int `json:"template,omitempty"`
+
+	// Bystander is true for a body that stands in the fight without being part of winning it: an elemental
+	// watching from the edge of the room, say. Steps can still name it, the fight is won once every other body
+	// has fallen, and a bystander still standing then leaves with the fight. The first body is the boss, so it
+	// is never a bystander.
+	Bystander bool `json:"bystander,omitempty"`
 }
 
 // BossRoutine is a repeating sequence that runs while its encounter is live.
@@ -125,7 +131,8 @@ type BossStep struct {
 	X        int `json:"x,omitempty"`
 	Y        int `json:"y,omitempty"`
 
-	// Direction is the way a blink leaves its participant facing: 2, 4, 6 or 8, or 0 to keep its facing.
+	// Direction is the way a blink leaves its participant facing: 2, 4, 6 or 8, or 0 to keep its facing. It is
+	// also the way a face step turns its participant, where 0 is not allowed.
 	Direction int `json:"direction,omitempty"`
 
 	// Tone is the screen tone tint settles on: red, green and blue from -255 to 255, then gray from 0 to 255.
@@ -136,7 +143,8 @@ type BossStep struct {
 	Animation int `json:"animation,omitempty"`
 
 	// Face, FaceIndex, Speaker and Lines are dialogue: the face image and the face on it, the name shown
-	// with the participant's line, and its text, shown together as one message.
+	// with the participant's line, and its text, shown together as one message. A log step reads Face,
+	// FaceIndex and Lines too, writing them to the dialogue log as one entry instead of saying them.
 	Face      string   `json:"face,omitempty"`
 	FaceIndex int      `json:"faceIndex,omitempty"`
 	Speaker   string   `json:"speaker,omitempty"`

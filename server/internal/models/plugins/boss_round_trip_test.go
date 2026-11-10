@@ -106,6 +106,41 @@ func TestBossParticipantRoundTripKeepsItsTemplate(t *testing.T) {
 	}
 }
 
+// TestBossParticipantRoundTripKeepsItStandingBy guards a bystander through a save. A body that lost the flag
+// would become one the fight needs felled, and an invincible watcher would leave its fight unwinnable.
+func TestBossParticipantRoundTripKeepsItStandingBy(t *testing.T) {
+	// Arrange- an elemental watching from the edge of the room.
+	original := []byte(`{ "key": "skye", "enemyId": 554, "expect": "Skye", "x": 25, "y": 19, "template": 607,
+		"bystander": true }`)
+
+	// Act
+	reloaded := roundTrip[BossParticipant](t, original)
+
+	// Assert
+	if reloaded["bystander"] != true {
+		t.Errorf("the bystander did not survive a save: got %v", reloaded["bystander"])
+	}
+}
+
+// TestBossParticipantRoundTripLeavesAFightingBodyUnflagged guards the shape an ordinary body keeps on disk. Nearly
+// every body is one the fight is won by felling, so a save writing the flag onto all of them would be noise.
+func TestBossParticipantRoundTripLeavesAFightingBodyUnflagged(t *testing.T) {
+	// Arrange- the boss itself, which says nothing about standing by.
+	original := []byte(`{ "key": "garuda", "enemyId": 373, "expect": "Garuda", "x": 25, "y": 24, "template": 606 }`)
+
+	// Act
+	reloaded := roundTrip[BossParticipant](t, original)
+
+	// Assert- the body survives, and no flag was written beside it.
+	if reloaded["template"] != float64(606) {
+		t.Errorf("the body did not survive a save: got %v", reloaded)
+	}
+
+	if _, written := reloaded["bystander"]; written {
+		t.Errorf("a save wrote the bystander flag onto a body the fight needs felled")
+	}
+}
+
 // TestBossEncounterRoundTripKeepsItsReactions guards every part of a reaction through a save: the moment
 // it answers, the bodies it waits on, and the fields each of its steps reads. A reaction lost here is a seal
 // that never breaks, or a fight that never gets faster.

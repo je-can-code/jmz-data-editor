@@ -30,6 +30,8 @@ const VERB_LABELS: Record<BossStep['verb'], string> = {
   wait: 'Pause before the next step',
   learnSkill: 'Teach a body a skill',
   startRoutine: 'Start a routine',
+  face: 'Turn a body to face a way',
+  log: 'Write a line to the dialogue log',
 };
 
 /**
@@ -44,6 +46,11 @@ const BLINK_FACINGS = [
 ] as const;
 
 /**
+ * The ways a turn can face a body. A turn has no "keep its facing", since keeping it is no turn at all.
+ */
+const TURN_FACINGS = BLINK_FACINGS.filter(facing => facing.value !== 0);
+
+/**
  * The four channels of a screen tone, in the order the file stores them, with the range each one takes.
  */
 const TONE_CHANNELS = [
@@ -56,7 +63,7 @@ const TONE_CHANNELS = [
 /**
  * The verbs that act on nobody in particular, so they have no use for choosing a body.
  */
-const VERBS_WITHOUT_A_BODY: BossStep['verb'][] = [ 'quickenRoutine', 'spawn', 'tint', 'wait', 'startRoutine' ];
+const VERBS_WITHOUT_A_BODY: BossStep['verb'][] = [ 'quickenRoutine', 'spawn', 'tint', 'wait', 'startRoutine', 'log' ];
 
 type BossStepCardProps = {
   step: BossStep;
@@ -434,6 +441,35 @@ const BossStepCard = ({ step, index, participants, routines, onChange, onRemove 
     </TextField>
   );
 
+  const turnField = (
+    <TextField
+      select
+      label={'Facing'}
+      size={'small'}
+      value={step.direction === 0 ? '' : step.direction}
+      helperText={'A skill used straight after fires this way.'}
+      onChange={event => onChange({ ...step, direction: Number(event.target.value) })}
+      sx={{ width: 260 }}
+    >
+      {TURN_FACINGS.map(facing => (
+        <MenuItem key={facing.value} value={facing.value}>{facing.label}</MenuItem>
+      ))}
+    </TextField>
+  );
+
+  const logLineField = (
+    <TextField
+      label={'Line'}
+      size={'small'}
+      fullWidth
+      multiline
+      minRows={2}
+      value={step.lines.join('\n')}
+      helperText={'One entry in the dialogue log; each row is a row of it. The fight plays on while it is read.'}
+      onChange={event => onChange({ ...step, lines: event.target.value.split('\n') })}
+    />
+  );
+
   const faceFields = (
     <Stack direction={'row'} spacing={2} alignItems={'flex-start'}>
       <TextField
@@ -469,6 +505,8 @@ const BossStepCard = ({ step, index, participants, routines, onChange, onRemove 
   const usesTint = step.verb === 'tint';
   const usesAnimation = step.verb === 'animation';
   const usesDialogue = step.verb === 'dialogue';
+  const usesTurn = step.verb === 'face';
+  const usesLog = step.verb === 'log';
 
   return (
     <Card variant={'outlined'}>
@@ -514,6 +552,9 @@ const BossStepCard = ({ step, index, participants, routines, onChange, onRemove 
           {usesWait && waitField}
           {usesLearnedSkill && skillSelect}
           {usesStartRoutine && startRoutineField}
+          {usesTurn && turnField}
+          {usesLog && faceFields}
+          {usesLog && logLineField}
         </Stack>
       </CardContent>
     </Card>

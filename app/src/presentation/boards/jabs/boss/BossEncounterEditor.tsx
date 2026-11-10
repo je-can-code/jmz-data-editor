@@ -1,4 +1,15 @@
-import { Button, Grid, IconButton, MenuItem, Stack, TextField, Tooltip, Typography } from '@mui/material';
+import {
+  Button,
+  FormControlLabel,
+  Grid,
+  IconButton,
+  MenuItem,
+  Stack,
+  Switch,
+  TextField,
+  Tooltip,
+  Typography,
+} from '@mui/material';
 import { Add, Delete } from '@mui/icons-material';
 import { BoardSectionCard } from '@presentation/components/board/BoardSectionCard.tsx';
 import { useEnemies } from '@presentation/context/resources/enemies.context.tsx';
@@ -23,6 +34,12 @@ const AI_CONTROL_LABELS: Record<string, string> = {
   shared: 'Fights normally, with these behaviors layered on top',
   scripted: 'These behaviors drive the fight completely',
 };
+
+/**
+ * What standing by means for a body, shown beside its switch.
+ */
+const BYSTANDER_HINT = 'Part of the fight, but nobody has to fell it to win, and it leaves with the fight. '
+  + 'The first body is the boss, so it never stands by.';
 
 type BossEncounterEditorProps = {
   encounter: BossEncounter;
@@ -165,7 +182,7 @@ const BossEncounterEditor = ({ encounter, onChange }: BossEncounterEditorProps) 
                   ))}
                 </TextField>
               </Grid>
-              <Grid size={2}>
+              <Grid size={1}>
                 <TextField
                   label={'X'}
                   type={'number'}
@@ -176,7 +193,7 @@ const BossEncounterEditor = ({ encounter, onChange }: BossEncounterEditorProps) 
                   slotProps={{ htmlInput: { min: 0 } }}
                 />
               </Grid>
-              <Grid size={2}>
+              <Grid size={1}>
                 <TextField
                   label={'Y'}
                   type={'number'}
@@ -198,6 +215,19 @@ const BossEncounterEditor = ({ encounter, onChange }: BossEncounterEditorProps) 
                   onChange={event => patchParticipant(index, { ...participant, template: Number(event.target.value) })}
                   slotProps={{ htmlInput: { min: 0 } }}
                 />
+              </Grid>
+              <Grid size={2}>
+                <Tooltip title={BYSTANDER_HINT}>
+                  <FormControlLabel
+                    control={
+                      <Switch
+                        checked={participant.bystander}
+                        onChange={event => patchParticipant(index, { ...participant, bystander: event.target.checked })}
+                      />
+                    }
+                    label={'Stands by'}
+                  />
+                </Tooltip>
               </Grid>
               <Grid size={1}>
                 <Tooltip title={'Remove this body'}>
