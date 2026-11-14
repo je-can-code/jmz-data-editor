@@ -41,7 +41,7 @@ type BossParticipant struct {
 	// runtime, so the plugin compares this against the live name and refuses to start on a mismatch.
 	Expect string `json:"expect"`
 
-	// X and Y are the tile this body appears on when the encounter starts.
+	// X and Y are the tile this body appears on, when the encounter starts or when it is summoned.
 	X int `json:"x"`
 	Y int `json:"y"`
 
@@ -55,6 +55,11 @@ type BossParticipant struct {
 	// has fallen, and a bystander still standing then leaves with the fight. The first body is the boss, so it
 	// is never a bystander.
 	Bystander bool `json:"bystander,omitempty"`
+
+	// Summoned is true for a body held back as the encounter starts, with nothing on the map until a summon step
+	// brings it onto its own tile. It is part of the fight all the while: the fight is not won until it has arrived
+	// and fallen, and a fallen reaction can wait on it. The first body is the boss, so it is never summoned.
+	Summoned bool `json:"summoned,omitempty"`
 }
 
 // BossRoutine is a repeating sequence that runs while its encounter is live.
@@ -107,7 +112,8 @@ type BossStep struct {
 	Expect string `json:"expect"`
 	Cast   bool   `json:"cast"`
 
-	// Participant is the body the step acts on, by key, and empty means the first body: the boss.
+	// Participant is the body the step acts on, by key, and empty means the first body: the boss. A summon
+	// names the body it brings in, which is never the boss.
 	Participant string `json:"participant,omitempty"`
 
 	// State is the state addState and removeState put on or take off the participant.
@@ -125,7 +131,8 @@ type BossStep struct {
 
 	// EnemyId, Template, X and Y are what spawn puts on the map and where: an enemy copied from the clone
 	// map slot with its id, unless Template names another, onto the tile at X and Y. Expect records the
-	// enemy's name, the same as a participant's. X and Y are also the tile a blink takes its participant to.
+	// enemy's name, the same as a participant's. X and Y are also the tile a blink or a jump takes its
+	// participant to.
 	EnemyId  int `json:"enemyId,omitempty"`
 	Template int `json:"template,omitempty"`
 	X        int `json:"x,omitempty"`
@@ -138,8 +145,8 @@ type BossStep struct {
 	// Tone is the screen tone tint settles on: red, green and blue from -255 to 255, then gray from 0 to 255.
 	Tone []int `json:"tone,omitempty"`
 
-	// Animation is the animation, by id, played over the participant, as a blink's flare, or as a spawn's
-	// arrival.
+	// Animation is the animation, by id, played over the participant, as a blink's flare, or as the arrival of
+	// a spawn or a summoned body.
 	Animation int `json:"animation,omitempty"`
 
 	// Face, FaceIndex, Speaker and Lines are dialogue: the face image and the face on it, the name shown

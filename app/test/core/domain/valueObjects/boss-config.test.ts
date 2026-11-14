@@ -118,6 +118,7 @@ describe("hydrateBossEncounters", () =>
             y: 14,
             template: 0,
             bystander: false,
+            summoned: false,
           },
           {
             key: "golem",
@@ -127,6 +128,17 @@ describe("hydrateBossEncounters", () =>
             y: 3,
             template: 601,
             bystander: true,
+            summoned: false,
+          },
+          {
+            key: "brine",
+            enemyId: 531,
+            expect: "Puppet",
+            x: 23,
+            y: 13,
+            template: 608,
+            bystander: false,
+            summoned: true,
           },
         ],
         aiControl: "shared",
@@ -315,6 +327,35 @@ describe("hydrateBossEncounters", () =>
                 face: "elemental-earth",
                 faceIndex: 3,
                 lines: [ "The barrage was powerful, but it appears weak!" ],
+              },
+              {
+                verb: "summon",
+                participant: "brine",
+                skill: 0,
+                state: 0,
+                expect: "",
+                cast: true,
+                image: "",
+                index: 0,
+                routine: "",
+                seconds: 0,
+                ...SPAWN_TINT_ANIMATION_DIALOGUE_NONES,
+                animation: 52,
+              },
+              {
+                verb: "jump",
+                participant: "mayor",
+                skill: 0,
+                state: 0,
+                expect: "",
+                cast: true,
+                image: "",
+                index: 0,
+                routine: "",
+                seconds: 0,
+                ...SPAWN_TINT_ANIMATION_DIALOGUE_NONES,
+                x: 24,
+                y: 13,
               },
             ],
           },
@@ -585,6 +626,7 @@ describe("hydrateBossEncounters", () =>
         y: 0,
         template: 0,
         bystander: false,
+        summoned: false,
       });
   });
 
@@ -601,6 +643,21 @@ describe("hydrateBossEncounters", () =>
       .toBe(false);
     expect(hydrated[ 0 ].participants[ 0 ].enemyId)
       .toBe(554);
+  });
+
+  it("reads a body that names something other than true or false for being summoned as one there from the start", () =>
+  {
+    // Arrange
+    const oddFlag = [ { key: "x", participants: [ { key: "brine", enemyId: 531, summoned: "later" } ] } ];
+
+    // Act
+    const hydrated = hydrateBossEncounters(oddFlag);
+
+    // Assert
+    expect(hydrated[ 0 ].participants[ 0 ].summoned)
+      .toBe(false);
+    expect(hydrated[ 0 ].participants[ 0 ].enemyId)
+      .toBe(531);
   });
 
   it("replaces a non-object entry in the list with a fully defaulted one", () =>
@@ -929,6 +986,19 @@ describe("boss config factories", () =>
 
     // Assert
     expect(participant.bystander)
+      .toBe(false);
+  });
+
+  it("starts a new body as one there from the start, not one held back to be summoned", () =>
+  {
+    // Arrange
+    // nothing to arrange; the factory takes no inputs.
+
+    // Act
+    const participant = createBossParticipant();
+
+    // Assert
+    expect(participant.summoned)
       .toBe(false);
   });
 

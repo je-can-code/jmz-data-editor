@@ -45,6 +45,8 @@ const BOSS_STEP_VERBS = [
   'startRoutine',
   'face',
   'log',
+  'summon',
+  'jump',
 ] as const;
 
 type BossStepVerb = typeof BOSS_STEP_VERBS[number];
@@ -55,7 +57,10 @@ type BossStepVerb = typeof BOSS_STEP_VERBS[number];
  */
 type BossStep = {
   verb: BossStepVerb;
-  /** The body the step acts on, by its name, or empty for the first body: the boss. */
+  /**
+   * The body the step acts on, by its name, or empty for the first body: the boss. A summon names the body it
+   * brings in, which is never the boss.
+   */
   participant: string;
   /** The skill a forced skill performs. */
   skill: number;
@@ -80,9 +85,9 @@ type BossStep = {
   enemyId: number;
   /** The clone map event a spawn copies its body from instead of its enemy's own slot, or 0 for the enemy's own. */
   template: number;
-  /** The x coordinate of the tile a spawn puts its body on, or a blink takes its body to. */
+  /** The x coordinate of the tile a spawn puts its body on, or a blink or a jump takes its body to. */
   x: number;
-  /** The y coordinate of the tile a spawn puts its body on, or a blink takes its body to. */
+  /** The y coordinate of the tile a spawn puts its body on, or a blink or a jump takes its body to. */
   y: number;
   /**
    * The way a blink leaves its body facing: 2, 4, 6 or 8 for down, left, right or up, or 0 to keep its facing. Also
@@ -91,7 +96,10 @@ type BossStep = {
   direction: number;
   /** The screen tone a tint settles on: red, green and blue from -255 to 255, then gray from 0 to 255. */
   tone: number[];
-  /** The animation played over a body, a blink's flare, or a spawn's arrival, by its id; 0 plays none. */
+  /**
+   * The animation played over a body, a blink's flare, or the arrival of a spawn or a summoned body, by its id; 0
+   * plays none.
+   */
   animation: number;
   /** The face image shown with a line, said or written to the dialogue log, by its file name, or empty for none. */
   face: string;
@@ -153,9 +161,9 @@ type BossParticipant = {
   enemyId: number;
   /** The enemy name at authoring time; the plugin refuses to start when this no longer matches. */
   expect: string;
-  /** The x coordinate of the tile this body appears on when the fight starts. */
+  /** The x coordinate of the tile this body appears on, when the fight starts or when it is summoned. */
   x: number;
-  /** The y coordinate of the tile this body appears on when the fight starts. */
+  /** The y coordinate of the tile this body appears on, when the fight starts or when it is summoned. */
   y: number;
   /**
    * The clone map event this body spawns from instead of its enemy's own slot, or 0 for the enemy's own:
@@ -168,6 +176,12 @@ type BossParticipant = {
    * The first body is the boss, so it never stands by.
    */
   bystander: boolean;
+  /**
+   * Whether this body is held back when the fight starts, until a summon step brings it onto its tile, like a
+   * masterwork called down the moment the last one falls. It still has to fall before the fight is won. The first
+   * body is the boss, so it is always there from the start.
+   */
+  summoned: boolean;
 };
 
 type BossEncounter = {
@@ -385,6 +399,8 @@ function hydrateParticipant(rawParticipant: unknown): BossParticipant
     template: pickNumber(source, 'template', 0),
     // a body written before bodies could stand by is one the fight is won by felling.
     bystander: pickBoolean(source, 'bystander', false),
+    // a body written before bodies could be summoned is there from the start.
+    summoned: pickBoolean(source, 'summoned', false),
   };
 }
 
@@ -588,6 +604,7 @@ function createBossParticipant(): BossParticipant
     y: 0,
     template: 0,
     bystander: false,
+    summoned: false,
   };
 }
 

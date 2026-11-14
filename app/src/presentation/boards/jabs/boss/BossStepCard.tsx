@@ -1,3 +1,4 @@
+import { Fragment, type ReactNode } from 'react';
 import { Box, Card, CardContent, FormControlLabel, IconButton, MenuItem, Stack, Switch, TextField, Tooltip, Typography } from '@mui/material';
 import { Delete } from '@mui/icons-material';
 import { useEnemies } from '@presentation/context/resources/enemies.context.tsx';
@@ -32,6 +33,8 @@ const VERB_LABELS: Record<BossStep['verb'], string> = {
   startRoutine: 'Start a routine',
   face: 'Turn a body to face a way',
   log: 'Write a line to the dialogue log',
+  summon: 'Summon a body held back',
+  jump: 'Have a body leap onto a tile',
 };
 
 /**
@@ -59,11 +62,6 @@ const TONE_CHANNELS = [
   { label: 'Blue', min: -255, max: 255 },
   { label: 'Gray', min: 0, max: 255 },
 ] as const;
-
-/**
- * The verbs that act on nobody in particular, so they have no use for choosing a body.
- */
-const VERBS_WITHOUT_A_BODY: BossStep['verb'][] = [ 'quickenRoutine', 'spawn', 'tint', 'wait', 'startRoutine', 'log' ];
 
 type BossStepCardProps = {
   step: BossStep;
@@ -124,6 +122,7 @@ const BossStepCard = ({ step, index, participants, routines, onChange, onRemove 
   const selectableStates = states.filter(state => state.name.trim() !== '');
   const selectableEnemies = enemies.filter(enemy => enemy.name.trim() !== '');
   const namedBodies = participants.filter(participant => participant.key.trim() !== '');
+  const heldBackBodies = namedBodies.filter(participant => participant.summoned);
   const namedRoutines = routines.filter(routine => routine.key.trim() !== '');
 
   const whoField = (
@@ -470,6 +469,46 @@ const BossStepCard = ({ step, index, participants, routines, onChange, onRemove 
     />
   );
 
+  const summonField = (
+    <TextField
+      select
+      label={'Who'}
+      size={'small'}
+      fullWidth
+      value={step.participant}
+      helperText={'One of the bodies held back. It arrives on its own tile.'}
+      onChange={event => onChange({ ...step, participant: event.target.value })}
+    >
+      {heldBackBodies.map(participant => (
+        <MenuItem key={participant.key} value={participant.key}>{participant.key}</MenuItem>
+      ))}
+    </TextField>
+  );
+
+  const jumpFields = (
+    <Stack direction={'row'} spacing={2} alignItems={'flex-start'}>
+      <TextField
+        label={'X'}
+        type={'number'}
+        size={'small'}
+        value={step.x}
+        helperText={'The tile it lands on.'}
+        onChange={event => onChange({ ...step, x: Number(event.target.value) })}
+        slotProps={{ htmlInput: { step: 1, min: 0 } }}
+        sx={{ width: 120 }}
+      />
+      <TextField
+        label={'Y'}
+        type={'number'}
+        size={'small'}
+        value={step.y}
+        onChange={event => onChange({ ...step, y: Number(event.target.value) })}
+        slotProps={{ htmlInput: { step: 1, min: 0 } }}
+        sx={{ width: 120 }}
+      />
+    </Stack>
+  );
+
   const faceFields = (
     <Stack direction={'row'} spacing={2} alignItems={'flex-start'}>
       <TextField
@@ -492,21 +531,30 @@ const BossStepCard = ({ step, index, participants, routines, onChange, onRemove 
     </Stack>
   );
 
-  const usesWho = VERBS_WITHOUT_A_BODY.includes(step.verb) === false;
-  const usesSkill = step.verb === 'forceSkill';
-  const usesLearnedSkill = step.verb === 'learnSkill';
-  const usesBlink = step.verb === 'blink';
-  const usesWait = step.verb === 'wait';
-  const usesStartRoutine = step.verb === 'startRoutine';
-  const usesState = step.verb === 'addState' || step.verb === 'removeState';
-  const usesImage = step.verb === 'changeImage';
-  const usesQuicken = step.verb === 'quickenRoutine';
-  const usesSpawn = step.verb === 'spawn';
-  const usesTint = step.verb === 'tint';
-  const usesAnimation = step.verb === 'animation';
-  const usesDialogue = step.verb === 'dialogue';
-  const usesTurn = step.verb === 'face';
-  const usesLog = step.verb === 'log';
+  // the fields each verb shows under its choice, in the order they read. A verb acting on a body opens with who it
+  // acts on; one acting on nobody in particular (a spawn, a tint, a wait, a routine sped up or started, a line in the
+  // log) has no use for choosing a body. A summon chooses from the bodies held back rather than from everyone, so it
+  // brings its own choice of body.
+  const arrivalField = animationNumberField('Arrives in', 'An animation played over it as it arrives; 0 for none.');
+  const fieldsByVerb: Record<BossStep['verb'], ReactNode[]> = {
+    forceSkill: [ whoField, skillFields ],
+    addState: [ whoField, stateField ],
+    removeState: [ whoField, stateField ],
+    changeImage: [ whoField, imageFields ],
+    quickenRoutine: [ quickenFields ],
+    spawn: [ spawnFields, arrivalField ],
+    tint: [ tintFields ],
+    animation: [ whoField, animationField ],
+    dialogue: [ whoField, faceFields, dialogueFields ],
+    blink: [ whoField, blinkFields ],
+    wait: [ waitField ],
+    learnSkill: [ whoField, skillSelect ],
+    startRoutine: [ startRoutineField ],
+    face: [ whoField, turnField ],
+    log: [ faceFields, logLineField ],
+    summon: [ summonField, arrivalField ],
+    jump: [ whoField, jumpFields ],
+  };
 
   return (
     <Card variant={'outlined'}>
@@ -537,24 +585,7 @@ const BossStepCard = ({ step, index, participants, routines, onChange, onRemove 
               ))}
           </TextField>
 
-          {usesWho && whoField}
-          {usesSkill && skillFields}
-          {usesState && stateField}
-          {usesImage && imageFields}
-          {usesQuicken && quickenFields}
-          {usesSpawn && spawnFields}
-          {usesSpawn && animationNumberField('Arrives in', 'An animation played over it as it arrives; 0 for none.')}
-          {usesTint && tintFields}
-          {usesAnimation && animationField}
-          {usesDialogue && faceFields}
-          {usesDialogue && dialogueFields}
-          {usesBlink && blinkFields}
-          {usesWait && waitField}
-          {usesLearnedSkill && skillSelect}
-          {usesStartRoutine && startRoutineField}
-          {usesTurn && turnField}
-          {usesLog && faceFields}
-          {usesLog && logLineField}
+          {fieldsByVerb[step.verb].map((field, at) => <Fragment key={at}>{field}</Fragment>)}
         </Stack>
       </CardContent>
     </Card>

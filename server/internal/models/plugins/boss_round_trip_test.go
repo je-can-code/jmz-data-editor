@@ -139,6 +139,26 @@ func TestBossParticipantRoundTripLeavesAFightingBodyUnflagged(t *testing.T) {
 	if _, written := reloaded["bystander"]; written {
 		t.Errorf("a save wrote the bystander flag onto a body the fight needs felled")
 	}
+
+	if _, written := reloaded["summoned"]; written {
+		t.Errorf("a save wrote the summoned flag onto a body there from the start")
+	}
+}
+
+// TestBossParticipantRoundTripKeepsItSummoned guards a body held back to be summoned through a save. A body that
+// lost the flag would arrive with the fight, so a masterwork meant for the tenth round would stand in the first.
+func TestBossParticipantRoundTripKeepsItSummoned(t *testing.T) {
+	// Arrange- the first of a maker's masterworks, waiting to be called down.
+	original := []byte(`{ "key": "brine", "enemyId": 531, "expect": "Puppet", "x": 23, "y": 13, "template": 608,
+		"summoned": true }`)
+
+	// Act
+	reloaded := roundTrip[BossParticipant](t, original)
+
+	// Assert
+	if reloaded["summoned"] != true || reloaded["template"] != float64(608) {
+		t.Errorf("the summoned body did not survive a save: got %v", reloaded)
+	}
 }
 
 // TestBossEncounterRoundTripKeepsItsReactions guards every part of a reaction through a save: the moment
@@ -266,6 +286,28 @@ func TestBossStepRoundTripKeepsWhereABlinkLandsAndWhoseFaceSpeaks(t *testing.T) 
 
 	if reloaded["face"] != "KH06-2_faces_MV_07" || reloaded["faceIndex"] != float64(3) {
 		t.Errorf("the face did not survive a save: got face %v index %v", reloaded["face"], reloaded["faceIndex"])
+	}
+}
+
+// TestBossStepRoundTripKeepsWhoIsSummonedAndWhereALeapLands guards a summon's body and arrival, and a jump's
+// tile, through a save. A summon that lost its body would name the boss, which the plugin refuses, and a jump
+// that lost its tile would leap into the arena's top-left corner.
+func TestBossStepRoundTripKeepsWhoIsSummonedAndWhereALeapLands(t *testing.T) {
+	// Arrange- the next masterwork called down in a flash, and the maker hopping down after the last.
+	summon := []byte(`{ "verb": "summon", "skill": 0, "expect": "", "cast": true, "participant": "char", "animation": 52 }`)
+	jump := []byte(`{ "verb": "jump", "skill": 0, "expect": "", "cast": true, "participant": "gloria", "x": 24, "y": 13 }`)
+
+	// Act
+	summoned := roundTrip[BossStep](t, summon)
+	leapt := roundTrip[BossStep](t, jump)
+
+	// Assert
+	if summoned["verb"] != "summon" || summoned["participant"] != "char" || summoned["animation"] != float64(52) {
+		t.Errorf("the summon did not survive a save: got %v", summoned)
+	}
+
+	if leapt["verb"] != "jump" || leapt["participant"] != "gloria" || leapt["x"] != float64(24) || leapt["y"] != float64(13) {
+		t.Errorf("the jump did not survive a save: got %v", leapt)
 	}
 }
 

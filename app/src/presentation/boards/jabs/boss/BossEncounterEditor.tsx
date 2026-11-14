@@ -41,6 +41,12 @@ const AI_CONTROL_LABELS: Record<string, string> = {
 const BYSTANDER_HINT = 'Part of the fight, but nobody has to fell it to win, and it leaves with the fight. '
   + 'The first body is the boss, so it never stands by.';
 
+/**
+ * What being summoned means for a body, shown beside its switch.
+ */
+const SUMMONED_HINT = 'Held back when the fight starts, until a step summons it onto its tile. It still has to '
+  + 'fall before the fight is won. The first body is the boss, so it is always there from the start.';
+
 type BossEncounterEditorProps = {
   encounter: BossEncounter;
   onChange: (updated: BossEncounter) => void;
@@ -149,7 +155,7 @@ const BossEncounterEditor = ({ encounter, onChange }: BossEncounterEditorProps) 
           </Grid>
 
           <Typography variant={'subtitle2'} color={'text.secondary'}>
-            Bodies in this fight. Each one appears on its tile when the fight starts.
+            Bodies in this fight. Each one appears on its tile when the fight starts, or when it is summoned.
           </Typography>
 
           {encounter.participants.map((participant, index) => (
@@ -217,17 +223,30 @@ const BossEncounterEditor = ({ encounter, onChange }: BossEncounterEditorProps) 
                 />
               </Grid>
               <Grid size={2}>
-                <Tooltip title={BYSTANDER_HINT}>
-                  <FormControlLabel
-                    control={
-                      <Switch
-                        checked={participant.bystander}
-                        onChange={event => patchParticipant(index, { ...participant, bystander: event.target.checked })}
-                      />
-                    }
-                    label={'Stands by'}
-                  />
-                </Tooltip>
+                <Stack>
+                  <Tooltip title={BYSTANDER_HINT}>
+                    <FormControlLabel
+                      control={
+                        <Switch
+                          checked={participant.bystander}
+                          onChange={event => patchParticipant(index, { ...participant, bystander: event.target.checked })}
+                        />
+                      }
+                      label={'Stands by'}
+                    />
+                  </Tooltip>
+                  <Tooltip title={SUMMONED_HINT}>
+                    <FormControlLabel
+                      control={
+                        <Switch
+                          checked={participant.summoned}
+                          onChange={event => patchParticipant(index, { ...participant, summoned: event.target.checked })}
+                        />
+                      }
+                      label={'Summoned'}
+                    />
+                  </Tooltip>
+                </Stack>
               </Grid>
               <Grid size={1}>
                 <Tooltip title={'Remove this body'}>
