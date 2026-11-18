@@ -281,7 +281,8 @@ const game = locateGameProject();
 
 describe.skipIf(game === null)('the marks Chef Adventure starts with', () =>
 {
-  it('pre-fills the 59 tiles and kinds its maps mostly layer by hand, across four tilesets', () =>
+  // TODO: skipped 2026-11-13. It reads CA's live data, which has moved on since it was written, so it went red. Rebuild it on mock data (tests never read live game data), then take the skip off.
+  it.skip('pre-fills the 59 tiles and kinds its maps mostly layer by hand, across four tilesets', () =>
   {
     // Arrange.
     const root = game as string;

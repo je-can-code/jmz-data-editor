@@ -1,19 +1,50 @@
-import { Button, Divider, IconButton, Stack, TextField, Tooltip, Typography } from '@mui/material';
+import { Button, Divider, FormControlLabel, IconButton, Stack, Switch, TextField, Tooltip, Typography } from '@mui/material';
 import { Add, Delete } from '@mui/icons-material';
 import { BoardSectionCard } from '@presentation/components/board/BoardSectionCard.tsx';
 import BossStepCard from './BossStepCard.tsx';
-import { type BossRoutine, type BossStep, createBossStep } from '@core/domain/valueObjects/boss-config.ts';
+import {
+  type BossParticipant,
+  type BossRoutine,
+  type BossStep,
+  createBossStep,
+} from '@core/domain/valueObjects/boss-config.ts';
 
 type BossRoutineCardProps = {
   routine: BossRoutine;
+  /** The bodies in this fight, any of which a step can act on. */
+  participants: BossParticipant[];
+  /** The routines in this fight, any of which a step can speed up. */
+  routines: BossRoutine[];
   onChange: (updated: BossRoutine) => void;
   onRemove: () => void;
 };
 
 /**
- * A repeating sequence the boss performs for as long as the fight lasts.
+ * Describes when a routine happens, for the card's subtitle.
+ * @param {BossRoutine} routine The routine being described.
+ * @returns {string} One line saying when it happens.
  */
-const BossRoutineCard = ({ routine, onChange, onRemove }: BossRoutineCardProps) =>
+const describeCadence = (routine: BossRoutine): string =>
+{
+  // a routine with no cadence yet has nothing to say.
+  if (routine.cadence <= 0)
+  {
+    return 'Set how often this happens.';
+  }
+
+  // a dormant routine starts whenever a step wakes it, and plays at once when it does.
+  if (routine.dormant)
+  {
+    return `Happens every ${routine.cadence} seconds once a step starts it, the first time right away.`;
+  }
+
+  return `Happens every ${routine.cadence} seconds, starting ${routine.cadence} seconds into the fight.`;
+};
+
+/**
+ * A repeating sequence the boss performs for as long as the fight lasts, or from the moment a step starts it.
+ */
+const BossRoutineCard = ({ routine, participants, routines, onChange, onRemove }: BossRoutineCardProps) =>
 {
   const patchStep = (index: number, updated: BossStep) =>
   {
@@ -36,9 +67,7 @@ const BossRoutineCard = ({ routine, onChange, onRemove }: BossRoutineCardProps) 
     onChange({ ...routine, steps: [ ...routine.steps, createBossStep() ] });
   };
 
-  const cadenceHelper = routine.cadence > 0
-    ? `Happens every ${routine.cadence} seconds, starting ${routine.cadence} seconds into the fight.`
-    : 'Set how often this happens.';
+  const cadenceHelper = describeCadence(routine);
 
   return (
     <BoardSectionCard
@@ -76,6 +105,18 @@ const BossRoutineCard = ({ routine, onChange, onRemove }: BossRoutineCardProps) 
           </Tooltip>
         </Stack>
 
+        <FormControlLabel
+          control={
+            <Switch
+              checked={routine.dormant}
+              onChange={event => onChange({ ...routine, dormant: event.target.checked })}
+            />
+          }
+          label={routine.dormant
+            ? 'Waits until a "Start a routine" step wakes it.'
+            : 'Runs from the moment the fight begins.'}
+        />
+
         <Divider/>
 
         {routine.steps.length === 0 && (
@@ -89,6 +130,8 @@ const BossRoutineCard = ({ routine, onChange, onRemove }: BossRoutineCardProps) 
             key={index}
             step={step}
             index={index}
+            participants={participants}
+            routines={routines}
             onChange={updated => patchStep(index, updated)}
             onRemove={() => removeStep(index)}
           />
