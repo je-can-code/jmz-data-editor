@@ -110,7 +110,11 @@ type BossStep struct {
 	Verb   string `json:"verb"`
 	Skill  int    `json:"skill"`
 	Expect string `json:"expect"`
-	Cast   bool   `json:"cast"`
+
+	// Cast is whether forceSkill's skill observes its own cast time, the wind-up a player reads coming. J-ABS-Boss
+	// reads a step that leaves it out as true, so this is a pointer rather than a value: a cast left out stays out
+	// through a save, where a plain bool would come back false and strip the wind-up from every such attack.
+	Cast *bool `json:"cast,omitempty"`
 
 	// Participant is the body the step acts on, by key, and empty means the first body: the boss. A summon
 	// names the body it brings in, which is never the boss.

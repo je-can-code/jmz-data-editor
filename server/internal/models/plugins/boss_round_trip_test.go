@@ -355,3 +355,39 @@ func TestBossStepRoundTripKeepsItsTintAnimationAndLine(t *testing.T) {
 		t.Errorf("the line did not survive a save: got speaker %v lines %v", reloaded["speaker"], reloaded["lines"])
 	}
 }
+
+// TestBossStepRoundTripWritesNoCastWhereNoneWasSaid guards the wind-up of a forced skill that never says whether
+// it casts. J-ABS-Boss reads a cast left out as true, so the skill observes its own cast time, and a save that
+// wrote it back as false would strip the telegraph from every such attack without a word.
+func TestBossStepRoundTripWritesNoCastWhereNoneWasSaid(t *testing.T) {
+	// Arrange- a forced skill that leaves cast to the plugin's default.
+	original := []byte(`{ "verb": "forceSkill", "skill": 2584, "expect": "Devour" }`)
+
+	// Act
+	reloaded := roundTrip[BossStep](t, original)
+
+	// Assert- the skill survives, and no cast was written beside it, so the plugin's default still holds.
+	if reloaded["skill"] != float64(2584) {
+		t.Errorf("the skill did not survive a save: got %v", reloaded["skill"])
+	}
+
+	if cast, written := reloaded["cast"]; written {
+		t.Errorf("a save wrote cast %v onto a forced skill that left it to the plugin's default", cast)
+	}
+}
+
+// TestBossStepRoundTripKeepsACastTurnedOff guards a forced skill whose wind-up was removed on purpose. Leaving
+// cast out keeps the wind-up, so a false dropped here would hand a telegraph back to an attack meant to land
+// without one.
+func TestBossStepRoundTripKeepsACastTurnedOff(t *testing.T) {
+	// Arrange- a forced skill that fires without its cast time.
+	original := []byte(`{ "verb": "forceSkill", "skill": 2609, "expect": "Void Zone", "cast": false }`)
+
+	// Act
+	reloaded := roundTrip[BossStep](t, original)
+
+	// Assert
+	if reloaded["cast"] != false {
+		t.Errorf("a cast turned off did not survive a save: got %v", reloaded["cast"])
+	}
+}
