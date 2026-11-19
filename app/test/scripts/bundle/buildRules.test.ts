@@ -317,7 +317,7 @@ describe('buildRules', () =>
     });
   });
 
-  describe('manifests', () =>
+  describe('editorManifest', () =>
   {
     it('keeps the dev shell\'s manifest but for the bundle\'s own name and the target\'s switches', () =>
     {
@@ -341,7 +341,10 @@ describe('buildRules', () =>
           window: { title: 'JMZ Data Editor', width: 1920 },
         });
     });
+  });
 
+  describe('TARGETS', () =>
+  {
     it('starts the Linux build with popups unblocked, for the windows the shell opens', () =>
     {
       // Arrange: nothing to set up; the targets are the build's own.
@@ -353,7 +356,10 @@ describe('buildRules', () =>
       expect(target)
         .toStrictEqual({ goos: 'linux', goarch: 'amd64', chromiumArgs: '--disable-popup-blocking --use-angle=vulkan' });
     });
+  });
 
+  describe('bundleManifest', () =>
+  {
     it('writes what the bundle is into bundle.json, with its NW.js and its default port', () =>
     {
       // Arrange.
@@ -373,26 +379,59 @@ describe('buildRules', () =>
           port: 47380,
         });
     });
+  });
 
-    it('names the folder, the tarball and versions.json\'s entry by the target and the version', () =>
+  describe('bundleFolderName', () =>
+  {
+    it('names the folder a build is laid out in by the bundle\'s name and the version', () =>
     {
       // Arrange.
       const version = '20261118.2145-925c73f';
 
       // Act.
-      const named = [
-        bundleFolderName(version),
-        tarballName('linux-x64', version),
-        versionsFile('linux-x64', version, tarballName('linux-x64', version), 'ab12'),
-      ];
+      const folder = bundleFolderName(version);
 
       // Assert.
-      expect(named)
-        .toStrictEqual([
-          'jmz-editor-20261118.2145-925c73f',
-          'jmz-editor-linux-x64-20261118.2145-925c73f.tar.gz',
-          { 'linux-x64': { version, file: 'jmz-editor-linux-x64-20261118.2145-925c73f.tar.gz', sha256: 'ab12' } },
-        ]);
+      expect(folder)
+        .toBe('jmz-editor-20261118.2145-925c73f');
+    });
+  });
+
+  describe('tarballName', () =>
+  {
+    it('names the tarball by the bundle\'s name, the target and the version', () =>
+    {
+      // Arrange.
+      const version = '20261118.2145-925c73f';
+
+      // Act.
+      const tarball = tarballName('linux-x64', version);
+
+      // Assert.
+      expect(tarball)
+        .toBe('jmz-editor-linux-x64-20261118.2145-925c73f.tar.gz');
+    });
+  });
+
+  describe('versionsFile', () =>
+  {
+    it('names the tarball, its version and its SHA-256 under the target it runs on', () =>
+    {
+      // Arrange.
+      const file = 'jmz-editor-linux-x64-20261118.2145-925c73f.tar.gz';
+
+      // Act.
+      const versions = versionsFile('linux-x64', '20261118.2145-925c73f', file, 'ab12');
+
+      // Assert.
+      expect(versions)
+        .toStrictEqual({
+          'linux-x64': {
+            version: '20261118.2145-925c73f',
+            file: 'jmz-editor-linux-x64-20261118.2145-925c73f.tar.gz',
+            sha256: 'ab12',
+          },
+        });
     });
   });
 
