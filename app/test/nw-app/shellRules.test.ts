@@ -585,25 +585,17 @@ describe('shellRules', () =>
   {
     describe('isBundled', () =>
     {
-      it('finds a bundle by the manifest beside the shell\'s folder, and lays the bundle out around it', () =>
+      it('finds a bundle by the manifest beside the shell\'s folder', () =>
       {
         // Arrange: a bundle whose build wrote its manifest.
         const exists = (filePath: string) => filePath === '/opt/jmz-editor-1/bundle.json';
 
         // Act.
-        const found = [ rules.isBundled('/opt/jmz-editor-1/editor', exists), rules.bundleLayout('/opt/jmz-editor-1/editor') ];
+        const found = rules.isBundled('/opt/jmz-editor-1/editor', exists);
 
         // Assert.
         expect(found)
-          .toStrictEqual([
-            true,
-            {
-              root: '/opt/jmz-editor-1',
-              manifest: '/opt/jmz-editor-1/bundle.json',
-              api: '/opt/jmz-editor-1/server/jmz-api',
-              ui: '/opt/jmz-editor-1/ui',
-            },
-          ]);
+          .toBe(true);
       });
 
       it('runs a checkout as the dev stack, even beside a manifest in the shell\'s own folder', () =>
@@ -617,6 +609,26 @@ describe('shellRules', () =>
         // Assert.
         expect(found)
           .toBe(false);
+      });
+    });
+
+    describe('bundleLayout', () =>
+    {
+      it('lays a bundle out around the folder above the shell\'s: the manifest, the API\'s binary and the UI\'s pages', () =>
+      {
+        // Arrange: nothing to set up; the shell sits in the bundle's editor folder, as the build puts it.
+
+        // Act.
+        const layout = rules.bundleLayout('/opt/jmz-editor-1/editor');
+
+        // Assert.
+        expect(layout)
+          .toStrictEqual({
+            root: '/opt/jmz-editor-1',
+            manifest: '/opt/jmz-editor-1/bundle.json',
+            api: '/opt/jmz-editor-1/server/jmz-api',
+            ui: '/opt/jmz-editor-1/ui',
+          });
       });
     });
 
@@ -786,9 +798,21 @@ describe('shellRules', () =>
         expect(root)
           .toBe('');
       });
+
+      it('passes over a blank variable to the config\'s folder', () =>
+      {
+        // Arrange: no flag, a variable of spaces, and a config naming a folder.
+
+        // Act.
+        const root = rules.bundleProjectRoot([], { JMZ_PROJECT_ROOT: '   ' }, { projectRoot: '/games/from-config' }, '/home/maker');
+
+        // Assert.
+        expect(root)
+          .toBe('/games/from-config');
+      });
     });
 
-    describe('origin and environment', () =>
+    describe('bundlePort', () =>
     {
       it('uses the config\'s port when it sets one, and the bundle\'s own otherwise', () =>
       {
@@ -801,8 +825,11 @@ describe('shellRules', () =>
         expect(ports)
           .toStrictEqual([ 47390, 47380 ]);
       });
+    });
 
-      it('serves the pages and the API from one loopback origin on that port', () =>
+    describe('bundleOrigin', () =>
+    {
+      it('serves the pages and the API from one loopback origin on the port', () =>
       {
         // Arrange: the bundle's own port.
 
@@ -813,8 +840,11 @@ describe('shellRules', () =>
         expect(origin)
           .toBe('http://127.0.0.1:47380');
       });
+    });
 
-      it('starts the API on that origin, allowing it alone, on the project, serving the pages, and ending with the shell', () =>
+    describe('bundleServerEnvironment', () =>
+    {
+      it('starts the API on the bundle\'s origin, allowing it alone, on the project, serving the pages, and ending with the shell', () =>
       {
         // Arrange: a project folder with a space in it.
 
