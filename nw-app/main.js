@@ -320,8 +320,13 @@ let bootWindow = null;
 let stoppedBy = '';
 
 // the error windows a stopped start left on screen, which the next start replaces: each closes once the window taking
-// its place is on its way, since closing the last window quits the app.
-let replacedProblems = [];
+// its place is on its way, since closing the last window quits the app. One the person closes first is forgotten.
+const replacedProblems = new Set();
+
+// set while a relaunch runs the start again, until the window taking the old error windows' place is on its way. The
+// person may well close the old ones meanwhile, as their words ask, and the app must not quit halfway through a start:
+// that would end the API it has just started.
+let rerunning = false;
 
 // held for the life of the app, so the channel is never collected.
 let shellChannel = null;
@@ -330,11 +335,12 @@ let shellChannel = null;
 const playtests = new Map();
 
 /**
- * Quits once the last visible window has closed, an error window included; the hidden relay window does not count.
+ * Quits once the last visible window has closed, an error window included, unless a relaunch is running the start
+ * again, whose own window is still to come; the hidden relay window does not count.
  */
 function quitWhenLastWindowCloses()
 {
-  if (openWindows.size > 0 || opening.size > 0 || problemWindows.size > 0 || problemsOpening > 0)
+  if (rerunning || openWindows.size > 0 || opening.size > 0 || problemWindows.size > 0 || problemsOpening > 0)
   {
     return;
   }
@@ -667,6 +673,7 @@ function showProblem(text)
     win.on('closed', () =>
     {
       problemWindows.delete(win);
+      replacedProblems.delete(win);
       quitWhenLastWindowCloses();
     });
   });
@@ -674,12 +681,13 @@ function showProblem(text)
 
 /**
  * Closes the error windows a new start replaces, once the window taking their place is on its way and keeps the app
- * open in their stead.
+ * open in their stead; from then on, closing the last window quits the app again.
  */
 function closeReplacedProblems()
 {
-  const replaced = replacedProblems;
-  replacedProblems = [];
+  const replaced = [ ...replacedProblems ];
+  replacedProblems.clear();
+  rerunning = false;
   replaced.forEach(win => win.close(true));
 }
 
@@ -877,12 +885,13 @@ function reportProblem(problem, found)
 /**
  * Runs the bundled editor's start again, for a relaunch after a problem the person can put right stopped it, on this
  * copy's own flags and the config as it reads now. The error windows on screen stay up until the window taking their
- * place is on its way, the editor's or a fresh error window, since closing the last window quits the app.
+ * place is on its way, the editor's or a fresh error window, and closing them meanwhile never quits the app.
  */
 function runAgain()
 {
   stoppedBy = '';
-  replacedProblems = [ ...problemWindows ];
+  rerunning = true;
+  problemWindows.forEach(win => replacedProblems.add(win));
   runBundle().catch(crashed);
 }
 
