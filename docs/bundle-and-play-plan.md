@@ -198,7 +198,9 @@ Steps:
    (`{ "linux-x64": { "version", "file", "sha256" } }`).
 9. **Publish** (`bun run bundle --publish`): copy the tarball, `versions.json` **and the installer**
    (`scripts/bundle/install.ts`, section 3) into `/mnt/exdrive/dev/jmz-builds/`, the editor's sibling of
-   `zed-builds`, which the laptop sees as `/mnt/j-desktop/dev/jmz-builds/`.
+   `zed-builds`, which the laptop sees as `/mnt/j-desktop/dev/jmz-builds/`. The destination can be pointed at another
+   folder (`--publish-dir <dir>`), so tests never write to the real one. Publish refuses to run while the installer is
+   missing.
 
 Layout:
 
@@ -246,7 +248,7 @@ behavior, unchanged) otherwise. Put the decisions in `shellRules.js` with tests.
 | Concern | Dev mode (today) | Bundle mode |
 |---|---|---|
 | What starts | `bun run dev` (Go via `go run`, Vite) | `server/jmz-api` only |
-| First window | the data editor (`/`), or the map editor (`/map.html`) with `--maps` (`shellRules.js:65-68`) | pending D3: the map editor, if it becomes the main editor. The data editor stays one click away through the bar's Data editor button (`WorkspaceChrome.tsx:199`) |
+| First window | the data editor (`/`), or the map editor (`/map.html`) with `--maps` (`shellRules.js:65-68`) | the map editor (`/map.html`), D3's default while D3 is open. One rule in `shellRules.js`, so settling D3 the other way is a one-line change. The data editor stays one click away through the bar's Data editor button (`WorkspaceChrome.tsx:199`) |
 | Origin | UI on `:3000`, API on `:8080` | **one fixed loopback origin** for both, default `http://127.0.0.1:47380`, overridable as `port` in the config. Never an ephemeral port: `localStorage` and the channels are per-origin, so a new port would wipe them every launch. Never 3000 or 8080, so the bundle runs beside a dev stack |
 | API environment | `serverEnvironment(apiBase, uiUrl)` | same function, with `apiBase` and `uiUrl` both the bundle origin, plus `JMZ_PROJECT_ROOT`, `JMZ_UI_DIR=<bundle>/ui` and `JMZ_EXIT_WITH_PARENT=1` |
 | Config file | `<repo>/.config/jmz-data-editor.json` | per user, surviving updates: `$XDG_CONFIG_HOME/jmz-editor/config.json` (default `~/.config/jmz-editor/config.json`); `{ "projectRoot", "port" }` |
@@ -375,8 +377,8 @@ rather than using the copy.
   0.118.0 SDK, and `--publish` copies the tarball, `versions.json` and `install.ts` into `jmz-builds/`. `release/` is
   in `.gitignore`.
 - The bundle-mode rules are covered in `shellRules.test.ts`: which mode, the config and log paths from the XDG
-  variables (`cacheDirectory` in `shellRules.js` already reads `XDG_CACHE_HOME` that way), the fixed origin, the root
-  check and readiness. 2.5's seeding is covered where it lives.
+  variables (`cacheDirectory` in `shellRules.js` already reads `XDG_CACHE_HOME` that way), the fixed origin, the first
+  window, the root check and readiness. 2.5's seeding is covered where it lives.
 - The dead null checks named in 2.2 are gone, along with the tests that only covered them.
 - M3 (section 5), off-screen.
 
@@ -419,9 +421,9 @@ The build started on the evening of 2026-11-18. The latest each step can land an
 
 | Day | Steps |
 |---|---|
-| Wednesday 2026-11-18, evening | P1 beside P2: both merged |
-| Thursday 2026-11-19 | P1 and P2 done; P3 beside P4 |
-| Friday 2026-11-20 | the review and its fixes; L1; L2 by the evening |
+| Wednesday 2026-11-18, evening | P1 beside P2: both merged; P3 beside P4 started |
+| Thursday 2026-11-19 | P3 and P4 done; the bundle installed into a stand-in laptop on the desktop; the review and its fixes |
+| Friday 2026-11-20 | L1; L2 by the evening |
 | Saturday 2026-11-21 | the demo |
 
 ---
@@ -460,7 +462,7 @@ rest stand at their defaults until Jeremy changes one.
 |---|---|---|
 | D1 | Play while that project's playtest is still running | **Settled:** answer "Already running." and launch nothing |
 | D2 | Play with unsaved edits in the window | **Settled:** confirm first: "Play without your unsaved changes?" |
-| D3 | Where the button lives | **Reopened:** Play only in the map editor, with the map editor as the main editor that the bundle opens on. Settled earlier as both the data editor's top bar and the map editor's toolbar. The map editor's button is built either way |
+| D3 | Where the button lives | **Reopened:** Play only in the map editor, with the map editor as the main editor that the bundle opens on. Settled earlier as both the data editor's top bar and the map editor's toolbar. The map editor's button is built either way, and until D3 is settled the bundle opens on the map editor |
 | D4 | A keyboard shortcut for Play | None for now |
 | D5 | The bundle's port | 47380, overridable in the config |
 | D6 | The bundle's NW.js | 0.118.0 SDK, the runtime Chef Adventure is tested on. Moving to a newer NW.js is its own decision |
