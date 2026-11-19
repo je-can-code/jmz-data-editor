@@ -1,6 +1,26 @@
-import { describe, expect, it } from 'vitest';
+import { type ChildProcess, spawn, spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { once } from 'node:events';
+import {
+  chmodSync,
+  copyFileSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  readlinkSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   desktopEntry,
+  foldersInUse,
+  install,
   isSharedLibrary,
   missingLibraries,
   prunable,
@@ -15,7 +35,8 @@ import {
  * build whose version can name a folder and whose tarball sits beside it. Every library ldd could not find is named,
  * however ldd words it. The menu entry starts the editor by an absolute path, because the laptop's PATH lacks
  * ~/.local/bin, and with no terminal. And pruning only ever removes build folders other than the current and previous
- * ones, never a link, so the build in use and the one to go back to are never at risk.
+ * ones and those something is running from, never a link, so neither the build in use, the one to go back to, nor one
+ * still open from before is ever pulled out from under the person using it.
  */
 
 /**
@@ -27,6 +48,188 @@ const VERSION = '20261119.0100-abc1234';
  * A SHA-256 as the bundle build writes one.
  */
 const DIGEST = 'a'.repeat(64);
+
+/**
+ * Builds the tests publish and install, oldest first.
+ */
+const FIRST = '20261118.2200-aaa1111';
+const SECOND = '20261119.0100-bbb2222';
+
+/**
+ * A real program that ldd can read and that runs until it is stopped, standing in for NW.js in every build the tests
+ * publish, so a test can run a build the way the editor runs from it.
+ */
+const SLEEP = '/bin/sleep';
+
+/**
+ * The launcher every published build carries. It says which build it belongs to, then starts that build's nw, so a
+ * test can tell which build the command line link starts.
+ */
+const FAKE_LAUNCHER = [
+  '#!/bin/sh',
+  'HERE="$(dirname "$(readlink -f "$0")")"',
+  'echo "$HERE"',
+  'exec "$HERE/nwjs/nw" 0',
+  '',
+].join('\n');
+
+/**
+ * A stand-in for the laptop, inside a folder of the test's own: an empty home folder, and a builds folder like the
+ * share's.
+ */
+type Laptop = {
+  /**
+   * The home folder installs go into.
+   */
+  readonly home: string;
+
+  /**
+   * The builds folder, holding what the desktop published.
+   */
+  readonly builds: string;
+
+  /**
+   * The install folder inside the home folder.
+   */
+  readonly root: string;
+};
+
+/**
+ * The folders made for the tests, removed after each.
+ */
+const folders: string[] = [];
+
+/**
+ * The programs the tests start, stopped after each.
+ */
+const programs: ChildProcess[] = [];
+
+afterEach(() =>
+{
+  programs.splice(0)
+    .forEach(program => program.kill('SIGKILL'));
+  folders.splice(0)
+    .forEach(folder => rmSync(folder, { recursive: true, force: true }));
+  vi.restoreAllMocks();
+});
+
+/**
+ * Makes a stand-in laptop with nothing installed and nothing published.
+ * @returns {Laptop} The laptop.
+ */
+const laptop = (): Laptop =>
+{
+  const folder = mkdtempSync(join(tmpdir(), 'bundle-install-test-'));
+  folders.push(folder);
+  const home = join(folder, 'home');
+  const builds = join(folder, 'builds');
+  mkdirSync(home);
+  mkdirSync(builds);
+  return { home, builds, root: join(home, '.local', 'jmz-editor') };
+};
+
+/**
+ * Hashes a file the way the bundle build does.
+ * @param {string} path The file.
+ * @returns {string} Its SHA-256, in lowercase hex.
+ */
+const sha256Of = (path: string): string =>
+{
+  return createHash('sha256')
+    .update(readFileSync(path))
+    .digest('hex');
+};
+
+/**
+ * Publishes a small build to a laptop's builds folder the way the desktop does: its tarball, and versions.json naming
+ * it, neither one executable, as the share mounts them. The build is laid out as a bundle is: the launcher, an API
+ * that reports the build's version, NW.js with its lib folder, and the UI's icon.
+ * @param {Laptop} machine The laptop.
+ * @param {string} version The build's version.
+ */
+const publishBuild = (machine: Laptop, version: string): void =>
+{
+  const packing = mkdtempSync(join(tmpdir(), 'bundle-install-build-'));
+  folders.push(packing);
+  const build = join(packing, `jmz-editor-${version}`);
+  mkdirSync(join(build, 'server'), { recursive: true });
+  mkdirSync(join(build, 'nwjs', 'lib'), { recursive: true });
+  mkdirSync(join(build, 'ui'));
+  writeFileSync(join(build, 'jmz-editor'), FAKE_LAUNCHER);
+  writeFileSync(join(build, 'server', 'jmz-api'), `#!/bin/sh\necho ${version}\n`);
+  copyFileSync(SLEEP, join(build, 'nwjs', 'nw'));
+  writeFileSync(join(build, 'ui', 'favicon.ico'), `the icon of ${version}`);
+  [ 'jmz-editor', 'server/jmz-api', 'nwjs/nw' ].forEach(file => chmodSync(join(build, file), 0o755));
+
+  // the tarball keeps every mode; the share then takes every execute bit off the published files themselves.
+  const file = `jmz-editor-linux-x64-${version}.tar.gz`;
+  const tarball = join(machine.builds, file);
+  spawnSync('tar', [ '-czf', tarball, '-C', packing, `jmz-editor-${version}` ]);
+  const versions = join(machine.builds, 'versions.json');
+  writeFileSync(versions, JSON.stringify({ 'linux-x64': { version, file, sha256: sha256Of(tarball) } }));
+  [ tarball, versions ].forEach(path => chmodSync(path, 0o664));
+};
+
+/**
+ * Starts a program from inside an installed build and waits until it runs, the way the editor's NW.js, its API or a
+ * playtest runs from the build that holds it.
+ * @param {string} executable The program.
+ * @returns {Promise<ChildProcess>} The running program, which the test's cleanup stops.
+ */
+const startFrom = async (executable: string): Promise<ChildProcess> =>
+{
+  const program = spawn(executable, [ '600' ], { stdio: 'ignore' });
+  programs.push(program);
+  await once(program, 'spawn');
+  return program;
+};
+
+/**
+ * Lists everything under a folder: each folder and file by its path and the inode it is, and each link by what it
+ * names. Two listings taken around an install tell whether it changed anything there, a folder replaced by one of the
+ * same name included.
+ * @param {string} folder The folder.
+ * @param {string} inside Where inside it to list from, empty for all of it.
+ * @returns {string[]} One line per thing, in name order.
+ */
+const listing = (folder: string, inside = ''): string[] =>
+{
+  return readdirSync(join(folder, inside))
+    .sort()
+    .flatMap(name =>
+    {
+      const path = join(inside, name);
+      const stats = lstatSync(join(folder, path));
+      if (stats.isSymbolicLink())
+      {
+        return [ `${path} -> ${readlinkSync(join(folder, path))}` ];
+      }
+
+      return stats.isDirectory()
+        ? [ `${path}/ #${stats.ino}`, ...listing(folder, path) ]
+        : [ `${path} #${stats.ino}` ];
+    });
+};
+
+/**
+ * Runs something that is expected to be refused and hands back what the refusal said.
+ * @param {() => unknown} attempt What to run.
+ * @returns {string} The refusal's message, or a note that nothing was refused.
+ */
+const refusalFrom = (attempt: () => unknown): string =>
+{
+  try
+  {
+    attempt();
+    return 'nothing was refused';
+  }
+  catch (error)
+  {
+    return error instanceof Refusal
+      ? error.message
+      : `not a refusal: ${String(error)}`;
+  }
+};
 
 /**
  * Builds versions.json naming one Linux build, beside a Windows build the installer must leave alone.
@@ -48,17 +251,7 @@ const versionsNaming = (linux: Record<string, unknown>): string =>
  */
 const refusalOf = (text: string): string =>
 {
-  try
-  {
-    readPublishedBuild(text);
-    return 'nothing was refused';
-  }
-  catch (error)
-  {
-    return error instanceof Refusal
-      ? error.message
-      : `not a refusal: ${String(error)}`;
-  }
+  return refusalFrom(() => readPublishedBuild(text));
 };
 
 describe('install', () =>
@@ -251,11 +444,60 @@ describe('install', () =>
     });
   });
 
+  describe('foldersInUse', () =>
+  {
+    it('names each folder something runs from by its whole name, never one whose name only starts the same', () =>
+    {
+      // Arrange- a build beside its dirty twin, whose name the clean one's begins, a staging folder, a link, and
+      // programs running from the twin, from the staging folder, from outside, and from a folder beside the install
+      // folder whose name the install folder's begins.
+      const root = '/home/je/.local/jmz-editor';
+      const entries = [
+        { name: 'current', isFolder: false },
+        { name: '20261119.0100-abc1234', isFolder: true },
+        { name: '20261119.0100-abc1234-dirty', isFolder: true },
+        { name: '.incoming-x1y2z3', isFolder: true },
+        { name: '20261118.2300-bbb', isFolder: true },
+      ];
+      const executables = [
+        '/home/je/.local/jmz-editor/20261119.0100-abc1234-dirty/nwjs/nw',
+        '/home/je/.local/jmz-editor/.incoming-x1y2z3/jmz-editor-20261119.0100-ccc/server/jmz-api',
+        '/usr/bin/bash',
+        '/home/je/.local/jmz-editor-old/20261118.2300-bbb/nwjs/nw',
+      ];
+
+      // Act
+      const inUse = foldersInUse(root, entries, { readable: true, executables });
+
+      // Assert
+      expect(inUse)
+        .toEqual([ '20261119.0100-abc1234-dirty', '.incoming-x1y2z3' ]);
+    });
+
+    it('counts every folder as in use when /proc could not be read, and never a link', () =>
+    {
+      // Arrange- both links and two builds, with nothing known about what runs.
+      const entries = [
+        { name: 'current', isFolder: false },
+        { name: 'previous', isFolder: false },
+        { name: '20261119.0100-ccc', isFolder: true },
+        { name: '20261118.2200-aaa', isFolder: true },
+      ];
+
+      // Act
+      const inUse = foldersInUse('/home/je/.local/jmz-editor', entries, { readable: false, executables: [] });
+
+      // Assert
+      expect(inUse)
+        .toEqual([ '20261119.0100-ccc', '20261118.2200-aaa' ]);
+    });
+  });
+
   describe('prunable', () =>
   {
     it('removes every build folder but the current and previous, and what a run that stopped part-way left', () =>
     {
-      // Arrange- both links, three builds, a half-unpacked build, and a link left mid-switch.
+      // Arrange- both links, three builds, a half-unpacked build, and a link left mid-switch, with nothing running.
       const entries = [
         { name: 'current', isFolder: false },
         { name: 'previous', isFolder: false },
@@ -267,11 +509,31 @@ describe('install', () =>
       ];
 
       // Act
-      const removed = prunable(entries, [ '20261119.0100-ccc', '20261118.2300-bbb' ]);
+      const removed = prunable(entries, [ '20261119.0100-ccc', '20261118.2300-bbb' ], []);
 
       // Assert
       expect(removed)
         .toEqual([ '20261118.2200-aaa', '.incoming-x1y2z3' ]);
+    });
+
+    it('keeps every folder something runs from, and still removes the one beside it that nothing does', () =>
+    {
+      // Arrange- the current and previous builds, an older one a rollback still runs from, and one older still.
+      const entries = [
+        { name: 'current', isFolder: false },
+        { name: 'previous', isFolder: false },
+        { name: '20261119.0100-ccc', isFolder: true },
+        { name: '20261118.2300-bbb', isFolder: true },
+        { name: '20261118.2200-aaa', isFolder: true },
+        { name: '20261118.2100-zzz', isFolder: true },
+      ];
+
+      // Act
+      const removed = prunable(entries, [ '20261119.0100-ccc', '20261118.2300-bbb' ], [ '20261118.2200-aaa' ]);
+
+      // Assert
+      expect(removed)
+        .toEqual([ '20261118.2100-zzz' ]);
     });
 
     it('keeps the only build there is after a first install', () =>
@@ -280,11 +542,46 @@ describe('install', () =>
       const entries = [ { name: 'current', isFolder: false }, { name: '20261119.0100-ccc', isFolder: true } ];
 
       // Act
-      const removed = prunable(entries, [ '20261119.0100-ccc' ]);
+      const removed = prunable(entries, [ '20261119.0100-ccc' ], []);
 
       // Assert
       expect(removed)
         .toEqual([]);
+    });
+  });
+
+  describe('install', () =>
+  {
+    beforeEach(() =>
+    {
+      // the installer says what it did on the console; these tests read what it did from the folders instead.
+      vi.spyOn(console, 'log')
+        .mockImplementation(() => undefined);
+    });
+
+    it('refuses to replace a build of its own version while something runs from it, and changes nothing', async () =>
+    {
+      // Arrange- the first build kept as previous behind the second, started through previous as a rollback is, and
+      // then published again.
+      const machine = laptop();
+      publishBuild(machine, FIRST);
+      install(machine.builds, machine.home);
+      publishBuild(machine, SECOND);
+      install(machine.builds, machine.home);
+      const editor = await startFrom(join(machine.root, 'previous', 'nwjs', 'nw'));
+      publishBuild(machine, FIRST);
+      const before = listing(machine.home);
+
+      // Act
+      const message = refusalFrom(() => install(machine.builds, machine.home));
+
+      // Assert- the running editor's own file is still there, rather than deleted from under it.
+      expect([ message, listing(machine.home), readlinkSync(`/proc/${editor.pid}/exe`) ])
+        .toEqual([
+          `jmz-editor ${FIRST} is running from ${join(machine.root, FIRST)}. Close it, then run this again.`,
+          before,
+          join(realpathSync(machine.root), FIRST, 'nwjs', 'nw'),
+        ]);
     });
   });
 });

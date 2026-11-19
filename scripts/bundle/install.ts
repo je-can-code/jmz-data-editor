@@ -12,8 +12,10 @@
  * A new build is tried before anything switches to it. Its API has to report the version versions.json names, and
  * NW.js and every library beside it have to find what they load on this machine. A build that fails either is refused
  * by name and changes nothing. One that passes becomes ~/.local/jmz-editor/current, the build it replaced is kept as
- * previous, older ones are removed, and the app menu gets an entry that starts it with no terminal. Running it again
- * with nothing new to install says so and stops.
+ * previous, older ones are removed, and the app menu gets an entry that starts it with no terminal. A build something
+ * is still running from, such as an editor opened before the install or a rollback started through previous, is never
+ * removed or replaced: it stays until an install finds it closed. Running it again with nothing new to install says so
+ * and stops.
  *
  * Only Bun and Node built-ins are used, nothing from the repo or node_modules, since this file runs far from both.
  */
@@ -27,13 +29,14 @@ import {
   readdirSync,
   readFileSync,
   readlinkSync,
+  realpathSync,
   renameSync,
   rmSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
-import { basename, dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 /**
@@ -112,6 +115,16 @@ const DESKTOP_FILE = '.local/share/applications/jmz-editor.desktop';
  * How long the API gets to answer -version before its build is refused, so a build that hangs cannot hang the install.
  */
 const VERSION_TIMEOUT_MS = 10_000;
+
+/**
+ * The folder Linux describes every running process in, one folder per process id.
+ */
+const PROC = '/proc';
+
+/**
+ * What a process's folder in /proc is named: its id, and nothing else.
+ */
+const PROCESS_ID = /^\d+$/u;
 
 /**
  * What a version and a tarball's name may look like: a plain file name, never a hidden one or a path, since a version
@@ -197,6 +210,21 @@ type InstallEntry = {
    * True for a real folder; false for a link or a file, which pruning never touches.
    */
   readonly isFolder: boolean;
+};
+
+/**
+ * What is running on this machine, as /proc tells it.
+ */
+type RunningPrograms = {
+  /**
+   * False when /proc could not be read at all, so nothing can be shown not to be running.
+   */
+  readonly readable: boolean;
+
+  /**
+   * The executable of every running program /proc would name, each by the real path the system keeps for it.
+   */
+  readonly executables: string[];
 };
 
 /**
@@ -340,16 +368,41 @@ const desktopEntry = (launcher: string, icon: string): string =>
 };
 
 /**
+ * Names the folders in the install folder that something is running from. The editor's NW.js, its API and a playtest
+ * each run from inside the build that holds them, so a build with any of them running is in use, whichever link it was
+ * started through. A folder is matched by its whole name, never by how a path starts, since one version's name can
+ * begin another's, as 20261119.0100-abc1234 begins 20261119.0100-abc1234-dirty. When /proc could not be read, every
+ * folder counts as in use, since none can be shown free.
+ * @param {string} root The install folder's real path, since /proc names every executable by its real path.
+ * @param {InstallEntry[]} entries Everything in the install folder.
+ * @param {RunningPrograms} running What is running.
+ * @returns {string[]} The names of the folders in use.
+ */
+const foldersInUse = (root: string, entries: InstallEntry[], running: RunningPrograms): string[] =>
+{
+  // an executable's path inside the install folder starts with the folder it runs from, while the path of one outside
+  // it starts by climbing out, which no folder in it is named.
+  const runFrom = running.executables.map(executable => relative(root, executable))
+    .map(path => path.split(sep)[0]);
+
+  return entries.filter(entry => entry.isFolder && (running.readable === false || runFrom.includes(entry.name)))
+    .map(entry => entry.name);
+};
+
+/**
  * Names what to remove from the install folder once a build has been switched to: every build folder but the current
- * and previous ones, and every folder a run that stopped part-way left behind. Links are never removed, so neither
- * current nor previous can ever be.
+ * and previous ones, and every folder a run that stopped part-way left behind, unless something is running from it.
+ * Links are never removed, so neither current nor previous can ever be.
  * @param {InstallEntry[]} entries Everything in the install folder.
  * @param {string[]} kept The builds to keep: the current one, and the previous one when there is one.
+ * @param {string[]} inUse The folders something is running from, as foldersInUse names them.
  * @returns {string[]} The names to remove.
  */
-const prunable = (entries: InstallEntry[], kept: string[]): string[] =>
+const prunable = (entries: InstallEntry[], kept: string[], inUse: string[]): string[] =>
 {
-  return entries.filter(entry => entry.isFolder && kept.includes(entry.name) === false)
+  return entries.filter(entry => entry.isFolder
+    && kept.includes(entry.name) === false
+    && inUse.includes(entry.name) === false)
     .map(entry => entry.name);
 };
 
@@ -380,6 +433,59 @@ const linkedVersion = (root: string, link: string): string =>
   return existsSync(path)
     ? basename(readlinkSync(path))
     : '';
+};
+
+/**
+ * Lists everything in the install folder, as pruning and the in-use rule see it.
+ * @param {string} root The install folder.
+ * @returns {InstallEntry[]} Each thing in it.
+ */
+const entriesIn = (root: string): InstallEntry[] =>
+{
+  return readdirSync(root, { withFileTypes: true })
+    .map(entry => ({ name: entry.name, isFolder: entry.isDirectory() }));
+};
+
+/**
+ * Reads one process's executable from /proc.
+ * @param {string} id The process's id.
+ * @returns {string[]} The executable's real path, or nothing for a process that has ended since it was listed, that
+ * is part of the kernel, or that belongs to another user. The editor and everything it starts run as the same user as
+ * the installer, so none of those can be one of them.
+ */
+const executableOf = (id: string): string[] =>
+{
+  try
+  {
+    return [ readlinkSync(join(PROC, id, 'exe')) ];
+  }
+  catch
+  {
+    return [];
+  }
+};
+
+/**
+ * Reads what is running from /proc: the executable of every process, which is how a build folder is known to be in
+ * use.
+ * @returns {RunningPrograms} What is running.
+ */
+const runningPrograms = (): RunningPrograms =>
+{
+  // the installer is running too, so a /proc that cannot name the installer's own executable cannot be read at all.
+  try
+  {
+    readlinkSync(join(PROC, 'self', 'exe'));
+  }
+  catch
+  {
+    return { readable: false, executables: [] };
+  }
+
+  const executables = readdirSync(PROC)
+    .filter(name => PROCESS_ID.test(name))
+    .flatMap(executableOf);
+  return { readable: true, executables };
 };
 
 /**
@@ -606,7 +712,9 @@ const stage = (buildsFolder: string, build: PublishedBuild, root: string): Stage
 };
 
 /**
- * Moves a tried build into place and switches to it, keeps the build it replaced as previous, and removes the rest.
+ * Moves a tried build into place and switches to it, keeps the build it replaced as previous, and removes the rest,
+ * except any build something is still running from. A build of the same version that something is running from is
+ * refused rather than replaced, with the tried build taken away again, so nothing has changed.
  * @param {InstallPlaces} places Where the install goes.
  * @param {string} version The build's version.
  * @param {StagedBuild} staged The tried build.
@@ -615,8 +723,18 @@ const stage = (buildsFolder: string, build: PublishedBuild, root: string): Stage
  */
 const switchTo = (places: InstallPlaces, version: string, staged: StagedBuild, replaced: string): string[] =>
 {
-  // a folder of the same version can only be a previous build or one an earlier run left, never the current one.
+  // what is running is read once, just before anything moves, and decides both what may be replaced and what may go.
+  const inUse = foldersInUse(realpathSync(places.root), entriesIn(places.root), runningPrograms());
+
+  // a folder of the same version can only be a previous build or one an earlier run left, never the current one. A
+  // previous build can be running, started through previous to go back, and its files are never pulled out from under
+  // it.
   const destination = join(places.root, version);
+  if (inUse.includes(version))
+  {
+    rmSync(staged.incoming, { recursive: true, force: true });
+    throw new Refusal(`jmz-editor ${version} is running from ${destination}. Close it, then run this again.`);
+  }
   rmSync(destination, { recursive: true, force: true });
   renameSync(staged.folder, destination);
   rmSync(staged.incoming, { recursive: true, force: true });
@@ -628,10 +746,10 @@ const switchTo = (places: InstallPlaces, version: string, staged: StagedBuild, r
   }
   pointLink(join(places.root, CURRENT_LINK), version);
 
+  // a build still running stays past the two it keeps: an editor opened before this install, or a rollback started
+  // through previous. The next install to find it closed removes it.
   const kept = [ version, linkedVersion(places.root, PREVIOUS_LINK) ].filter(name => name !== '');
-  const entries = readdirSync(places.root, { withFileTypes: true })
-    .map(entry => ({ name: entry.name, isFolder: entry.isDirectory() }));
-  const removed = prunable(entries, kept);
+  const removed = prunable(entriesIn(places.root), kept, inUse);
   removed.forEach(name => rmSync(join(places.root, name), { recursive: true, force: true }));
   return removed;
 };
@@ -722,5 +840,14 @@ if (script !== undefined && pathToFileURL(script).href === import.meta.url)
   main();
 }
 
-export { desktopEntry, isSharedLibrary, missingLibraries, prunable, readPublishedBuild, Refusal };
-export type { InstallEntry, PublishedBuild };
+export {
+  desktopEntry,
+  foldersInUse,
+  install,
+  isSharedLibrary,
+  missingLibraries,
+  prunable,
+  readPublishedBuild,
+  Refusal,
+};
+export type { InstallEntry, PublishedBuild, RunningPrograms };
