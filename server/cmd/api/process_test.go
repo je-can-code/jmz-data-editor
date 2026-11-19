@@ -131,11 +131,12 @@ func startAPI(t *testing.T, binary string, settings ...string) *runningAPI {
 // alone, and a clean exit, from a server whose settings would stop it at once if they were read.
 func TestVersionAnswersBeforeAnyConfigurationIsRead(t *testing.T) {
 	// Arrange- an address off the loopback interface and a UI folder that is not there, each refused
-	// the moment configuration is read.
+	// the moment configuration is read, over an empty project of the test's own.
 	command := exec.Command(buildAPI(t), "-version")
 	command.Env = append(os.Environ(),
 		"JMZ_API_ADDRESS=0.0.0.0:8080",
-		"JMZ_UI_DIR="+filepath.Join(t.TempDir(), "missing"))
+		"JMZ_UI_DIR="+filepath.Join(t.TempDir(), "missing"),
+		"JMZ_PROJECT_ROOT="+t.TempDir())
 
 	// Act.
 	output, err := command.CombinedOutput()
