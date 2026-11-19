@@ -223,7 +223,7 @@ ones.
 
 With a production build always naming a base, `getJmzHttpApiBase()` returns `string`, and the null checks its callers
 still make are dead: `main.tsx`, `BackendGate`'s "Backend not configured" screen, `ImageService`, `JabsPluginsReader`,
-`EnemyPlacementsReader` and `browserEnvironment`. P3 removes them along with 2.5, which works in `BackendGate` too.
+`EnemyPlacementsReader` and `browserEnvironment`. P4 removes them along with 2.5, which works in `BackendGate` too.
 
 ### 2.3 The API serves the UI
 
@@ -330,8 +330,8 @@ the demo never waits on the merge.
 |---|---|---|---|
 | P1 Play | section 1 | first; **merged 2026-11-18** | P3: `nw-app/main.js`, `nw-app/shellRules.js` |
 | P2 Server | 2.2; 2.3; the API's `-version` flag (2.1, step 2); exit-with-parent (2.4) | beside P1; **merged 2026-11-18** | nothing |
-| P3 Bundle | the rest of 2.1, publish included; the rest of 2.4 except the atomic save; 2.5; the dead null checks named in 2.2 | once P1's off-screen checks and P2 are done | P1 |
-| P4 Install | section 3's `install.ts`; the atomic save in 2.4 | beside P3, built against the layout in 2.1 | nothing |
+| P3 Bundle | the rest of 2.1, publish included; the rest of 2.4 except the atomic save | once P1's off-screen checks and P2 are done | P1 |
+| P4 Install | section 3's `install.ts`; the atomic save in 2.4; 2.5; the dead null checks named in 2.2 | beside P3, built against the layout in 2.1 | nothing |
 | P5 Projects | 2.6 | after Saturday, unless there is time before | P3 |
 
 **Off-screen** means an Xvfb display with `WAYLAND_DISPLAY` unset and no sound, run so it cannot touch an editor
@@ -339,7 +339,11 @@ already open on the desktop: from a checkout other than the main one (the shell 
 `<repo>/.config/jmz-data-editor.json` on every boot, `main.js:375-379`), on its own `--api-base` and `--ui-url` ports
 (the open editor holds 8080 and 3000), and with its own `--user-data-dir` (a launch onto the open editor's profile
 would hand off to it instead of starting). Setting `XDG_CACHE_HOME` for a run also moves Go's build cache, so a cold
-`go run` can miss the dev runner's 5 s health wait: warm that cache with `go build` first.
+`go run` can miss the dev runner's 5 s health wait: warm that cache with `go build` first. NW.js keeps a crash-report
+folder under `~/.config/<manifest name>` even when given `--user-data-dir`, so every launch of the bundle and every
+run of the installer uses a temp `HOME`; with `HOME` moved, pin `GOCACHE`, `GOMODCACHE` and `GOPATH` to the real ones
+for anything that runs Go. Committed tests run on CI, which has no NW.js, no game folder and no `/mnt`: the stand-in
+laptop and the acceptance checks are scripted runs, not test files.
 
 **The test project** is a temp copy of Chef Adventure's folder, data and all, whose `package.json` points `main` at a
 recording `main.js` that writes `nw.App.argv` and `nw.App.dataPath` to a file and stays open. The editor loads and
@@ -374,12 +378,12 @@ rather than using the copy.
 ### P3 Bundle: done when
 
 - `bun run bundle` writes the tarball and `versions.json` under `release/` and refuses any NW.js but the pinned
-  0.118.0 SDK, and `--publish` copies the tarball, `versions.json` and `install.ts` into `jmz-builds/`. `release/` is
-  in `.gitignore`.
+  0.118.0 SDK. `--publish` refuses while `scripts/bundle/install.ts` is missing, and otherwise copies the tarball,
+  `versions.json` and the installer into the publish folder. `release/` is in `.gitignore`. The whole chain, publish
+  into a scratch folder and then install from it, runs once P3 and P4 are both merged.
 - The bundle-mode rules are covered in `shellRules.test.ts`: which mode, the config and log paths from the XDG
   variables (`cacheDirectory` in `shellRules.js` already reads `XDG_CACHE_HOME` that way), the fixed origin, the first
-  window, the root check and readiness. 2.5's seeding is covered where it lives.
-- The dead null checks named in 2.2 are gone, along with the tests that only covered them.
+  window, the root check and readiness.
 - M3 (section 5), off-screen.
 
 ### P4 Install: done when
@@ -390,8 +394,13 @@ rather than using the copy.
   anything older; a tarball whose SHA-256 is wrong and a build with a library missing are each refused, naming the
   cause and changing nothing.
 - `install.ts` uses Bun and Node built-ins only.
+- The `.desktop` file's `Exec` is an absolute path, since the laptop's `PATH` lacks `~/.local/bin`.
 - `store.save` writes through `WriteFileAtomic` (2.4), and `go test ./...` passes in `server/` with a test that a
-  failed write leaves the old file whole.
+  failed write leaves the old file whole. A data editor save is not reported back to the page as a change made
+  outside the editor (a rename reaches the file watcher differently from a write in place).
+- 2.5's seeding is covered where it lives, and a production build served by the API (as in M1), in a fresh profile,
+  shows the API's project root in the top bar.
+- The dead null checks named in 2.2 are gone, along with the tests that only covered them.
 - The app menu entry uses the UI's `favicon.ico`, the only icon the repo has. Whether the menu wants a PNG instead is
   settled in M4.
 
