@@ -146,8 +146,10 @@ const sha256Of = (path: string): string =>
  * that reports the build's version, NW.js with its lib folder, and the UI's icon.
  * @param {Laptop} machine The laptop.
  * @param {string} version The build's version.
+ * @param {(build: string) => void} damage What to do to the build's folder before it is packed, for a build that should
+ * be refused; nothing by default.
  */
-const publishBuild = (machine: Laptop, version: string): void =>
+const publishBuild = (machine: Laptop, version: string, damage: (build: string) => void = () => undefined): void =>
 {
   const packing = mkdtempSync(join(tmpdir(), 'bundle-install-build-'));
   folders.push(packing);
@@ -160,6 +162,7 @@ const publishBuild = (machine: Laptop, version: string): void =>
   copyFileSync(SLEEP, join(build, 'nwjs', 'nw'));
   writeFileSync(join(build, 'ui', 'favicon.ico'), `the icon of ${version}`);
   [ 'jmz-editor', 'server/jmz-api', 'nwjs/nw' ].forEach(file => chmodSync(join(build, file), 0o755));
+  damage(build);
 
   // the tarball keeps every mode; the share then takes every execute bit off the published files themselves.
   const file = `jmz-editor-linux-x64-${version}.tar.gz`;
@@ -617,6 +620,57 @@ describe('install', () =>
             '',
           ],
         ]);
+    });
+
+    it('refuses a build whose launcher has lost its execute bit, and changes nothing', () =>
+    {
+      // Arrange- a build installed, then a newer one packed with its launcher no longer executable.
+      const machine = laptop();
+      publishBuild(machine, FIRST);
+      install(machine.builds, machine.home);
+      publishBuild(machine, SECOND, build => chmodSync(join(build, 'jmz-editor'), 0o644));
+      const before = listing(machine.home);
+
+      // Act
+      const message = refusalFrom(() => install(machine.builds, machine.home));
+
+      // Assert
+      expect([ message, listing(machine.home) ])
+        .toEqual([ 'The build\'s jmz-editor launcher is not executable.', before ]);
+    });
+
+    it('refuses a build whose NW.js has lost its execute bit, and changes nothing', () =>
+    {
+      // Arrange- a build installed, then a newer one packed with its NW.js no longer executable, which ldd still reads.
+      const machine = laptop();
+      publishBuild(machine, FIRST);
+      install(machine.builds, machine.home);
+      publishBuild(machine, SECOND, build => chmodSync(join(build, 'nwjs', 'nw'), 0o644));
+      const before = listing(machine.home);
+
+      // Act
+      const message = refusalFrom(() => install(machine.builds, machine.home));
+
+      // Assert
+      expect([ message, listing(machine.home) ])
+        .toEqual([ 'The build\'s nwjs/nw is not executable.', before ]);
+    });
+
+    it('refuses a build with no NW.js as the build\'s fault, not the machine\'s, and changes nothing', () =>
+    {
+      // Arrange- a build installed, then a newer one packed without its NW.js.
+      const machine = laptop();
+      publishBuild(machine, FIRST);
+      install(machine.builds, machine.home);
+      publishBuild(machine, SECOND, build => rmSync(join(build, 'nwjs', 'nw')));
+      const before = listing(machine.home);
+
+      // Act
+      const message = refusalFrom(() => install(machine.builds, machine.home));
+
+      // Assert
+      expect([ message, listing(machine.home) ])
+        .toEqual([ 'The build has no nwjs/nw.', before ]);
     });
   });
 });

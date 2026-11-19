@@ -22,6 +22,8 @@
 import { spawnSync, type SpawnSyncReturns } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
+  accessSync,
+  constants,
   copyFileSync,
   existsSync,
   mkdirSync,
@@ -619,17 +621,44 @@ const missingFromMachine = (build: string): string[] =>
 };
 
 /**
- * Tries a build before anything switches to it: it has its launcher, its API reports the version versions.json names,
- * and NW.js and every library beside it find what they load on this machine.
+ * Says why a file in a build cannot be run, or nothing when it can.
+ * @param {string} path The file.
+ * @param {string} name What a refusal calls it.
+ * @returns {string} Why it cannot be run, or empty when it can.
+ */
+const whyNotRunnable = (path: string, name: string): string =>
+{
+  try
+  {
+    accessSync(path, constants.X_OK);
+    return '';
+  }
+  catch (error)
+  {
+    return (error as NodeJS.ErrnoException).code === 'ENOENT'
+      ? `The build has no ${name}.`
+      : `The build's ${name} is not executable.`;
+  }
+};
+
+/**
+ * Tries a build before anything switches to it: its launcher and NW.js can be run, its API reports the version
+ * versions.json names, and NW.js and every library beside it find what they load on this machine.
  * @param {string} build The build's folder.
  * @param {string} version The version versions.json names.
  */
 const tryBuild = (build: string, version: string): void =>
 {
-  // the menu entry and the command line link both start the launcher, so a build without one cannot be started.
-  if (existsSync(join(build, LAUNCHER)) === false)
+  // the menu entry and the command line link both start the launcher, which starts NW.js, so a build cannot be started
+  // without both. Each has to be runnable too: one that lost its execute bit passes every check after this one, ldd's
+  // included, then fails from the menu, where there is no terminal to say why.
+  const unrunnable = [
+    whyNotRunnable(join(build, LAUNCHER), `${LAUNCHER} launcher`),
+    whyNotRunnable(join(build, NWJS), NWJS),
+  ].filter(problem => problem !== '');
+  if (unrunnable.length > 0)
   {
-    throw new Refusal(`The build has no ${LAUNCHER} launcher.`);
+    throw new Refusal(unrunnable.join('\n'));
   }
 
   // the API answers -version before it reads any configuration, so it can be asked on a machine with no project open.
