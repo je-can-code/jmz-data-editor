@@ -13,6 +13,7 @@ import {
   readlinkSync,
   realpathSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -826,6 +827,36 @@ describe('install', () =>
           [ FIRST, SECOND, THIRD, 'current', 'previous' ],
           THIRD,
           SECOND,
+          join(realpathSync(machine.root), FIRST, 'nwjs', 'nw'),
+        ]);
+    });
+
+    it('keeps a build the editor is still running from when the home folder is reached through a link', async () =>
+    {
+      // Arrange- a home folder reached through a link, the editor started on the first build through it, and two newer
+      // builds installed through it while the editor stays open. A running program is named by its real path, which
+      // never passes through the link.
+      const machine = laptop();
+      const linkedHome = join(machine.home, '..', 'linked-home');
+      symlinkSync(machine.home, linkedHome);
+      publishBuild(machine, FIRST);
+      install(machine.builds, linkedHome);
+      const editor = await startFrom(join(linkedHome, '.local', 'jmz-editor', 'current', 'nwjs', 'nw'));
+      publishBuild(machine, SECOND);
+      install(machine.builds, linkedHome);
+      publishBuild(machine, THIRD);
+
+      // Act
+      install(machine.builds, linkedHome);
+
+      // Assert- the running editor's own file is still there, rather than deleted from under it.
+      expect([
+        readdirSync(machine.root)
+          .sort(),
+        readlinkSync(`/proc/${editor.pid}/exe`),
+      ])
+        .toEqual([
+          [ FIRST, SECOND, THIRD, 'current', 'previous' ],
           join(realpathSync(machine.root), FIRST, 'nwjs', 'nw'),
         ]);
     });

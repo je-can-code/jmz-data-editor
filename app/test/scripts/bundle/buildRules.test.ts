@@ -259,8 +259,9 @@ describe('buildRules', () =>
 
     it('calls a tree dirty for an untracked file in anything the build reads', () =>
     {
-      // Arrange: one untracked file under each folder the build reads, a folder git lists whole, a quoted name, and
-      // the root lockfile under either name Bun writes.
+      // Arrange: one untracked file under each folder the build reads, a folder git lists whole, a quoted name, the
+      // root lockfile under either name Bun writes, and one listed after a file the build does not read, so the whole
+      // status has to be read and not just its first line.
       const statuses = [
         '?? app/src/notes.ts',
         '?? server/internal/extra.go',
@@ -270,6 +271,7 @@ describe('buildRules', () =>
         '?? "app/src/a b.ts"',
         '?? bun.lock',
         '?? bun.lockb',
+        '?? docs/a.md\n?? app/b.ts',
       ];
 
       // Act.
@@ -277,7 +279,7 @@ describe('buildRules', () =>
 
       // Assert.
       expect(dirty)
-        .toStrictEqual([ true, true, true, true, true, true, true, true ]);
+        .toStrictEqual([ true, true, true, true, true, true, true, true, true ]);
     });
 
     it('calls a tree dirty for any change to a tracked file, wherever it is', () =>
