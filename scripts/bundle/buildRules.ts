@@ -252,6 +252,20 @@ const LAUNCHER = [
 ].join('\n');
 
 /**
+ * Builds the environment the UI's pages are built in, out of the one the build was started with. It names no API base,
+ * so the pages call the origin that served them, which in a bundle is the API's own: a base baked in would tie every
+ * build to one port. And it always builds for production, whatever NODE_ENV the build inherited, since Vite takes
+ * development there as a dev build even under vite build, and a dev build's pages call the dev stack's API port.
+ * @param {Record<string, string | undefined>} inherited The environment the build was started with.
+ * @returns {Record<string, string | undefined>} The UI build's environment.
+ */
+const uiBuildEnvironment = (inherited: Record<string, string | undefined>): Record<string, string | undefined> =>
+{
+  const { VITE_JMZ_API_BASE: _devApiBase, ...environment } = inherited;
+  return { ...environment, NODE_ENV: 'production' };
+};
+
+/**
  * Names the folder a build is laid out in, which is also the one folder inside its tarball.
  * @param {string} version The build's version.
  * @returns {string} The folder's name.
@@ -310,6 +324,7 @@ export {
   PINNED_NWJS,
   tarballName,
   TARGETS,
+  uiBuildEnvironment,
   versionsFile,
 };
 export type { BuildOptions, Target, VersionEntry };

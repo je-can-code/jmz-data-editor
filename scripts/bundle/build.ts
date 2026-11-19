@@ -46,6 +46,7 @@ import {
   parseBuildArguments,
   tarballName,
   TARGETS,
+  uiBuildEnvironment,
   versionsFile,
 } from './buildRules.ts';
 import type { Target } from './buildRules.ts';
@@ -169,14 +170,13 @@ const checkNwjs = (folder: string): void =>
 };
 
 /**
- * Builds the UI's pages for production. The build gets no API base, so the pages call the origin that served them,
- * which in a bundle is the API's own: a base baked in here would tie every build to one port.
+ * Builds the UI's pages for production, with no API base, in the environment uiBuildEnvironment (buildRules.ts) makes
+ * out of the build's own.
  * @returns {string} The folder of the built pages.
  */
 const buildUi = (): string =>
 {
-  const { VITE_JMZ_API_BASE: _devApiBase, ...environment } = process.env;
-  run([ 'bun', 'run', 'build' ], join(REPO, 'app'), environment);
+  run([ 'bun', 'run', 'build' ], join(REPO, 'app'), uiBuildEnvironment(process.env));
   return join(REPO, 'app', 'build');
 };
 

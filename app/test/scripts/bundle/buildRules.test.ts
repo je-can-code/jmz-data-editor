@@ -14,6 +14,7 @@ import {
   parseBuildArguments,
   tarballName,
   TARGETS,
+  uiBuildEnvironment,
   versionsFile,
 } from '../../../../scripts/bundle/buildRules.ts';
 
@@ -216,6 +217,29 @@ describe('buildRules', () =>
       // Assert.
       expect(version)
         .toBe('20261118.2145-925c73f-dirty');
+    });
+  });
+
+  describe('uiBuildEnvironment', () =>
+  {
+    it('builds the pages for production with no API base, whatever the build inherited, and passes the rest on', () =>
+    {
+      // Arrange: a shell left set up for the dev stack, beside settings the UI build still needs, another Vite
+      // setting among them.
+      const inherited = {
+        PATH: '/usr/bin:/bin',
+        HOME: '/home/je',
+        NODE_ENV: 'development',
+        VITE_JMZ_API_BASE: 'http://127.0.0.1:8080',
+        VITE_JMZ_FEATURE: 'on',
+      };
+
+      // Act.
+      const environment = uiBuildEnvironment(inherited);
+
+      // Assert.
+      expect(environment)
+        .toStrictEqual({ PATH: '/usr/bin:/bin', HOME: '/home/je', NODE_ENV: 'production', VITE_JMZ_FEATURE: 'on' });
     });
   });
 
