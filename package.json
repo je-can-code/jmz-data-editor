@@ -8,6 +8,7 @@
     "nw:dev": "nw ./nw-app",
     "map-editor-ca": "bun run nw:dev --project-root /mnt/exdrive/dev/gaming/ca/chef-adventure --maps",
     "build": "cd app && bun run build",
+    "bundle": "bun scripts/bundle/build.ts",
     "test": "cd app && bun run test",
     "lint": "oxlint app/src app/test scripts nw-app",
     "speed": "bun scripts/speed/runSpeed.ts",

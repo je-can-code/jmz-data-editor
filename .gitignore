@@ -7,6 +7,9 @@ build
 dist
 bin
 
+# The desktop bundle's builds: bun run bundle
+/release/
+
 # IDEs
 .idea
 
