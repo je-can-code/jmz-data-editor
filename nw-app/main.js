@@ -12,6 +12,13 @@
 // commands or rows the editors copied), and only on a reply channel the asking page opened under a random name, since
 // every window hears the shell channel. Anything else on the clipboard never reaches a page.
 //
+// Pages ask the same channel to play the open project. The shell asks the API which project that is, since the API
+// knows whether this shell started it or attached to it, and starts the project's game on the very NW.js the shell runs
+// on, in test mode and on a profile of the project's own, so the launch never hands itself over to a copy of the game
+// started some other way. The game is detached and let go of, so closing the editor never ends a playtest. While the
+// project's game is still running nothing new starts, and the page is told so. The answer goes back on a reply channel
+// the page opened for it, as a clipboard read's does.
+//
 // The app stays open while any window is. Visible windows are never given a 'close' listener: that would take
 // their closing away from the page, and a page holding unsaved edits asks before it closes through its own
 // beforeunload.
@@ -26,6 +33,7 @@
 // Each flag also takes the --flag=value form.
 const { spawn } = require('node:child_process');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const http = require('node:http');
 const rules = require('./shellRules.js');
@@ -34,8 +42,15 @@ const DEFAULT_API_BASE = 'http://127.0.0.1:8080';
 const DEFAULT_UI_URL = 'http://127.0.0.1:3000';
 const SHELL_CHANNEL = 'jmz-shell';
 
-// how long a clipboard reply channel stays open after its answer, in milliseconds.
-const CLIPBOARD_REPLY_LINGER_MS = 5000;
+// how long a reply channel stays open after its answer, in milliseconds.
+const REPLY_LINGER_MS = 5000;
+
+// how long the shell waits on the API to name the open project, in milliseconds; the page waits five seconds in all.
+const PLAY_HEALTH_TIMEOUT_MS = 2000;
+
+// how long a new playtest is watched for an early exit, in milliseconds: a launch onto a profile already in use hands
+// itself over to the game running there and exits within a few dozen.
+const PLAY_WATCH_MS = 1000;
 
 const { argv } = nw.App;
 const logPath = rules.readFlag(argv, '--log') || '';
@@ -95,6 +110,54 @@ function httpGet(url, timeoutMs)
     {
       res.resume();
       res.on('end', () => resolve(res.statusCode || 0));
+    });
+    req.on('error', reject);
+    req.on('timeout', () =>
+    {
+      req.destroy(new Error('timeout'));
+    });
+  });
+}
+
+/**
+ * Parses JSON text, or answers null for text that is not JSON.
+ * @param {string} text The text.
+ * @returns {unknown} The value, or null.
+ */
+function parseJsonSafe(text)
+{
+  try
+  {
+    return JSON.parse(text);
+  }
+  catch
+  {
+    return null;
+  }
+}
+
+/**
+ * Reads an answer whose body is JSON, as the API's health check gives: the status, and the body, parsed.
+ * @param {string} url The URL.
+ * @param {number} timeoutMs How long the connection may sit idle before the read gives up.
+ * @returns {Promise<{ status: number, body: unknown }>} The status, and the body, or null for a body that is not JSON.
+ */
+function httpGetJson(url, timeoutMs)
+{
+  return new Promise((resolve, reject) =>
+  {
+    const req = http.get(url, { timeout: timeoutMs }, (res) =>
+    {
+      const chunks = [];
+      res.on('data', (chunk) =>
+      {
+        chunks.push(chunk);
+      });
+      res.on('error', reject);
+      res.on('end', () =>
+      {
+        resolve({ status: res.statusCode || 0, body: parseJsonSafe(Buffer.concat(chunks).toString('utf-8')) });
+      });
     });
     req.on('error', reject);
     req.on('timeout', () =>
@@ -176,6 +239,9 @@ const opening = new Set();
 // held for the life of the app, so the channel is never collected.
 let shellChannel = null;
 
+// the playtests this shell started that are still running, by their profile folder, which is one per project.
+const playtests = new Map();
+
 /**
  * Quits once the last visible window has closed; the hidden relay window does not count.
  */
@@ -237,9 +303,21 @@ function openWindow(url, width, height)
 }
 
 /**
- * Answers a page's clipboard read on the reply channel the page opened for it, built in the hidden window's realm so
- * it belongs to the UI's origin. The channel stays open a moment after the answer, so closing it can never overtake
- * the message; the page waits for an answer far less long than that.
+ * Says an answer on the reply channel a page opened for it, built in the hidden window's realm so it belongs to the
+ * UI's origin. The channel stays open a moment after the answer, so closing it can never overtake the message.
+ * @param {object} win The hidden relay window.
+ * @param {string} channel The reply channel's name.
+ * @param {object} message The answer.
+ */
+function answerOn(win, channel, message)
+{
+  const reply = new win.window.BroadcastChannel(channel);
+  reply.postMessage(message);
+  setTimeout(() => reply.close(), REPLY_LINGER_MS);
+}
+
+/**
+ * Answers a page's clipboard read on the reply channel the page opened for it.
  * @param {object} win The hidden relay window.
  * @param {object} request The page's request.
  */
@@ -252,18 +330,157 @@ function answerClipboardRead(win, request)
     return;
   }
 
-  const reply = new win.window.BroadcastChannel(answer.channel);
-  reply.postMessage(answer.message);
-  setTimeout(() => reply.close(), CLIPBOARD_REPLY_LINGER_MS);
+  answerOn(win, answer.channel, answer.message);
+}
+
+/**
+ * Asks the API which project is open. The API is the one place that knows, whether this shell started it or attached
+ * to one already running, which may have been started on another project than this shell's own flags name.
+ * @param {string} apiBase The API's origin.
+ * @returns {Promise<string>} The project's folder, or an empty string when the API could not say.
+ */
+async function openProjectRoot(apiBase)
+{
+  try
+  {
+    const { status, body } = await httpGetJson(`${apiBase}/api/health`, PLAY_HEALTH_TIMEOUT_MS);
+    const data = status === 200 && body !== null && typeof body === 'object' ? body.data : null;
+    const root = data !== null && typeof data === 'object' ? data.projectRoot : '';
+    return typeof root === 'string' ? root : '';
+  }
+  catch
+  {
+    return '';
+  }
+}
+
+/**
+ * Lists the names in a folder, or none for a folder that cannot be read, which holds no game either.
+ * @param {string} folder The folder.
+ * @returns {string[]} The names.
+ */
+function listFolder(folder)
+{
+  try
+  {
+    return fs.readdirSync(folder);
+  }
+  catch
+  {
+    return [];
+  }
+}
+
+/**
+ * Starts a project's playtest on the NW.js this shell runs on, in test mode and on the project's own profile, and
+ * watches it for a moment to learn what became of it. The game is detached and let go of, so it outlives the editor as
+ * a game started from a terminal does, and closing the editor never ends a playtest; the watch only listens for its
+ * exit, and never holds it.
+ * @param {string} projectRoot The project's folder.
+ * @returns {Promise<{ outcome: string, projectRoot: string, args: string[] }>} What became of it, and the arguments
+ * it was started with, none when nothing was.
+ */
+function launchPlaytest(projectRoot)
+{
+  const profile = rules.playtestProfileDirectory(rules.cacheDirectory(process.env, os.homedir()), projectRoot);
+
+  // one playtest per project: a game this shell started on the project's profile that is still running is its playtest.
+  if (playtests.has(profile))
+  {
+    return Promise.resolve({ outcome: 'already-running', projectRoot, args: [] });
+  }
+
+  const args = rules.playArguments(projectRoot, profile);
+  const game = spawn(process.execPath, args, { detached: true, stdio: 'ignore' });
+  game.unref();
+
+  // the game counts as running from its launch, so a second Play during the watch never launches another; it is
+  // forgotten once it exits, however that happens.
+  playtests.set(profile, game);
+  const forget = () =>
+  {
+    if (playtests.get(profile) === game)
+    {
+      playtests.delete(profile);
+    }
+  };
+
+  return new Promise((resolve) =>
+  {
+    // a launch still running once the watch is up is the game, started.
+    const watch = setTimeout(() => resolve({ outcome: rules.playOutcome(null), projectRoot, args }), PLAY_WATCH_MS);
+
+    // a launch that ends sooner says how, which tells a hand-off to the game already running from a failure.
+    game.on('exit', (code, signal) =>
+    {
+      forget();
+      clearTimeout(watch);
+      resolve({ outcome: rules.playOutcome({ code, signal }), projectRoot, args });
+    });
+
+    // a launch that could not start at all never exits; it failed.
+    game.on('error', (error) =>
+    {
+      forget();
+      clearTimeout(watch);
+      resolve({ outcome: 'failed', projectRoot, args, error: String(error) });
+    });
+  });
+}
+
+/**
+ * Plays the open project: asks the API which project that is, refuses a folder with no game in it, and otherwise
+ * launches its playtest, or finds it already running.
+ * @param {string} apiBase The API's origin.
+ * @returns {Promise<{ outcome: string, projectRoot: string, args: string[] }>} What became of it, and the arguments
+ * the game was started with, none when nothing was.
+ */
+async function playOpenProject(apiBase)
+{
+  const projectRoot = await openProjectRoot(apiBase);
+  if (projectRoot === '')
+  {
+    return { outcome: 'failed', projectRoot, args: [] };
+  }
+
+  if (rules.isGameFolder(listFolder(projectRoot)) === false)
+  {
+    return { outcome: 'not-a-game', projectRoot, args: [] };
+  }
+
+  return launchPlaytest(projectRoot);
+}
+
+/**
+ * Answers a page's Play on the reply channel the page opened for it: what became of the open project's playtest. A
+ * request naming no proper reply channel is refused before anything is asked or launched.
+ * @param {object} win The hidden relay window.
+ * @param {object} request The page's request.
+ * @param {string} apiBase The API's origin.
+ * @returns {Promise<void>} Settles once answered.
+ */
+async function answerPlay(win, request, apiBase)
+{
+  const replyTo = rules.playReplyChannel(request.replyTo);
+  if (replyTo === null)
+  {
+    log('refused-play', {});
+    return;
+  }
+
+  const played = await playOpenProject(apiBase);
+  log('play', played);
+  answerOn(win, replyTo, { type: 'play-result', result: played.outcome });
 }
 
 /**
  * Opens the hidden window on the UI's origin and listens on the shell channel through it.
  * @param {string} uiUrl The UI's origin.
+ * @param {string} apiBase The API's origin, which a Play asks for the open project.
  * @param {{ width: number, height: number }} fallbackSize The size for windows that ask for none.
  * @param {() => void} ready Called once the shell is listening.
  */
-function startRelay(uiUrl, fallbackSize, ready)
+function startRelay(uiUrl, apiBase, fallbackSize, ready)
 {
   nw.Window.open(`${uiUrl}/shell.html`, { show: false, width: 200, height: 100 }, (win) =>
   {
@@ -290,6 +507,16 @@ function startRelay(uiUrl, fallbackSize, ready)
         if (request.type === 'clipboard-read')
         {
           answerClipboardRead(win, request);
+          return;
+        }
+
+        // a playtest of the open project, answered the same way: only the asking window learns what became of it.
+        if (request.type === 'play')
+        {
+          answerPlay(win, request, apiBase).catch((error) =>
+          {
+            log('play-crash', { error: String(error) });
+          });
           return;
         }
 
@@ -361,7 +588,8 @@ async function main()
     || cfg.projectRoot
     || '';
 
-  log('boot', { argv, attach, apiBase, uiUrl, projectRoot, maps: rules.hasFlag(argv, '--maps') });
+  // the NW.js binary is logged too, since a playtest runs on this same one.
+  log('boot', { argv, execPath: process.execPath, attach, apiBase, uiUrl, projectRoot, maps: rules.hasFlag(argv, '--maps') });
 
   // attached, the running UI and API already know their project.
   if (attach === false)
@@ -414,7 +642,7 @@ async function main()
   const nwManifest = readJsonFileSafe(path.join(__dirname, 'package.json')) || {};
   const { width = 1400, height = 900 } = nwManifest.window || {};
 
-  startRelay(uiUrl, { width, height }, () =>
+  startRelay(uiUrl, apiBase, { width, height }, () =>
   {
     openWindow(`${uiUrl}${rules.bootPath(argv)}`, width, height);
   });
