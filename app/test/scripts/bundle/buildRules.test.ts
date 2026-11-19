@@ -8,6 +8,7 @@ import {
   bundleManifest,
   bundleVersion,
   editorManifest,
+  isDirtyTree,
   LAUNCHER,
   nwjsProblem,
   nwjsVersionIn,
@@ -22,10 +23,11 @@ import {
  * The bundle build turns the repo into one folder that runs on a machine with nothing installed, so what it decides is
  * what the laptop gets. It ships one NW.js only, the pinned version in the SDK flavor, read from the files themselves,
  * because a bundle on another runtime would play the game on something it was never tested on. It names every build by
- * when it was made and the commit it came from, marked dirty when the tree held changes, so a build on the laptop can
- * always be traced back. The bundle runs under a name of its own, so it never hands its launch to a dev shell, and its
- * launcher must find the bundle through the link the installer puts on the PATH. A mistyped flag is refused rather than
- * quietly building something other than what was asked for.
+ * when it was made and the commit it came from, marked dirty when the tree held a change the build could carry, so a
+ * build on the laptop can always be traced back, while a stray note beside the code never marks it. The bundle runs
+ * under a name of its own, so it never hands its launch to a dev shell, and its launcher must find the bundle through
+ * the link the installer puts on the PATH. A mistyped flag is refused rather than quietly building something other than
+ * what was asked for.
  */
 
 /**
@@ -217,6 +219,78 @@ describe('buildRules', () =>
       // Assert.
       expect(version)
         .toBe('20261118.2145-925c73f-dirty');
+    });
+  });
+
+  describe('isDirtyTree', () =>
+  {
+    it('calls a tree with nothing changed clean', () =>
+    {
+      // Arrange: git status printing nothing at all.
+      const status = '';
+
+      // Act.
+      const dirty = isDirtyTree(status);
+
+      // Assert.
+      expect(dirty)
+        .toBe(false);
+    });
+
+    it('calls a tree clean when its only untracked files are outside what the build reads', () =>
+    {
+      // Arrange: a note in docs/, one with a quoted name, and names that only start the way a build input does.
+      const status = [
+        '?? docs/notes.md',
+        '?? "docs/caf\\303\\251.md"',
+        '?? app-notes.md',
+        '?? scripts.txt',
+        '?? package.json.bak',
+        '',
+      ].join('\n');
+
+      // Act.
+      const dirty = isDirtyTree(status);
+
+      // Assert.
+      expect(dirty)
+        .toBe(false);
+    });
+
+    it('calls a tree dirty for an untracked file in anything the build reads', () =>
+    {
+      // Arrange: one untracked file under each folder the build reads, a folder git lists whole, a quoted name, and
+      // the root lockfile under either name Bun writes.
+      const statuses = [
+        '?? app/src/notes.ts',
+        '?? server/internal/extra.go',
+        '?? nw-app/extra.js',
+        '?? scripts/bundle/extra.ts',
+        '?? app/src/newBoard/',
+        '?? "app/src/a b.ts"',
+        '?? bun.lock',
+        '?? bun.lockb',
+      ];
+
+      // Act.
+      const dirty = statuses.map(status => isDirtyTree(status));
+
+      // Assert.
+      expect(dirty)
+        .toStrictEqual([ true, true, true, true, true, true, true, true ]);
+    });
+
+    it('calls a tree dirty for any change to a tracked file, wherever it is', () =>
+    {
+      // Arrange: a doc edited, staged, deleted and renamed, none of them in what the build reads.
+      const statuses = [ ' M docs/bundle-and-play-plan.md', 'M  README.md', 'D  LICENSE', 'R  a.md -> b.md' ];
+
+      // Act.
+      const dirty = statuses.map(status => isDirtyTree(status));
+
+      // Assert.
+      expect(dirty)
+        .toStrictEqual([ true, true, true, true ]);
     });
   });
 

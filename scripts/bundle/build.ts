@@ -12,7 +12,8 @@
  *   jmz-editor-linux-x64-<version>.tar.gz   that folder, packed with its modes
  *   versions.json                           the tarball's version, name and SHA-256
  *
- * The version is the build's UTC date and time, the commit, and -dirty when the tree held changes not committed.
+ * The version is the build's UTC date and time, the commit, and -dirty when the tree held a change to a tracked file,
+ * or a file not yet tracked inside what the build reads (isDirtyTree, in buildRules.ts).
  *
  * --publish copies the tarball, the installer (scripts/bundle/install.ts) and versions.json into the builds folder,
  * /mnt/exdrive/dev/jmz-builds unless --publish-dir names another, and refuses before building anything while the
@@ -40,6 +41,7 @@ import {
   bundleManifest,
   bundleVersion,
   editorManifest,
+  isDirtyTree,
   LAUNCHER,
   nwjsProblem,
   nwjsVersionIn,
@@ -274,7 +276,7 @@ const main = async (): Promise<void> =>
   const builtAt = new Date();
   const commit = read([ 'git', 'rev-parse', 'HEAD' ]);
   const shortCommit = read([ 'git', 'rev-parse', '--short', 'HEAD' ]);
-  const dirty = read([ 'git', 'status', '--porcelain' ]) !== '';
+  const dirty = isDirtyTree(read([ 'git', 'status', '--porcelain' ]));
   const version = bundleVersion(builtAt, shortCommit, dirty);
   say(`building ${version} with the NW.js in ${nwjs}`);
 
