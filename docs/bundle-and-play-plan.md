@@ -398,7 +398,7 @@ rather than using the copy.
 
 - `go test ./...` passes in `server/`, run locally, since CI runs only the app suite. New tests beside
   `server/cmd/api/access_test.go` cover the UI served when `JMZ_UI_DIR` is set and 404 when it is not, a path climbing
-  out of the UI folder refused, the `Host` check still refusing, `.html` sent with `no-cache`, the `/api` routes
+  out of the UI folder refused, the `Host` check still refusing, `.html` sent with `no-cache` (`no-store` since the review, 2.3), the `/api` routes
   unchanged, `-version` printing and exiting before any config is read, and the API exiting when its stdin closes
   under `JMZ_EXIT_WITH_PARENT=1`, and not without it.
 - `app/` tests pass, with the new production branch of `getJmzHttpApiBase()` covered.
@@ -419,7 +419,8 @@ rather than using the copy.
 
 - In a stand-in laptop on the desktop (an empty `HOME`, and the builds folder copied with every execute bit off, the
   way the share mounts it): a first install switches `current` and writes the link and the `.desktop` file; a second
-  run of the same version says so and changes nothing; a newer version keeps the old one as `previous` and prunes
+  run of the same version says so and changes nothing (since the review it also writes the menu entry again, section
+  3); a newer version keeps the old one as `previous` and prunes
   anything older; a tarball whose SHA-256 is wrong and a build with a library missing are each refused, naming the
   cause and changing nothing.
 - `install.ts` uses Bun and Node built-ins only.
