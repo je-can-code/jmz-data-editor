@@ -476,7 +476,7 @@ The build started on the evening of 2026-11-18. The latest each step can land an
 | Day | Steps |
 |---|---|
 | Wednesday 2026-11-18, evening | P1 beside P2, then P3 beside P4: all four merged. The chain checked on the merged branch: built, published into a scratch folder, installed into a stand-in laptop (twice, the second a no-op), then launched off-screen with no `bun`, `go` or `nw` on `PATH`: the API on the configured root, the map editor first, the data editor showing the project folder, the port freed on quit |
-| Thursday 2026-11-19 | the review and its fixes |
+| Thursday 2026-11-19 | the review and its fixes, merged by early morning. The chain checked again on the merged branch, this time also driving the installed build: Play launching the recorder and outliving the editor, the playtest read back through `/proc` as running from the build, and a relaunch after each kind of failed start. The one thing an Xvfb display cannot show, a fresh error window taking the focus, is checked on the laptop |
 | Friday 2026-11-20 | L1; L2 by the evening |
 | Saturday 2026-11-21 | the demo |
 
