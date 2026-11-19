@@ -29,6 +29,12 @@ const rules = load('../../../nw-app/shellRules.js') as {
   devStackArgs(projectRoot: string, apiBase: string, uiUrl: string): string[];
   clipboardAnswer(request: Record<string, unknown>, readText: () => unknown): { channel: string; message: { type: string; text: string } } | null;
   CLIPBOARD_KINDS: Record<string, string>;
+  playReplyChannel(name: unknown): string | null;
+  isGameFolder(listing: string[]): boolean;
+  cacheDirectory(environment: Record<string, string | undefined>, homeDirectory: string): string;
+  playtestProfileDirectory(cacheRoot: string, projectRoot: string): string;
+  playArguments(projectRoot: string, profileDirectory: string): string[];
+  playOutcome(exit: { code: number | null; signal: string | null } | null): string;
 };
 
 describe('shellRules', () =>
@@ -338,6 +344,205 @@ describe('shellRules', () =>
           [COMMAND_CLIPBOARD_FORMAT]: 'format',
           [ROW_CLIPBOARD_FORMAT]: 'format',
         });
+    });
+  });
+
+  /*
+   * Play starts the open project as a playtest on the editor's own NW.js, and the shell holds the decisions that make it
+   * the game's test mode and nothing else. RPG Maker reads test mode from the first argument after the game's folder
+   * alone, and NW.js keeps Chromium's switches among the arguments, so 'test' must come straight after the folder. Each
+   * project plays on a profile of its own, the same one every time, since a launch onto a profile in use hands itself to
+   * whatever runs there: RPG Maker games all share one default profile, so without one of its own Play would hand off to
+   * a copy of the game started some other way. A launch that exits at once with code 0 was handed off, so its game is
+   * already running; any other early ending failed; one still running is the game. Only a folder holding a game is
+   * launched at all, and the answer goes only to a reply channel the asking page opened under a random name.
+   */
+  describe('playtests', () =>
+  {
+    describe('playReplyChannel', () =>
+    {
+      it('accepts a play reply channel\'s name', () =>
+      {
+        // Arrange: a name as the page builds it.
+        const name = 'jmz-play-0f8fad5b-d9cb-469f-a165-70867728950e';
+
+        // Act.
+        const accepted = rules.playReplyChannel(name);
+
+        // Assert.
+        expect(accepted)
+          .toBe(name);
+      });
+
+      it('refuses every other name, a clipboard reply channel\'s included', () =>
+      {
+        // Arrange: the clipboard's prefix on a proper UUID, the shell channel, a guessable name, more after the UUID, an
+        // upper-case UUID, which crypto.randomUUID never writes, and things that are not names.
+        const names: unknown[] = [
+          'jmz-clipboard-0f8fad5b-d9cb-469f-a165-70867728950e',
+          'jmz-shell',
+          'jmz-play-1',
+          'jmz-play-0f8fad5b-d9cb-469f-a165-70867728950e-x',
+          'jmz-play-0F8FAD5B-D9CB-469F-A165-70867728950E',
+          undefined,
+          42,
+        ];
+
+        // Act.
+        const accepted = names.map(name => rules.playReplyChannel(name));
+
+        // Assert.
+        expect(accepted)
+          .toStrictEqual([ null, null, null, null, null, null, null ]);
+      });
+    });
+
+    describe('isGameFolder', () =>
+    {
+      it('finds a game only where the manifest and the page are both there', () =>
+      {
+        // Arrange: a game, each half of one alone, near misses of both names, and an empty folder.
+        const listings = [
+          [ 'data', 'img', 'index.html', 'js', 'package.json' ],
+          [ 'data', 'package.json' ],
+          [ 'data', 'index.html' ],
+          [ 'index.htm', 'package.json' ],
+          [ 'Index.html', 'package.json' ],
+          [ 'index.html', 'package.json.bak' ],
+          [],
+        ];
+
+        // Act.
+        const games = listings.map(listing => rules.isGameFolder(listing));
+
+        // Assert.
+        expect(games)
+          .toStrictEqual([ true, false, false, false, false, false, false ]);
+      });
+    });
+
+    describe('cacheDirectory', () =>
+    {
+      it('uses XDG_CACHE_HOME when it names an absolute folder', () =>
+      {
+        // Arrange.
+        const environment = { XDG_CACHE_HOME: '/scratch/cache' };
+
+        // Act.
+        const folder = rules.cacheDirectory(environment, '/home/maker');
+
+        // Assert.
+        expect(folder)
+          .toBe('/scratch/cache');
+      });
+
+      it('falls back to ~/.cache when XDG_CACHE_HOME is unset, empty or relative', () =>
+      {
+        // Arrange: the three values the spec says to ignore.
+        const environments = [ {}, { XDG_CACHE_HOME: '' }, { XDG_CACHE_HOME: 'scratch/cache' } ];
+
+        // Act.
+        const folders = environments.map(environment => rules.cacheDirectory(environment, '/home/maker'));
+
+        // Assert.
+        expect(folders)
+          .toStrictEqual([ '/home/maker/.cache', '/home/maker/.cache', '/home/maker/.cache' ]);
+      });
+    });
+
+    describe('playtestProfileDirectory', () =>
+    {
+      it('names a project\'s profile under the cache by the SHA-1 of its folder, the same on every Play', () =>
+      {
+        // Arrange: one project asked about twice, once with a trailing slash.
+
+        // Act.
+        const profiles = [
+          rules.playtestProfileDirectory('/home/maker/.cache', '/games/chef adventure'),
+          rules.playtestProfileDirectory('/home/maker/.cache', '/games/chef adventure/'),
+        ];
+
+        // Assert.
+        expect(profiles)
+          .toStrictEqual([
+            '/home/maker/.cache/jmz-editor/playtest/9872d39051d7ccc4be26344cc0136589a81f8769',
+            '/home/maker/.cache/jmz-editor/playtest/9872d39051d7ccc4be26344cc0136589a81f8769',
+          ]);
+      });
+
+      it('gives two projects two profiles, even when one folder\'s name starts the other\'s', () =>
+      {
+        // Arrange: two projects whose folders differ only after a shared start.
+
+        // Act.
+        const profiles = [
+          rules.playtestProfileDirectory('/home/maker/.cache', '/games/chef adventure'),
+          rules.playtestProfileDirectory('/home/maker/.cache', '/games/chef'),
+        ];
+
+        // Assert.
+        expect(profiles)
+          .toStrictEqual([
+            '/home/maker/.cache/jmz-editor/playtest/9872d39051d7ccc4be26344cc0136589a81f8769',
+            '/home/maker/.cache/jmz-editor/playtest/6e8304c44dc3d32b33f589a75148cb6541bd3050',
+          ]);
+      });
+    });
+
+    describe('playArguments', () =>
+    {
+      it('puts test straight after the game\'s folder, and the profile after that', () =>
+      {
+        // Arrange: a folder with a space in it, which stays one argument.
+
+        // Act.
+        const args = rules.playArguments('/games/chef adventure', '/home/maker/.cache/jmz-editor/playtest/9872d390');
+
+        // Assert.
+        expect(args)
+          .toStrictEqual([ '/games/chef adventure', 'test', '--user-data-dir=/home/maker/.cache/jmz-editor/playtest/9872d390' ]);
+      });
+    });
+
+    describe('playOutcome', () =>
+    {
+      it('calls a launch still running when the watch ends started', () =>
+      {
+        // Arrange: no exit within the watch.
+
+        // Act.
+        const outcome = rules.playOutcome(null);
+
+        // Assert.
+        expect(outcome)
+          .toBe('started');
+      });
+
+      it('calls a launch that exited at once with code 0 handed off to the game already running', () =>
+      {
+        // Arrange.
+        const exit = { code: 0, signal: null };
+
+        // Act.
+        const outcome = rules.playOutcome(exit);
+
+        // Assert.
+        expect(outcome)
+          .toBe('already-running');
+      });
+
+      it('calls any other early ending, an error code or a signal, a launch that failed', () =>
+      {
+        // Arrange: an error code, and a signal, which leaves no code at all.
+        const exits = [ { code: 1, signal: null }, { code: null, signal: 'SIGKILL' } ];
+
+        // Act.
+        const outcomes = exits.map(exit => rules.playOutcome(exit));
+
+        // Assert.
+        expect(outcomes)
+          .toStrictEqual([ 'failed', 'failed' ]);
+      });
     });
   });
 });

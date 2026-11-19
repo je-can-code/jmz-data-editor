@@ -1,6 +1,8 @@
 // The NW.js shell's decisions, kept apart from main.js so they can be tested without NW.js: reading the app's
-// flags, deciding which page boots, naming and vetting the windows pages ask for, and what a page may read off the
-// clipboard.
+// flags, deciding which page boots, naming and vetting the windows pages ask for, what a page may read off the
+// clipboard, and how a project's playtest is started and judged.
+const crypto = require('node:crypto');
+const path = require('node:path');
 
 /**
  * Reads a flag's value from the app's arguments, in either form the shell accepts: `--name=value` or
@@ -199,6 +201,98 @@ function clipboardAnswer(request, readText)
 }
 
 /**
+ * The name a page's reply channel for a playtest must have: a prefix of its own and a random UUID, as a clipboard
+ * read's has, so the answer reaches the asking window alone and never the shell channel every window hears.
+ */
+const PLAY_REPLY_PATTERN = /^jmz-play-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+/**
+ * Vets the reply channel a page named for its play request. A request naming any other channel gets no answer, and
+ * starts no game.
+ * @param {unknown} name The name the page sent.
+ * @returns {string | null} The name, when it is a play reply channel's, or null when it is not.
+ */
+function playReplyChannel(name)
+{
+  return typeof name === 'string' && PLAY_REPLY_PATTERN.test(name) ? name : null;
+}
+
+/**
+ * Reports whether a folder holds a game NW.js can start: the manifest NW.js reads first, and the page every RPG Maker
+ * MZ game opens on. A folder missing either has no game in it to play.
+ * @param {string[]} listing The names in the folder.
+ * @returns {boolean} True only when both are there.
+ */
+function isGameFolder(listing)
+{
+  return listing.includes('package.json') && listing.includes('index.html');
+}
+
+/**
+ * Finds the folder caches belong in on Linux, as the XDG base directory spec has it: XDG_CACHE_HOME when it names an
+ * absolute folder, and ~/.cache otherwise. The spec says to ignore an empty or relative value, so both fall back too.
+ * @param {Record<string, string | undefined>} environment The process's environment.
+ * @param {string} homeDirectory The person's home folder.
+ * @returns {string} The cache folder.
+ */
+function cacheDirectory(environment, homeDirectory)
+{
+  const configured = environment.XDG_CACHE_HOME || '';
+  return path.isAbsolute(configured) ? configured : path.join(homeDirectory, '.cache');
+}
+
+/**
+ * Names the profile a project's playtests run on: a folder of their own under the cache, named by the SHA-1 of the
+ * project's absolute folder, so every Play of one project lands on the same profile and two projects never share one.
+ * RPG Maker gives every game the same name, and so the same default profile, and a launch onto a profile already in use
+ * hands itself over to whatever runs there: without a profile of its own, Play would hand off to a copy of the game
+ * started some other way, or to another project's. Two spellings of one folder, such as one with a trailing slash, are
+ * one project.
+ * @param {string} cacheRoot The cache folder.
+ * @param {string} projectRoot The project's folder.
+ * @returns {string} The profile's folder.
+ */
+function playtestProfileDirectory(cacheRoot, projectRoot)
+{
+  const digest = crypto.createHash('sha1')
+    .update(path.resolve(projectRoot))
+    .digest('hex');
+  return path.join(cacheRoot, 'jmz-editor', 'playtest', digest);
+}
+
+/**
+ * Builds the arguments that start a project's playtest on the editor's own NW.js: the game's folder, 'test', then the
+ * playtest's profile. RPG Maker reads test mode from the first argument after the folder and no other, and NW.js leaves
+ * Chromium's switches among those arguments, so 'test' comes straight after the folder: a switch placed before it would
+ * take its place, and the game would start without its debug screen and DevTools.
+ * @param {string} projectRoot The project's folder.
+ * @param {string} profileDirectory The playtest's profile folder.
+ * @returns {string[]} The arguments for the NW.js binary.
+ */
+function playArguments(projectRoot, profileDirectory)
+{
+  return [ projectRoot, 'test', `--user-data-dir=${profileDirectory}` ];
+}
+
+/**
+ * Works out what became of a launch from how its process ended within the moment the shell watches it, or from its not
+ * having ended. A launch onto a profile already in use hands itself over to the game running there and exits at once
+ * with code 0, so that game is already running; any other ending, a code or a signal, is a game that failed to start;
+ * and a process still running when the moment is up is the game, started.
+ * @param {{ code: number | null, signal: string | null } | null} exit How the process ended, or null while it runs.
+ * @returns {'started' | 'already-running' | 'failed'} What became of the launch.
+ */
+function playOutcome(exit)
+{
+  if (exit === null)
+  {
+    return 'started';
+  }
+
+  return exit.code === 0 ? 'already-running' : 'failed';
+}
+
+/**
  * Builds the environment the Go API reads its configuration from, out of the same origins that tell the UI
  * where everything is: the address to listen on, from the API base, and the one page origin allowed to call it,
  * from the UI's URL. A UI moved off port 3000 is then allowed, and the default origins are not.
@@ -254,10 +348,16 @@ function devStackArgs(projectRoot, apiBase, uiUrl)
 
 module.exports = {
   bootPath,
+  cacheDirectory,
   clipboardAnswer,
   CLIPBOARD_KINDS,
   devStackArgs,
   hasFlag,
+  isGameFolder,
+  playArguments,
+  playOutcome,
+  playReplyChannel,
+  playtestProfileDirectory,
   readFlag,
   resolveWindowUrl,
   serverEnvironment,
