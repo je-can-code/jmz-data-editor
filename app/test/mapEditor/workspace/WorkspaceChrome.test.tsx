@@ -347,6 +347,28 @@ describe('WorkspaceChrome', () =>
       expect([ before, playRequests(rendered).length ])
         .toStrictEqual([ 0, 1 ]);
     });
+
+    it('plays once over unsaved edits when the question\'s Play is pressed twice as the question goes', () =>
+    {
+      // Arrange: the map edited and not saved, and the question asked.
+      const rendered = renderWithShell();
+      answerHello(rendered);
+      act(() =>
+      {
+        rendered.hub.edit('Rename map', [ mapHistoryKey(2) ], tx => tx.set('map:2', [ 'displayName' ], 'Harbor'));
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'Play' }));
+      const confirm = within(screen.getByRole('dialog')).getByRole('button', { name: 'Play' });
+
+      // Act: a double-click, the second press landing while the question is still fading out and can still be pressed.
+      fireEvent.click(confirm);
+      const stillShown = confirm.isConnected;
+      fireEvent.click(confirm);
+
+      // Assert.
+      expect([ stillShown, playRequests(rendered).length ])
+        .toStrictEqual([ true, 1 ]);
+    });
   });
 
   describe('the Panels menu', () =>

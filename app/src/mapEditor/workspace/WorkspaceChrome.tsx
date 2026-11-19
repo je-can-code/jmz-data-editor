@@ -239,7 +239,8 @@ const PlayButton = () =>
           <Button onClick={() => setAsking(false)}>
             Cancel
           </Button>
-          <Button autoFocus onClick={play}>
+          {/* the question stays pressable while it fades out, so its Play rests too, or a double-click plays twice. */}
+          <Button autoFocus disabled={playing} onClick={play}>
             Play
           </Button>
         </DialogActions>
