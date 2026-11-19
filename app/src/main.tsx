@@ -11,10 +11,7 @@ import { appTheme } from '@presentation/theme/appTheme.ts';
 
 // Configure the data layer adapter once at startup.
 const httpApiBase = getJmzHttpApiBase();
-if (httpApiBase !== null)
-{
-  setJsonStore(new HttpJsonStore(httpApiBase));
-}
+setJsonStore(new HttpJsonStore(httpApiBase));
 
 // Ask the NW.js shell whether it is there now, so the map editor button knows how to open a window by the time
 // anyone clicks it.

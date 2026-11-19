@@ -286,22 +286,5 @@ describe('EnemyPlacementsReader', () =>
         vi.unstubAllGlobals();
       }
     });
-
-    it('asks nothing when there is no server to ask', async () =>
-    {
-      // Arrange
-      const fetcher = fetcherAnswering('', 200);
-
-      // Act
-      const reading = readEnemyPlacements(5, null, fetcher);
-
-      // Assert
-      await expect(reading)
-        .rejects
-        .toThrow('The editor has no server to ask where enemies are placed.');
-      expect(fetcher)
-        .not
-        .toHaveBeenCalled();
-    });
   });
 });

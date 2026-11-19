@@ -313,10 +313,10 @@ const NEW_GAME_FILES: ReadonlySet<string> = new Set([ SYSTEM_FILE, 'data/Actors.
 
 /**
  * Builds the page's own environment: the real channels, stream, locks, shell and window.
- * @param {string | null} apiBase The Go server's origin.
+ * @param {string} apiBase The Go server's origin.
  * @returns {MapEditorEnvironment} The environment.
  */
-const browserEnvironment = (apiBase: string | null): MapEditorEnvironment =>
+const browserEnvironment = (apiBase: string): MapEditorEnvironment =>
 {
   return {
     apiBase,

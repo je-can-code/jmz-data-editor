@@ -150,21 +150,16 @@ const parseEnemyPlacements = (data: unknown, enemyId: number): EnemyPlacement[] 
  * Asks the server where an enemy is placed. The server keeps what it read of the maps until one changes, so asking
  * each time the board shows another enemy is cheap, and always as current as the files.
  * @param {number} enemyId The enemy's id.
- * @param {string | null} apiBase The server's origin; the app's own by default.
+ * @param {string} apiBase The server's origin; the app's own by default.
  * @param {Fetcher} fetcher Fetches the answer; the browser's fetch by default.
  * @returns {Promise<EnemyPlacement[]>} Every placement of the enemy, by map and then event.
  */
 const readEnemyPlacements = async (
   enemyId: number,
-  apiBase: string | null = getJmzHttpApiBase(),
+  apiBase: string = getJmzHttpApiBase(),
   fetcher: Fetcher = (url) => fetch(url),
 ): Promise<EnemyPlacement[]> =>
 {
-  if (apiBase === null)
-  {
-    throw new Error('The editor has no server to ask where enemies are placed.');
-  }
-
   // fetch the answer, which carries its own error message whenever the server has one to give.
   const url = enemyPlacementsUrl(apiBase, enemyId);
   const response = await fetcher(url);

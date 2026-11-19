@@ -16,35 +16,22 @@ type HealthEnvelope = {
 
 type BackendState =
   | { type: "checking" }
-  | { type: "missing-api-base" }
   | { type: "unreachable"; apiBase: string }
   | { type: "missing-project-root"; apiBase: string }
   | { type: "ready"; apiBase: string };
 
 type BackendGateProps = {
-  apiBase: string | null;
+  apiBase: string;
 };
 
 const BackendGate = (props: BackendGateProps) =>
 {
   const { apiBase } = props;
 
-  const [ state, setState ] = React.useState<BackendState>(() =>
-  {
-    if (apiBase === null)
-    {
-      return { type: "missing-api-base" };
-    }
-    return { type: "checking" };
-  });
+  const [ state, setState ] = React.useState<BackendState>({ type: "checking" });
 
   React.useEffect(() =>
   {
-    if (apiBase === null)
-    {
-      return;
-    }
-
     let cancelled = false;
 
     const probeBackendHealth = async () =>
@@ -130,15 +117,6 @@ const BackendGate = (props: BackendGateProps) =>
             <Typography variant={"h6"}>Checking backend…</Typography>
             <Typography variant={"body2"} color={"text.secondary"}>
               Looking for `GET /api/health`.
-            </Typography>
-          </>
-        );
-      case "missing-api-base":
-        return (
-          <>
-            <Typography variant={"h5"}>Backend not configured</Typography>
-            <Typography variant={"body2"} color={"text.secondary"}>
-              Set `VITE_JMZ_API_BASE` (or run in dev where it defaults to `http://127.0.0.1:8080`).
             </Typography>
           </>
         );

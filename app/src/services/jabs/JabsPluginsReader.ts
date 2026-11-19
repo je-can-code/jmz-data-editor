@@ -18,11 +18,6 @@ async function readJabsActionMapIdFromPluginsJs(_projectRoot: string): Promise<n
   try
   {
     const apiBase = getJmzHttpApiBase();
-    if (apiBase === null)
-    {
-      return DEFAULT_JABS_ACTION_MAP_ID;
-    }
-
     const url = `${apiBase}/api/plugin-metadata`;
     const response = await fetch(url, { method: 'GET' });
     if (!response.ok)

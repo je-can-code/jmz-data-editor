@@ -106,11 +106,6 @@ function resolveIconSetPngPath(projectDataPath: string): string
 async function loadIconSetPng(_projectDataPath: string): Promise<ArrayBuffer>
 {
   const apiBase = getJmzHttpApiBase();
-  if (apiBase === null)
-  {
-    throw new Error('IconSet load failed: JMZ HTTP API base is not configured.');
-  }
-
   const url = `${apiBase}/api/iconset`;
   const response = await fetch(url, { method: 'GET' });
   if (!response.ok)
