@@ -304,8 +304,10 @@ describe('install', () =>
 
     it('refuses a version that cannot name a folder of its own', () =>
     {
-      // Arrange- a path, a hidden name, each link's name, and a number.
-      const versions = [ '../elsewhere', '.hidden', 'current', 'previous', 20261119 ];
+      // Arrange- a path, a hidden name, each link's name, and a number. The second path starts with a plain name, so
+      // where the first is also refused for starting with a dot, only refusing its slashes keeps it from climbing to
+      // the home folder, which the installer would then remove as a build of that version.
+      const versions = [ '../elsewhere', 'a/../../..', '.hidden', 'current', 'previous', 20261119 ];
 
       // Act
       const messages = versions.map(version => refusalOf(versionsNaming({ version, file: 'a.gz', sha256: DIGEST })));
@@ -314,6 +316,7 @@ describe('install', () =>
       expect(messages)
         .toEqual([
           'versions.json names a version no folder can be named after: "../elsewhere".',
+          'versions.json names a version no folder can be named after: "a/../../..".',
           'versions.json names a version no folder can be named after: ".hidden".',
           'versions.json names a version no folder can be named after: "current".',
           'versions.json names a version no folder can be named after: "previous".',
@@ -323,8 +326,9 @@ describe('install', () =>
 
     it('refuses a tarball named by anything but a file beside versions.json', () =>
     {
-      // Arrange- a path out of the builds folder, and no name at all.
-      const files = [ '../jmz-editor.tar.gz', undefined ];
+      // Arrange- two paths out of the builds folder, and no name at all. The second path starts with a plain name, so
+      // only refusing its slash keeps it in the builds folder.
+      const files = [ '../jmz-editor.tar.gz', 'x/../y.tar.gz', undefined ];
 
       // Act
       const messages = files.map(file => refusalOf(versionsNaming({ version: VERSION, file, sha256: DIGEST })));
@@ -333,6 +337,7 @@ describe('install', () =>
       expect(messages)
         .toEqual([
           'versions.json names a tarball that is not a file beside it: "../jmz-editor.tar.gz".',
+          'versions.json names a tarball that is not a file beside it: "x/../y.tar.gz".',
           'versions.json names a tarball that is not a file beside it: undefined.',
         ]);
     });
