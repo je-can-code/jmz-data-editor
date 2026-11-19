@@ -541,19 +541,34 @@ function parseBundleConfig(text, homeDirectory)
 
 /**
  * Picks the bundled editor's project by the dev stack's precedence: --project-root, then JMZ_PROJECT_ROOT, then the
- * config. A relative folder counts from where the editor was started, and is made absolute here, so the root check,
- * the API and Play all name the one folder.
+ * config, and says which of them named it. The flag and the variable each win over the config, so a fix for a wrong
+ * folder belongs wherever the folder came from; with none set, the config is the place to set one. A relative folder
+ * counts from where the editor was started, and is made absolute here, so the root check, the API and Play all name the
+ * one folder.
  * @param {string[]} argv The app's arguments.
  * @param {Record<string, string | undefined>} environment The process's environment.
  * @param {{ projectRoot: string }} config The config's settings.
  * @param {string} workingDirectory The folder the editor was started from.
- * @returns {string} The project's absolute folder, or an empty string when none is set.
+ * @returns {{ projectRoot: string, source: 'flag' | 'variable' | 'config' }} The project's absolute folder, or an
+ * empty string when none is set, and where it came from.
  */
 function bundleProjectRoot(argv, environment, config, workingDirectory)
 {
+  const fromFlag = readFlag(argv, '--project-root');
+  if (fromFlag !== null)
+  {
+    return { projectRoot: path.resolve(workingDirectory, fromFlag), source: 'flag' };
+  }
+
+  // a variable of spaces names no folder, so it leaves the choice to the config.
   const fromEnvironment = (environment.JMZ_PROJECT_ROOT || '').trim();
-  const chosen = readFlag(argv, '--project-root') || fromEnvironment || config.projectRoot;
-  return chosen === '' ? '' : path.resolve(workingDirectory, chosen);
+  if (fromEnvironment !== '')
+  {
+    return { projectRoot: path.resolve(workingDirectory, fromEnvironment), source: 'variable' };
+  }
+
+  const fromConfig = config.projectRoot;
+  return { projectRoot: fromConfig === '' ? '' : path.resolve(workingDirectory, fromConfig), source: 'config' };
 }
 
 /**
@@ -685,6 +700,26 @@ function healthProjectRoot(answer)
 }
 
 /**
+ * How the person points the editor at their game, by where the editor took the project from: the flag it was started
+ * with, JMZ_PROJECT_ROOT, or the config. The flag and the variable each win over the config, so while either names a
+ * folder, a fix made in the config changes nothing, and neither does a relaunch, which runs on the first launch's own
+ * flags and environment. Each says where the folder came from, and how to fall back to the config instead.
+ */
+const ROOT_FIXES = {
+  flag: facts => [
+    'This folder comes from the --project-root the editor was started with, which wins over the config.',
+    `Use your game's folder there, or leave the flag out to use "projectRoot" in ${facts.config}.`,
+  ],
+  variable: facts => [
+    'This folder comes from JMZ_PROJECT_ROOT, which wins over the config.',
+    `Set it to your game's folder, or remove it to use "projectRoot" in ${facts.config}.`,
+  ],
+  config: facts => [
+    `Set "projectRoot" in ${facts.config} to your game's folder.`,
+  ],
+};
+
+/**
  * What the bundled editor's error window says about each thing that can stop it, in plain words, line by line, and the
  * log that says more: the API's, where the API ran and could have written why it stopped, and the shell's everywhere
  * else, both for what the shell found before starting the API and for an API that could not start at all, which never
@@ -703,7 +738,7 @@ const PROBLEMS = {
     lines: facts => [
       'No project is chosen yet.',
       '',
-      `Set "projectRoot" in ${facts.config} to your game's folder.`,
+      ...ROOT_FIXES.config(facts),
     ],
   },
   'missing-project': {
@@ -713,7 +748,7 @@ const PROBLEMS = {
       'The project folder isn\'t there:',
       facts.projectRoot,
       '',
-      `Set "projectRoot" in ${facts.config} to your game's folder.`,
+      ...ROOT_FIXES[facts.rootSource](facts),
     ],
   },
   'not-a-project': {
@@ -723,7 +758,7 @@ const PROBLEMS = {
       'This folder isn\'t an RPG Maker MZ project, since it has no data/System.json:',
       facts.projectRoot,
       '',
-      `Set "projectRoot" in ${facts.config} to your game's folder.`,
+      ...ROOT_FIXES[facts.rootSource](facts),
     ],
   },
   'bad-config': {
@@ -776,8 +811,9 @@ const START_AFRESH = 'Then close this window and open the editor again.';
  * Words what went wrong for the error window, and names the log that says more. A problem the person can put right
  * ends by asking for a fresh start, which a relaunch gives as well.
  * @param {string} problem What went wrong, one of the problems above.
- * @param {{ projectRoot: string, port: number, config: string, apiLog: string, shellLog: string }} facts The project,
- * the port, and the config and log files, as the bundle has them.
+ * @param {{ projectRoot: string, rootSource: 'flag' | 'variable' | 'config', port: number, config: string,
+ * apiLog: string, shellLog: string }} facts The project and where it came from, the port, and the config and log
+ * files, as the bundle has them.
  * @returns {string} The window's text.
  */
 function problemText(problem, facts)

@@ -41,14 +41,14 @@ const rules = load('../../../nw-app/shellRules.js') as {
   isBundled(shellDirectory: string, exists: (filePath: string) => boolean): boolean;
   bundleUserFiles(environment: Record<string, string | undefined>, homeDirectory: string): { config: string; apiLog: string; shellLog: string };
   parseBundleConfig(text: string | null, homeDirectory: string): { projectRoot: string; port: number | null } | null;
-  bundleProjectRoot(argv: string[], environment: Record<string, string | undefined>, config: { projectRoot: string }, workingDirectory: string): string;
+  bundleProjectRoot(argv: string[], environment: Record<string, string | undefined>, config: { projectRoot: string }, workingDirectory: string): { projectRoot: string; source: string };
   bundlePort(config: { port: number | null }, defaultPort: number): number;
   bundleOrigin(port: number): string;
   bundleServerEnvironment(origin: string, projectRoot: string, uiDirectory: string): Record<string, string>;
   apiSpawnOptions(environment: Record<string, string | undefined>, serverVariables: Record<string, string>, output: number): { env: Record<string, string | undefined>; stdio: unknown[] };
   projectRootProblem(projectRoot: string, exists: (filePath: string) => boolean): string | null;
   isApiReady(answer: { status: number; body: unknown }): boolean;
-  problemText(problem: string, facts: { projectRoot: string; port: number; config: string; apiLog: string; shellLog: string }): string;
+  problemText(problem: string, facts: { projectRoot: string; rootSource: string; port: number; config: string; apiLog: string; shellLog: string }): string;
   relaunchAction(state: { problem: string; problemsOpening: number; problemsShown: number; editorReady: boolean }): string;
 };
 
@@ -815,7 +815,7 @@ describe('shellRules', () =>
 
     describe('bundleProjectRoot', () =>
     {
-      it('takes --project-root first, then JMZ_PROJECT_ROOT, then the config', () =>
+      it('takes --project-root first, then JMZ_PROJECT_ROOT, then the config, and says which named the folder', () =>
       {
         // Arrange: all three set, then the flag gone, then the variable gone too.
         const config = { projectRoot: '/games/from-config' };
@@ -830,25 +830,34 @@ describe('shellRules', () =>
 
         // Assert.
         expect(roots)
-          .toStrictEqual([ '/games/from-flag', '/games/from-environment', '/games/from-config' ]);
+          .toStrictEqual([
+            { projectRoot: '/games/from-flag', source: 'flag' },
+            { projectRoot: '/games/from-environment', source: 'variable' },
+            { projectRoot: '/games/from-config', source: 'config' },
+          ]);
       });
 
-      it('makes a relative folder absolute from where the editor was started', () =>
+      it('makes a relative folder absolute from where the editor was started, wherever it came from', () =>
       {
-        // Arrange: a relative flag, and a relative config.
+        // Arrange: a relative flag, a relative variable, and a relative config.
 
         // Act.
         const roots = [
           rules.bundleProjectRoot([ '--project-root=games/chef' ], {}, { projectRoot: '' }, '/home/maker'),
+          rules.bundleProjectRoot([], { JMZ_PROJECT_ROOT: 'games/env' }, { projectRoot: '' }, '/home/maker'),
           rules.bundleProjectRoot([], {}, { projectRoot: './chef/' }, '/home/maker'),
         ];
 
         // Assert.
         expect(roots)
-          .toStrictEqual([ '/home/maker/games/chef', '/home/maker/chef' ]);
+          .toStrictEqual([
+            { projectRoot: '/home/maker/games/chef', source: 'flag' },
+            { projectRoot: '/home/maker/games/env', source: 'variable' },
+            { projectRoot: '/home/maker/chef', source: 'config' },
+          ]);
       });
 
-      it('answers an empty folder when none is set, a blank variable included', () =>
+      it('answers an empty folder when none is set, a blank variable included, and the config as the place to set one', () =>
       {
         // Arrange: no flag, a variable of spaces, and an empty config.
 
@@ -857,7 +866,7 @@ describe('shellRules', () =>
 
         // Assert.
         expect(root)
-          .toBe('');
+          .toStrictEqual({ projectRoot: '', source: 'config' });
       });
 
       it('passes over a blank variable to the config\'s folder', () =>
@@ -869,7 +878,7 @@ describe('shellRules', () =>
 
         // Assert.
         expect(root)
-          .toBe('/games/from-config');
+          .toStrictEqual({ projectRoot: '/games/from-config', source: 'config' });
       });
     });
 
@@ -1041,6 +1050,7 @@ describe('shellRules', () =>
     // what the shell knows when something stops the bundled editor, and every problem it can report.
     const FACTS = {
       projectRoot: '/games/gone',
+      rootSource: 'config',
       port: 47380,
       config: '/home/maker/.config/jmz-editor/config.json',
       apiLog: '/home/maker/.local/state/jmz-editor/api.log',
@@ -1067,6 +1077,88 @@ describe('shellRules', () =>
             '',
             'The log is at /home/maker/.local/state/jmz-editor/shell.log',
           ].join('\n'));
+      });
+
+      it('points the fix for a folder that is not there at the config, when the config named it', () =>
+      {
+        // Arrange: the facts above, whose folder came from the config.
+
+        // Act.
+        const text = rules.problemText('missing-project', FACTS);
+
+        // Assert.
+        expect(text)
+          .toBe([
+            'The project folder isn\'t there:',
+            '/games/gone',
+            '',
+            'Set "projectRoot" in /home/maker/.config/jmz-editor/config.json to your game\'s folder.',
+            'Then close this window and open the editor again.',
+            '',
+            'The log is at /home/maker/.local/state/jmz-editor/shell.log',
+          ].join('\n'));
+      });
+
+      it('names JMZ_PROJECT_ROOT as where the folder came from, since it wins over the config, and points the fix at it', () =>
+      {
+        // Arrange: the folder named by the variable, which a fix made in the config would never reach.
+        const facts = { ...FACTS, rootSource: 'variable' };
+
+        // Act.
+        const text = rules.problemText('missing-project', facts);
+
+        // Assert.
+        expect(text)
+          .toBe([
+            'The project folder isn\'t there:',
+            '/games/gone',
+            '',
+            'This folder comes from JMZ_PROJECT_ROOT, which wins over the config.',
+            'Set it to your game\'s folder, or remove it to use "projectRoot" in /home/maker/.config/jmz-editor/config.json.',
+            'Then close this window and open the editor again.',
+            '',
+            'The log is at /home/maker/.local/state/jmz-editor/shell.log',
+          ].join('\n'));
+      });
+
+      it('names --project-root as where the folder came from, since it wins over the config, and points the fix at it', () =>
+      {
+        // Arrange: the folder named by the flag the editor was started with.
+        const facts = { ...FACTS, rootSource: 'flag' };
+
+        // Act.
+        const text = rules.problemText('missing-project', facts);
+
+        // Assert.
+        expect(text)
+          .toBe([
+            'The project folder isn\'t there:',
+            '/games/gone',
+            '',
+            'This folder comes from the --project-root the editor was started with, which wins over the config.',
+            'Use your game\'s folder there, or leave the flag out to use "projectRoot" in /home/maker/.config/jmz-editor/config.json.',
+            'Then close this window and open the editor again.',
+            '',
+            'The log is at /home/maker/.local/state/jmz-editor/shell.log',
+          ].join('\n'));
+      });
+
+      it('points the fix for a folder that is not a project at where the folder came from, as for one not there', () =>
+      {
+        // Arrange: a folder that is not a project, named by each of the three.
+        const sources = [ 'config', 'variable', 'flag' ];
+
+        // Act.
+        const fixes = sources.map(rootSource => rules.problemText('not-a-project', { ...FACTS, rootSource })
+          .split('\n')[3]);
+
+        // Assert.
+        expect(fixes)
+          .toStrictEqual([
+            'Set "projectRoot" in /home/maker/.config/jmz-editor/config.json to your game\'s folder.',
+            'This folder comes from JMZ_PROJECT_ROOT, which wins over the config.',
+            'This folder comes from the --project-root the editor was started with, which wins over the config.',
+          ]);
       });
 
       it('says the config cannot be read, what to make it hold, how to start afresh, and where the log is', () =>

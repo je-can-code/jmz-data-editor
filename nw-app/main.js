@@ -869,7 +869,8 @@ async function waitForApi(origin, ended)
 /**
  * Logs what stopped the bundled editor, keeps it for a second launch to answer, and shows it in the error window.
  * @param {string} problem What stopped it, one of the problems the rules word.
- * @param {{ projectRoot: string, port: number }} found The project and the port, as far as the shell got.
+ * @param {{ projectRoot: string, rootSource: string, port: number }} found The project and where it came from, and the
+ * port, as far as the shell got.
  */
 function reportProblem(problem, found)
 {
@@ -884,8 +885,9 @@ function reportProblem(problem, found)
 
 /**
  * Runs the bundled editor's start again, for a relaunch after a problem the person can put right stopped it, on this
- * copy's own flags and the config as it reads now. The error windows on screen stay up until the window taking their
- * place is on its way, the editor's or a fresh error window, and closing them meanwhile never quits the app.
+ * copy's own flags and environment, and the config as it reads now. The error windows on screen stay up until the
+ * window taking their place is on its way, the editor's or a fresh error window, and closing them meanwhile never
+ * quits the app.
  */
 function runAgain()
 {
@@ -964,12 +966,14 @@ async function runBundle()
 
   // a config that cannot be read sets nothing, and the window below says the file is wrong.
   const settings = config === null ? { projectRoot: '', port: null } : config;
-  const projectRoot = rules.bundleProjectRoot(argv, process.env, settings, process.cwd());
+  const { projectRoot, source } = rules.bundleProjectRoot(argv, process.env, settings, process.cwd());
   const port = rules.bundlePort(settings, manifest.port);
   const origin = rules.bundleOrigin(port);
-  const found = { projectRoot, port };
+
+  // where the folder came from goes with it, so a problem with the folder points the fix at the place that named it.
+  const found = { projectRoot, rootSource: source, port };
   const { version } = manifest;
-  log('boot', { argv, execPath: process.execPath, version, config: userFiles.config, origin, projectRoot });
+  log('boot', { argv, execPath: process.execPath, version, config: userFiles.config, origin, projectRoot, rootSource: source });
 
   if (config === null)
   {
@@ -1114,7 +1118,7 @@ function crashed(error)
 
   if (bundled)
   {
-    reportProblem('crashed', { projectRoot: '', port: 0 });
+    reportProblem('crashed', { projectRoot: '', rootSource: 'config', port: 0 });
     return;
   }
 
