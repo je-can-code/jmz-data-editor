@@ -942,7 +942,7 @@ describe('shellRules', () =>
       {
         // Arrange: the problems the person fixes in the config or by closing another program, then the ones they cannot
         // fix, where there is nothing to start afresh for.
-        const problems = [ 'no-project', 'missing-project', 'not-a-project', 'bad-config', 'port-in-use', 'api-stopped', 'api-silent', 'crashed' ];
+        const problems = [ 'no-project', 'missing-project', 'not-a-project', 'bad-config', 'port-in-use', 'api-start-failed', 'api-stopped', 'api-silent', 'crashed' ];
 
         // Act.
         const asked = problems.map(problem => rules.problemText(problem, FACTS)
@@ -950,13 +950,13 @@ describe('shellRules', () =>
 
         // Assert.
         expect(asked)
-          .toStrictEqual([ true, true, true, true, true, false, false, false ]);
+          .toStrictEqual([ true, true, true, true, true, false, false, false, false ]);
       });
 
-      it('names the shell\'s log for what the shell found, and the API\'s for what became of the API', () =>
+      it('names the API\'s log where the API ran and could have written to it, and the shell\'s everywhere else', () =>
       {
         // Arrange: every problem the shell can report.
-        const problems = [ 'no-project', 'missing-project', 'not-a-project', 'bad-config', 'port-in-use', 'api-stopped', 'api-silent', 'crashed' ];
+        const problems = [ 'no-project', 'missing-project', 'not-a-project', 'bad-config', 'port-in-use', 'api-start-failed', 'api-stopped', 'api-silent', 'crashed' ];
 
         // Act.
         const lastLines = problems.map(problem => rules.problemText(problem, FACTS)
@@ -971,10 +971,27 @@ describe('shellRules', () =>
             'The log is at /home/maker/.local/state/jmz-editor/shell.log',
             'The log is at /home/maker/.local/state/jmz-editor/shell.log',
             'The log is at /home/maker/.local/state/jmz-editor/shell.log',
+            'The log is at /home/maker/.local/state/jmz-editor/shell.log',
             'The log is at /home/maker/.local/state/jmz-editor/api.log',
             'The log is at /home/maker/.local/state/jmz-editor/api.log',
             'The log is at /home/maker/.local/state/jmz-editor/shell.log',
           ]);
+      });
+
+      it('says the server could not start, apart from its stopping, and names the shell\'s log, the one holding the reason', () =>
+      {
+        // Arrange: the facts above, for a server that never ran, so never wrote a word to its own log.
+
+        // Act.
+        const text = rules.problemText('api-start-failed', FACTS);
+
+        // Assert.
+        expect(text)
+          .toBe([
+            'The editor\'s server couldn\'t start.',
+            '',
+            'The log is at /home/maker/.local/state/jmz-editor/shell.log',
+          ].join('\n'));
       });
 
       it('names the folder and the config wherever the person has a project to fix', () =>

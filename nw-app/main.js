@@ -744,7 +744,8 @@ function isPortTaken(port)
  * @param {string} version The bundle's version.
  * @param {string} origin The bundle's origin.
  * @param {string} projectRoot The project's folder.
- * @returns {Promise<void>} Settles once the API has stopped, or could not start at all.
+ * @returns {Promise<'exited' | 'unstartable'>} Settles once the API has stopped, as 'exited', or as 'unstartable' when
+ * it could not start at all.
  */
 function startApi(layout, version, origin, projectRoot)
 {
@@ -766,14 +767,15 @@ function startApi(layout, version, origin, projectRoot)
     api.once('exit', (code, signal) =>
     {
       log('api-exit', { code, signal });
-      resolve();
+      resolve('exited');
     });
 
-    // a binary that cannot run at all never exits; it failed to start.
+    // a binary that cannot run at all, being missing or not executable, never exits; it failed to start, and the
+    // reason is in this log line alone, since the API never ran to write its own.
     api.once('error', (error) =>
     {
       log('api-error', { error: String(error) });
-      resolve();
+      resolve('unstartable');
     });
   });
 }
@@ -782,7 +784,8 @@ function startApi(layout, version, origin, projectRoot)
  * Asks the API's health check every quarter second until it answers ready, or the asking is called off.
  * @param {string} origin The bundle's origin.
  * @param {() => boolean} asking Whether to keep asking.
- * @returns {Promise<'ready' | 'silent'>} 'ready' once the API answered so, and 'silent' when the asking was called off.
+ * @returns {Promise<'ready' | 'api-silent'>} 'ready' once the API answered so, and 'api-silent' when the asking was
+ * called off.
  */
 async function pollHealth(origin, asking)
 {
@@ -804,22 +807,24 @@ async function pollHealth(origin, asking)
     await sleep(250);
   }
 
-  return 'silent';
+  return 'api-silent';
 }
 
 /**
- * Waits for the bundle's API to say it is ready, for it to stop, or for the wait to run out, whichever comes first.
+ * Waits for the bundle's API to say it is ready, for it to stop or fail to start, or for the wait to run out, whichever
+ * comes first.
  * @param {string} origin The bundle's origin.
- * @param {Promise<void>} ended Settles once the API has stopped.
- * @returns {Promise<'ready' | 'stopped' | 'silent'>} Which came first.
+ * @param {Promise<'exited' | 'unstartable'>} ended Settles once the API has stopped, or could not start at all.
+ * @returns {Promise<'ready' | 'api-start-failed' | 'api-stopped' | 'api-silent'>} 'ready' when that came first, and
+ * otherwise the problem that did.
  */
 async function waitForApi(origin, ended)
 {
   let asking = true;
   const outcome = await Promise.race([
     pollHealth(origin, () => asking),
-    ended.then(() => 'stopped'),
-    sleep(API_READY_TIMEOUT_MS).then(() => 'silent'),
+    ended.then(ending => (ending === 'unstartable' ? 'api-start-failed' : 'api-stopped')),
+    sleep(API_READY_TIMEOUT_MS).then(() => 'api-silent'),
   ]);
 
   asking = false;
@@ -919,7 +924,7 @@ async function startBundle()
   {
     // an API that never answered is ended, so it holds nothing against the next launch.
     shutdown();
-    reportProblem(outcome === 'stopped' ? 'api-stopped' : 'api-silent', found);
+    reportProblem(outcome, found);
     return;
   }
 

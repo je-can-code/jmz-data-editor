@@ -629,8 +629,10 @@ function isApiReady(answer)
 
 /**
  * What the bundled editor's error window says about each thing that can stop it, in plain words, line by line, and the
- * log that says more: the shell's, for what the shell found before starting the API, and the API's, for what became of
- * the API. A desktop launch has no terminal, so this window is the one place the person learns what went wrong.
+ * log that says more: the API's, where the API ran and could have written why it stopped, and the shell's everywhere
+ * else, both for what the shell found before starting the API and for an API that could not start at all, which never
+ * wrote a word of its own. A desktop launch has no terminal, so this window is the one place the person learns what
+ * went wrong.
  *
  * Whatever the person can put right themselves ends by asking them to close this window before opening the editor
  * again. The checks run only as the editor starts, and while this window is up the editor is still running: opening it
@@ -685,6 +687,10 @@ const PROBLEMS = {
       `Close that program, or set "port" in ${facts.config} to a free port.`,
       'Then close this window and open the editor again.',
     ],
+  },
+  'api-start-failed': {
+    log: 'shellLog',
+    lines: () => [ 'The editor\'s server couldn\'t start.' ],
   },
   'api-stopped': {
     log: 'apiLog',
