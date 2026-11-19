@@ -158,38 +158,49 @@ func serveAsset(responseWriter http.ResponseWriter, httpRequest *http.Request, b
 	serveFile(responseWriter, httpRequest, filepath.Join(root, base, folder), name+extension, contentType)
 }
 
-// serveFile serves relativePath from inside folder and nowhere else.
-//
-// The file is opened through an os.Root on the folder, which refuses any path that would resolve
-// outside it, symbolic links included. The name has already been checked by the caller; this is the
-// second lock on the same door, so a gap in the first cannot become a way out of the project.
+// serveFile serves relativePath from inside folder and nowhere else (see openPlainFile).
 // http.ServeContent answers range requests, which is how a browser seeks and streams audio.
 func serveFile(responseWriter http.ResponseWriter, httpRequest *http.Request, folder string, relativePath string, contentType string) {
-	folderRoot, err := os.OpenRoot(folder)
-	if err != nil {
-		answerOpenError(responseWriter, err)
-		return
-	}
-	defer folderRoot.Close()
-
-	file, err := folderRoot.Open(filepath.FromSlash(relativePath))
+	file, info, err := openPlainFile(folder, relativePath)
 	if err != nil {
 		answerOpenError(responseWriter, err)
 		return
 	}
 	defer file.Close()
 
-	info, err := file.Stat()
-	if err != nil || info.Mode().IsRegular() == false {
-		http.Error(responseWriter, "not found", http.StatusNotFound)
-		return
-	}
-
 	// revalidate on every use, so an image repainted outside the editor is never shown stale; an
 	// unchanged file still costs only a 304.
 	responseWriter.Header().Set("Content-Type", contentType)
 	responseWriter.Header().Set("Cache-Control", "no-cache")
 	http.ServeContent(responseWriter, httpRequest, info.Name(), info.ModTime(), file)
+}
+
+// openPlainFile opens relativePath from inside folder and nowhere else, and only when it is a plain
+// file: a folder, a device or anything else that is not a file is reported as not existing, since it
+// is never something to serve. The caller closes the file.
+//
+// The file is opened through an os.Root on the folder, which refuses any path that would resolve
+// outside it, symbolic links included. The name has already been checked by the caller; this is the
+// second lock on the same door, so a gap in the first cannot become a way out of the folder.
+func openPlainFile(folder string, relativePath string) (*os.File, os.FileInfo, error) {
+	folderRoot, err := os.OpenRoot(folder)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer folderRoot.Close()
+
+	file, err := folderRoot.Open(filepath.FromSlash(relativePath))
+	if err != nil {
+		return nil, nil, err
+	}
+
+	info, err := file.Stat()
+	if err != nil || info.Mode().IsRegular() == false {
+		file.Close()
+		return nil, nil, fs.ErrNotExist
+	}
+
+	return file, info, nil
 }
 
 // answerOpenError turns a failure to open an asset into its answer: 404 when it does not exist, 500

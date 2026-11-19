@@ -2,7 +2,9 @@ package main
 
 import (
 	"errors"
+	"flag"
 	"fmt"
+	"io"
 	"jmz-data-editor/server/internal/api"
 	"jmz-data-editor/server/internal/commandlist"
 	"jmz-data-editor/server/internal/middleware"
@@ -17,6 +19,10 @@ import (
 	"os"
 	"strings"
 )
+
+// version names this build. The bundle build stamps it with -ldflags "-X main.version=<v>"; a plain
+// go run or go build leaves it at dev.
+var version = "dev"
 
 // listenAddress is where the API listens unless told otherwise: the loopback address only, on the port
 // the UI expects (nw-app/main.js and the dev scripts both default to http://127.0.0.1:8080).
@@ -35,12 +41,22 @@ type serverConfig struct {
 
 	// origins are the page origins allowed to call the API from a browser, compared exactly.
 	origins []string
+
+	// uiDirectory is the folder of the UI's built pages to serve beside the API, or empty to serve the
+	// API alone, as the dev stack, where Vite serves the pages, always does.
+	uiDirectory string
+
+	// exitWithParent ends the server when its stdin closes, which is how it learns that the program
+	// that started it has ended.
+	exitWithParent bool
 }
 
 // configFrom reads the server's configuration: JMZ_API_ADDRESS, the host and port to listen on, and
 // JMZ_UI_ORIGINS, the comma-separated page origins allowed to call it. Either one unset keeps today's
 // default. The address must be a loopback name, because the API reads and writes the game's files and
-// must never be reachable from another machine.
+// must never be reachable from another machine. JMZ_UI_DIR, when set, names a folder of the UI's built
+// pages to serve as well, and JMZ_EXIT_WITH_PARENT=1 ends the server when its stdin closes; the
+// bundled editor sets both, and neither changes anything while unset.
 func configFrom(getenv func(string) string) (serverConfig, error) {
 	address := strings.TrimSpace(getenv("JMZ_API_ADDRESS"))
 	if address == "" {
@@ -71,7 +87,29 @@ func configFrom(getenv func(string) string) (serverConfig, error) {
 		origins = defaultOrigins
 	}
 
-	return serverConfig{address: address, origins: origins}, nil
+	// the UI's folder is checked once, here, so a bundle missing its pages stops at launch and says
+	// why, rather than starting and answering every page with a 404.
+	uiDirectory := strings.TrimSpace(getenv("JMZ_UI_DIR"))
+	if uiDirectory != "" {
+		info, statErr := os.Stat(uiDirectory)
+		if statErr != nil || info.IsDir() == false {
+			return serverConfig{}, fmt.Errorf("JMZ_UI_DIR must name the folder of the UI's built pages, not %q", uiDirectory)
+		}
+	}
+
+	// a value that means neither on nor off is refused rather than read as off, since off would leave
+	// a server outliving its parent, which is the very thing the setting is for.
+	exitWithParent := strings.TrimSpace(getenv("JMZ_EXIT_WITH_PARENT"))
+	if exitWithParent != "" && exitWithParent != "0" && exitWithParent != "1" {
+		return serverConfig{}, fmt.Errorf("JMZ_EXIT_WITH_PARENT must be 1 or 0, not %q", exitWithParent)
+	}
+
+	return serverConfig{
+		address:        address,
+		origins:        origins,
+		uiDirectory:    uiDirectory,
+		exitWithParent: exitWithParent == "1",
+	}, nil
 }
 
 // policy is who may talk to the API: pages from the configured origins, and requests addressed to the
@@ -90,19 +128,49 @@ func (config serverConfig) policy() middleware.Policy {
 }
 
 func main() {
+	// -version answers before any configuration is read, so the installer can try a build on a machine
+	// with no project and no free port.
+	showVersion := flag.Bool("version", false, "print the build's version and exit")
+	flag.Parse()
+	if *showVersion {
+		fmt.Println(version)
+		return
+	}
+
 	config, err := configFrom(os.Getenv)
 	if err != nil {
 		panic(err)
+	}
+
+	// a parent holding the other end of stdin, as the bundled editor's shell does, takes the server with
+	// it when it ends, so no server is left holding the port against the next launch.
+	if config.exitWithParent {
+		go exitWhenStdinCloses(os.Stdin)
 	}
 
 	// one change stream for the whole server: every window's saves pass through it.
 	changes := watch.NewHub("data", store.EditorDataFolder)
 
 	fmt.Printf("Server running on http://%s\n", config.address)
-	err = http.ListenAndServe(config.address, routes(changes, config.policy()))
+	if config.uiDirectory != "" {
+		fmt.Printf("Serving the UI from %s\n", config.uiDirectory)
+	}
+	err = http.ListenAndServe(config.address, routes(changes, config.policy(), config.uiDirectory))
 	if err != nil {
 		panic(err)
 	}
+}
+
+// exitWhenStdinCloses waits for stdin to close, then ends the server. The system closes a pipe once
+// the process holding its other end has ended, whether that process quit, crashed or was killed, on
+// Linux and Windows alike, so this is how the server notices that whatever started it is gone.
+func exitWhenStdinCloses(stdin io.Reader) {
+	// nothing on stdin is meant for the server; reading only waits for the end, and a failed read
+	// means the same thing.
+	io.Copy(io.Discard, stdin)
+
+	fmt.Println("Stopping: stdin closed, so whatever started the server has ended.")
+	os.Exit(0)
 }
 
 // accessPolicy is the policy the server keeps when nothing configures it: pages from the UI's Vite
@@ -112,8 +180,10 @@ func accessPolicy() middleware.Policy {
 	return serverConfig{address: listenAddress, origins: defaultOrigins}.policy()
 }
 
-// routes registers every endpoint the API serves, behind the access policy.
-func routes(changes *watch.Hub, policy middleware.Policy) http.Handler {
+// routes registers every endpoint the API serves, behind the access policy. When uiDirectory names a
+// folder, the UI's built pages are served from it as well, behind the same policy, so one address
+// answers both the pages and the API they call.
+func routes(changes *watch.Hub, policy middleware.Policy, uiDirectory string) http.Handler {
 	mux := http.NewServeMux()
 
 	//region health
@@ -263,5 +333,20 @@ func routes(changes *watch.Hub, policy middleware.Policy) http.Handler {
 	mux.HandleFunc("GET /api/database-names", api.LoadDatabaseNames)
 	//endregion command list
 
-	return middleware.CORS(mux, policy)
+	return middleware.CORS(withUI(mux, uiDirectory), policy)
+}
+
+// withUI puts the UI's pages beside the API's routes. Every path under /api still goes to those routes
+// untouched, so an /api path they do not know stays their 404 and never turns into a page; every other
+// path is one of the UI's files. With no folder there is nothing to add.
+func withUI(apiRoutes http.Handler, uiDirectory string) http.Handler {
+	if uiDirectory == "" {
+		return apiRoutes
+	}
+
+	site := http.NewServeMux()
+	site.Handle("/api", apiRoutes)
+	site.Handle("/api/", apiRoutes)
+	site.Handle("/", api.ServeUI(uiDirectory))
+	return site
 }
