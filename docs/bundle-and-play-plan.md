@@ -170,7 +170,8 @@ leftovers named above).
 
 Steps:
 
-1. **UI:** `cd app && bun run build`, with `VITE_JMZ_API_BASE` unset (see 2.2). Output: `app/build/`.
+1. **UI:** `cd app && bun run build`, with `VITE_JMZ_API_BASE` unset (see 2.2) and `NODE_ENV=production`, since an
+   inherited `development` would make a dev build whose pages name the dev stack's API port. Output: `app/build/`.
 2. **API:** in `server/`, `CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "-s -w -X main.version=<v>" -o <out>/server/jmz-api ./cmd/api`.
    Add a `-version` flag to `cmd/api` that prints `main.version` and exits before any config is read (the installer
    uses it as a smoke test).
@@ -189,7 +190,9 @@ Steps:
 5. **UI files:** copy `app/build/` to `<out>/ui/`.
 6. **Manifest:** write `<out>/bundle.json`:
    `{ "version", "commit", "dirty", "builtAt", "nwjs": "0.118.0-sdk", "port": 47380 }`.
-   `version` is `<UTC yyyymmdd.HHMM>-<short sha>`, plus `-dirty` when the tree has uncommitted changes.
+   `version` is `<UTC yyyymmdd.HHMM>-<short sha>`, plus `-dirty` when a tracked file has uncommitted changes or an
+   untracked file sits where the build reads (`app/`, `server/`, `nw-app/`, `scripts/`, the root `package.json` and
+   lockfile). An untracked note elsewhere in the checkout leaves the label off.
 7. **Launcher:** write `<out>/jmz-editor`, executable:
    `#!/bin/sh` / `HERE="$(dirname "$(readlink -f "$0")")"` / `exec "$HERE/nwjs/nw" "$HERE/editor" "$@"`.
    Launching by explicit path is deliberate. Whether a path argument overrides a `package.nw` beside the binary is
@@ -233,8 +236,13 @@ When `JMZ_UI_DIR` is set, `routes()` (`main.go:116+`) also serves that directory
 - Behind the same `CORS` middleware. With `JMZ_UI_ORIGINS` set to the bundle's own origin, every request from the
   bundle's pages passes whether or not the browser sends `Origin`: a request without one is served, and one carrying
   the bundle's own origin is allowed (`cors.go:42-56`).
-- `index.html` and the other `.html` files go out with `Cache-Control: no-cache`, so an update is never masked by a
-  cached page. Hashed `assets/` files can be cached.
+- Every file outside `assets/`, the pages above all, goes out with `Cache-Control: no-store` and no `Last-Modified`,
+  so no page is ever answered from a copy the browser kept. A validator would not be enough: every installed version
+  shares one profile and one origin, and a build's files carry its build time, so going back to an older build
+  (`previous`) would be told the newer build's cached page is still good. The hashed files directly in `assets/` can
+  be cached for good.
+- Every UI file carries `Content-Security-Policy: frame-ancestors 'self'`. The pages' own requests to the API are
+  same-origin, so a page framed by another site could otherwise save or delete through them.
 - A directory beside the binary rather than `go:embed`: `go:embed` needs the files at compile time inside the
   module, which would break plain `go run ./cmd/api` in dev.
 - Tests beside `server/cmd/api/access_test.go`: served when set, 404 when unset, `Host` check still refuses, `/api`
@@ -251,7 +259,7 @@ behavior, unchanged) otherwise. Put the decisions in `shellRules.js` with tests.
 | First window | the data editor (`/`), or the map editor (`/map.html`) with `--maps` (`shellRules.js:65-68`) | the map editor (`/map.html`), D3's default while D3 is open. One rule in `shellRules.js`, so settling D3 the other way is a one-line change. The data editor stays one click away through the bar's Data editor button (`WorkspaceChrome.tsx:199`) |
 | Origin | UI on `:3000`, API on `:8080` | **one fixed loopback origin** for both, default `http://127.0.0.1:47380`, overridable as `port` in the config. Never an ephemeral port: `localStorage` and the channels are per-origin, so a new port would wipe them every launch. Never 3000 or 8080, so the bundle runs beside a dev stack |
 | API environment | `serverEnvironment(apiBase, uiUrl)` | same function, with `apiBase` and `uiUrl` both the bundle origin, plus `JMZ_PROJECT_ROOT`, `JMZ_UI_DIR=<bundle>/ui` and `JMZ_EXIT_WITH_PARENT=1` |
-| Config file | `<repo>/.config/jmz-data-editor.json` | per user, surviving updates: `$XDG_CONFIG_HOME/jmz-editor/config.json` (default `~/.config/jmz-editor/config.json`); `{ "projectRoot", "port" }` |
+| Config file | `<repo>/.config/jmz-data-editor.json` | per user, surviving updates: `$XDG_CONFIG_HOME/jmz-editor/config.json` (default `~/.config/jmz-editor/config.json`); `{ "projectRoot", "port" }`. A leading `~` in `projectRoot` counts from the home folder, as a terminal would |
 | Project root | flag, env, config | same precedence |
 | Child output | `stdio: 'inherit'` | appended to `<state>/jmz-editor/api.log` (`$XDG_STATE_HOME` or `~/.local/state`); the shell's own `--log` defaults to `<state>/jmz-editor/shell.log` |
 | Readiness | wait 10 s for the UI, then open anyway | before starting the API, check that the root exists and holds `data/System.json`, since `projectRootOk` only means the variable is set; then wait for `/api/health` with `ok` (read with the JSON GET from 1.2); on a bad root, a timeout or an exit, show the error window instead |
@@ -271,7 +279,18 @@ the old file whole.
 
 **The error window.** Generalize `showMissingProjectRoot` (`main.js:321-338`) into one small window that states
 what went wrong in plain words (no project chosen, port already in use, the API stopped) and names the log file.
-There is no terminal in a desktop launch, so a `panic` or an inherited stdout is otherwise invisible.
+There is no terminal in a desktop launch, so a `panic` or an inherited stdout is otherwise invisible. An API that
+cannot start at all (its binary missing or not executable) is told apart from one that stopped, and points at
+`shell.log`, where the reason is. A project error names where the root came from (the flag, `JMZ_PROJECT_ROOT` or the
+config), since the first two outrank the config and editing it would not help.
+
+**Opening the editor again.** A second launch hands its command line to the running copy and exits (the shared
+profile), so a relaunch never starts fresh while one of the editor's windows is open. When startup stopped on
+something fixed in the config (no project chosen, a project folder missing or not a project, a config that does not
+parse, a port in use), the relaunch runs the checks again: the editor opens if the fix took, and a fresh error window
+comes forward if not. After the API itself failed, a relaunch brings the error window forward, and with the editor
+open it brings the editor forward. Which problems run the checks again is one rule in `shellRules.js`, beside the
+wording that tells the person what to do.
 
 ### 2.5 The top bar shows the API's root
 
@@ -301,16 +320,24 @@ Modelled on the Zed builds' `laptop.js`.
   the builds folder rather than from the repo because the desktop's checkout changes branch with PR work, so a
   script inside it can vanish; the copy beside the tarball always matches it. It finds `versions.json` and the
   tarball in its own folder, and uses Bun and Node built-ins only (nothing from the repo or `node_modules`).
-- Reads `versions.json`. If that version is already installed, it says so and stops, so running it twice is harmless.
-- Copies the tarball to a local temp folder, checks its SHA-256, and extracts it to
-  `~/.local/jmz-editor/<version>/`. Modes come from the archive, so the share's `file_mode=0664` does not matter.
+- Holds a lock beside the install folder from start to finish, so a second run started meanwhile refuses instead of
+  pruning the first one's staging folder. A lock whose process is gone is taken over.
+- Reads `versions.json`. If that version is already current, it says so and writes the menu entry again (below), so
+  running it twice is harmless and puts back a link or `.desktop` file that a cut-short run never wrote.
+- Says it is copying, then copies the tarball into a staging folder inside `~/.local/jmz-editor/`, checks its SHA-256,
+  and extracts it to `~/.local/jmz-editor/<version>/`. Not `/tmp`, which is RAM on these machines and which a run
+  killed mid-copy would leave full; the next run clears a staging folder left behind. Modes come from the archive, so
+  the share's `file_mode=0664` does not matter.
 - **Tries the build before switching to it:** `server/jmz-api -version` must print the expected version, and `ldd`
   on `nwjs/nw`, `nwjs/lib/*.so` and `libvulkan.so.1` must report nothing `not found`. NW.js's libraries find each
   other only through `nw`'s `RPATH` (`$ORIGIN/lib/`): plain `ldd` on the desktop's working copy reports
   `libnw.so => not found` for `libnode.so` and `libffmpeg.so => not found` for `libnw.so`, so the check runs with
-  `LD_LIBRARY_PATH=<bundle>/nwjs/lib` (verified 2026-11-18). On failure it names what is missing and changes nothing.
+  `LD_LIBRARY_PATH=<bundle>/nwjs/lib` (verified 2026-11-18). The launcher and `nwjs/nw` must be executable. On failure
+  it names what is missing and changes nothing.
 - Switches `~/.local/jmz-editor/current` to the new version, keeps the one it replaced as `previous`, and prunes older
-  ones.
+  ones, except a build some process is running from (its `/proc/<pid>/exe` resolves inside it: the editor, the API, a
+  playtest). An editor started through `previous`, or left open across two installs, keeps its build. Re-installing a
+  version whose folder is in use is refused, and so is any install while `/proc` cannot be listed.
 - Writes `~/.local/bin/jmz-editor` (a link to `current/jmz-editor`) and
   `~/.local/share/applications/jmz-editor.desktop` (`Exec` that link, `Terminal=false`, an icon from the bundle), so
   the editor opens from the app menu with no terminal.
@@ -410,23 +437,24 @@ rather than using the copy.
 
 One review over the whole branch once P1 to P4 are done, before anything reaches the laptop: process lifetimes (no
 API left holding the port, no playtest killed by the editor), the static handler and the origin checks, the installer
-never removing the version in use, and every config and log write. Known items for it:
+never removing the version in use, and every config and log write.
 
-- The static handler caches every file sitting directly in `assets/` for good, which suits Vite's hashed output, but a
-  file copied there from `public/assets/` carries no hash and would be cached across an update.
-- The installer prunes by age alone, so two installs without restarting the editor remove the build still running.
+**Done 2026-11-18, evening:** four reviews side by side (the shell, the server, the bundle and installer, the UI),
+their fixes, then a second pass over the fixes. Nothing found would have stopped the demo, and sections 2 and 3
+describe the behavior as fixed. Of the items known going in, the installer pruning the build in use, the unexpanded
+`~` and the `-dirty` label from untracked files are fixed. These stay as they are:
+
+- The static handler caches every file sitting directly in `assets/` for good. Only Vite's hashed output lands there
+  today: `public/assets/` holds a folder (`images/`), and files one folder down go out `no-store`.
 - The installer follows `versions.json`, so publishing an older build installs it and makes the newer one `previous`.
+  That is also how a rollback gets published, and with pages never cached, the older build runs its own UI.
 - With `getJmzHttpApiBase()` always naming a base, the map editor's no-server mode is reachable only from tests.
 - The app menu entry is named "JMZ Editor"; the page title says "JMZ Data Editor".
 - A playtest inherits a socket to the editor's crash reporter, so the editor's two `chrome_crashpad_handler`
   processes live on until the game exits.
 - `config.json` sits in `~/.config/jmz-editor`, which is also the bundle's NW.js profile folder, so deleting the
   profile deletes the config.
-- A `~` in `projectRoot` is not expanded.
-- Untracked files mark a build `-dirty`, so a build from a checkout holding an untracked doc carries the label.
 - Publish never removes old tarballs from the publish folder.
-
-Then one more pass over the review's own fixes, and the findings go to Jeremy in one batch.
 
 ### The laptop
 
@@ -434,7 +462,9 @@ The laptop runs the same OS as the desktop and both GPUs are AMD, so nothing is 
 The installer's own `ldd` check (section 3) still runs at L1, and M4 settles the ANGLE flag on the laptop's screen.
 
 - **L1, after the review:** publish from the branch, install over SSH with `install.ts`, copy the game folder, and
-  write the config (section 3). A missing library named by `ldd` gets settled then.
+  write the config (section 3). A missing library named by `ldd` gets settled then. A `JMZ_PROJECT_ROOT` exported by a
+  shell profile outranks the config (the desktop's `~/.bashrc` exports one for the dev stack), so check the laptop's
+  profile files for it first.
 - **L2, Jeremy, at home, before Saturday:** M4.
 - **If M4 fails on Friday:** the game alone, played on the laptop from the bundle's NW.js and the copied game folder,
   keeps the playing half of the demo. The editor half waits for a fix.
@@ -493,7 +523,7 @@ rest stand at their defaults until Jeremy changes one.
 | D7 | Publish folder | `/mnt/exdrive/dev/jmz-builds/` |
 | D8 | Install folder on the laptop | `~/.local/jmz-editor/` with `current` and `previous` links |
 | D9 | Updates for a second user away from the share | Open until after Saturday. The versioned folders and `versions.json` are the shape a download-based updater would read |
-| D10 | Which unsaved edits the prompt sees | **Reopened with D3.** The window Play is clicked in, so with Play only in the map editor, edits left unsaved in the data editor are not seen. Alternative: every open window, asked over the shared channel before launching |
+| D10 | Which unsaved edits the prompt sees | **Reopened with D3.** The window Play is clicked in. With Play only in the map editor's main window, unsaved edits in the data editor are not seen, and neither are those in the map editor's own Common Events window, which keeps its documents apart. Alternative: every open window, asked over the shared channel before launching |
 
 ---
 
@@ -510,3 +540,6 @@ rest stand at their defaults until Jeremy changes one.
 - **Saves from the data editor carry no client id.** They reach the file-change stream with `client: ""`, so a map
   editor holding `System.json` or `CommonEvents.json` takes a data editor save for a change made outside the editor.
   This predates the bundle.
+- **Empty-root checks that can no longer fire.** The root now always comes from a ready health check, so the resource
+  contexts' skips while it is empty (`difficulty.context.tsx:52` and about a dozen siblings) never run, and
+  `setProjectRoot` has no caller until 2.6 switches projects.
