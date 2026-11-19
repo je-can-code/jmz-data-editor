@@ -219,6 +219,10 @@ second, and in a production build fall back to **the page's own origin**, becaus
 page (2.3). Baking a URL in at build time would tie the port to the build. Cover the new branch beside the existing
 ones.
 
+With a production build always naming a base, `getJmzHttpApiBase()` returns `string`, and the null checks its callers
+still make are dead: `main.tsx`, `BackendGate`'s "Backend not configured" screen, `ImageService`, `JabsPluginsReader`,
+`EnemyPlacementsReader` and `browserEnvironment`. P3 removes them along with 2.5, which works in `BackendGate` too.
+
 ### 2.3 The API serves the UI
 
 When `JMZ_UI_DIR` is set, `routes()` (`main.go:116+`) also serves that directory for `GET` requests that are not
@@ -253,7 +257,15 @@ behavior, unchanged) otherwise. Put the decisions in `shellRules.js` with tests.
 
 **Exit with the parent.** A crashed shell must not leave the API holding the port, or the next launch fails. Spawn
 the API with `stdin: 'pipe'` and, when `JMZ_EXIT_WITH_PARENT=1`, have it read stdin in a goroutine and exit when
-stdin closes. The pipe closes when the shell dies, however it dies, on Linux and Windows alike. Test it in Go.
+stdin closes. The pipe closes when the shell dies, however it dies, on Linux and Windows alike. Test it in Go. The
+API exits as soon as stdin closes, so the shell must spawn it with `stdin: 'pipe'` and keep the pipe open for the life
+of the app: with `'ignore'` it stops at once.
+
+**Saves survive a sudden stop.** The exit on a closed stdin and the shell's `child.kill()` both end the API at once.
+The data editor's saves go through `store.save` (`server/internal/store/json.go:69-76`), a plain `os.WriteFile`, so a
+stop in the middle of one can leave a database file cut short. The map editor's saves already go through
+`WriteFileAtomic` (`server/internal/store/atomic.go`): `save` moves onto it too, with a test that a failed write leaves
+the old file whole.
 
 **The error window.** Generalize `showMissingProjectRoot` (`main.js:321-338`) into one small window that states
 what went wrong in plain words (no project chosen, port already in use, the API stopped) and names the log file.
@@ -314,17 +326,18 @@ the demo never waits on the merge.
 
 | Package | Covers | Starts | Shares files with |
 |---|---|---|---|
-| P1 Play | section 1 | first | P3: `nw-app/main.js`, `nw-app/shellRules.js` |
-| P2 Server | 2.2; 2.3; the API's `-version` flag (2.1, step 2); exit-with-parent (2.4) | beside P1 | nothing |
-| P3 Bundle | the rest of 2.1, publish included; the rest of 2.4; 2.5 | once P1's off-screen checks and P2 are done | P1 |
-| P4 Install | section 3's `install.ts` | beside P3, built against the layout in 2.1 | nothing |
+| P1 Play | section 1 | first; **merged 2026-11-18** | P3: `nw-app/main.js`, `nw-app/shellRules.js` |
+| P2 Server | 2.2; 2.3; the API's `-version` flag (2.1, step 2); exit-with-parent (2.4) | beside P1; **merged 2026-11-18** | nothing |
+| P3 Bundle | the rest of 2.1, publish included; the rest of 2.4 except the atomic save; 2.5; the dead null checks named in 2.2 | once P1's off-screen checks and P2 are done | P1 |
+| P4 Install | section 3's `install.ts`; the atomic save in 2.4 | beside P3, built against the layout in 2.1 | nothing |
 | P5 Projects | 2.6 | after Saturday, unless there is time before | P3 |
 
 **Off-screen** means an Xvfb display with `WAYLAND_DISPLAY` unset and no sound, run so it cannot touch an editor
 already open on the desktop: from a checkout other than the main one (the shell rewrites
 `<repo>/.config/jmz-data-editor.json` on every boot, `main.js:375-379`), on its own `--api-base` and `--ui-url` ports
 (the open editor holds 8080 and 3000), and with its own `--user-data-dir` (a launch onto the open editor's profile
-would hand off to it instead of starting).
+would hand off to it instead of starting). Setting `XDG_CACHE_HOME` for a run also moves Go's build cache, so a cold
+`go run` can miss the dev runner's 5 s health wait: warm that cache with `go build` first.
 
 **The test project** is a temp copy of Chef Adventure's folder, data and all, whose `package.json` points `main` at a
 recording `main.js` that writes `nw.App.argv` and `nw.App.dataPath` to a file and stays open. The editor loads and
@@ -362,7 +375,9 @@ rather than using the copy.
   0.118.0 SDK, and `--publish` copies the tarball, `versions.json` and `install.ts` into `jmz-builds/`. `release/` is
   in `.gitignore`.
 - The bundle-mode rules are covered in `shellRules.test.ts`: which mode, the config and log paths from the XDG
-  variables, the fixed origin, the root check and readiness. 2.5's seeding is covered where it lives.
+  variables (`cacheDirectory` in `shellRules.js` already reads `XDG_CACHE_HOME` that way), the fixed origin, the root
+  check and readiness. 2.5's seeding is covered where it lives.
+- The dead null checks named in 2.2 are gone, along with the tests that only covered them.
 - M3 (section 5), off-screen.
 
 ### P4 Install: done when
@@ -373,6 +388,8 @@ rather than using the copy.
   anything older; a tarball whose SHA-256 is wrong and a build with a library missing are each refused, naming the
   cause and changing nothing.
 - `install.ts` uses Bun and Node built-ins only.
+- `store.save` writes through `WriteFileAtomic` (2.4), and `go test ./...` passes in `server/` with a test that a
+  failed write leaves the old file whole.
 - The app menu entry uses the UI's `favicon.ico`, the only icon the repo has. Whether the menu wants a PNG instead is
   settled in M4.
 
@@ -380,7 +397,9 @@ rather than using the copy.
 
 One review over the whole branch once P1 to P4 are done, before anything reaches the laptop: process lifetimes (no
 API left holding the port, no playtest killed by the editor), the static handler and the origin checks, the installer
-never removing the version in use, and every config and log write. Then one more pass over the review's own fixes,
+never removing the version in use, and every config and log write. One known item for it: the static handler caches
+every file sitting directly in `assets/` for good, which suits Vite's hashed output, but a file copied there from
+`public/assets/` carries no hash and would be cached across an update. Then one more pass over the review's own fixes,
 and the findings go to Jeremy in one batch.
 
 ### The laptop
@@ -400,7 +419,7 @@ The build started on the evening of 2026-11-18. The latest each step can land an
 
 | Day | Steps |
 |---|---|
-| Wednesday 2026-11-18, evening | P1 beside P2 |
+| Wednesday 2026-11-18, evening | P1 beside P2: both merged |
 | Thursday 2026-11-19 | P1 and P2 done; P3 beside P4 |
 | Friday 2026-11-20 | the review and its fixes; L1; L2 by the evening |
 | Saturday 2026-11-21 | the demo |
