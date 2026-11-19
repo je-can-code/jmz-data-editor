@@ -364,6 +364,34 @@ describe('WindowShell', () =>
       }
     });
 
+    it('answers unavailable at once, opening no reply channel, once the page has stopped listening for the shell', async () =>
+    {
+      // Arrange: a page the NW.js shell answered, which then stopped listening, as a page does as it goes.
+      vi.useFakeTimers();
+      try
+      {
+        const { shell, replies } = relayedShell();
+        shell.close();
+        let settled: PlayResult | null = null;
+
+        // Act: a Play, with no time let pass at all.
+        shell.play().then(result =>
+        {
+          settled = result;
+          return result;
+        });
+        await vi.advanceTimersByTimeAsync(0);
+
+        // Assert: still counted as answered, so only the closed channel can have stopped the Play, and nothing waited.
+        expect([ shell.isRelayed, settled, replies.length ])
+          .toStrictEqual([ true, 'unavailable', 0 ]);
+      }
+      finally
+      {
+        vi.useRealTimers();
+      }
+    });
+
     it('answers unavailable under the shell where it cannot open a reply channel', async () =>
     {
       // Arrange: a shell that answers, but no way to open a channel of the page's own.
