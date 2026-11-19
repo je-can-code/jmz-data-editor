@@ -116,7 +116,7 @@ describe('TraitEditor', () =>
   const renderEditor = () =>
   {
     render(
-      <ProjectPathProvider>
+      <ProjectPathProvider initialProjectRoot={'/games/test-project'}>
         <TraitEditor selectedTraits={traits} updateEnemyTraits={vi.fn()}/>
       </ProjectPathProvider>
     );

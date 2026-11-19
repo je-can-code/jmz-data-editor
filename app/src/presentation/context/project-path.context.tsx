@@ -1,30 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import {
-  defaultProjectRoot,
-  resolveRmmzDataDirectory,
-  toRmmzProjectRootFromPossibleDataPath
-} from '../../constants/PathConstants';
+import { resolveRmmzDataDirectory } from '../../constants/PathConstants';
 import { SystemService } from '@services/SystemService';
-
-const LS_KEY_PROJECT_ROOT = 'rmmzProjectRoot';
-const LS_KEY_LEGACY_DATA_PATH = 'projectPath';
-
-function readInitialProjectRootFromLocalStorage(): string
-{
-  const modern = localStorage.getItem(LS_KEY_PROJECT_ROOT);
-  if (typeof modern === 'string' && modern.trim().length > 0)
-  {
-    return toRmmzProjectRootFromPossibleDataPath(modern.trim());
-  }
-
-  const legacy = localStorage.getItem(LS_KEY_LEGACY_DATA_PATH);
-  if (typeof legacy === 'string' && legacy.trim().length > 0)
-  {
-    return toRmmzProjectRootFromPossibleDataPath(legacy.trim());
-  }
-
-  return defaultProjectRoot;
-}
 
 type ProjectPathValue = {
   /**
@@ -50,11 +26,24 @@ type ProjectPathValue = {
 
 const Ctx = createContext<ProjectPathValue | null>(null);
 
-export function ProjectPathProvider({ children }: { children: React.ReactNode })
+type ProjectPathProviderProps = {
+  /**
+   * The project root the API serves, from its health check.
+   */
+  initialProjectRoot: string;
+  children: React.ReactNode;
+};
+
+/**
+ * Holds the project root the editor shows and loads from.
+ * @param {ProjectPathProviderProps} props The API's project root, and what sits inside.
+ */
+export function ProjectPathProvider({ initialProjectRoot, children }: ProjectPathProviderProps)
 {
-  const [ projectRoot, setProjectRoot ] = useState<string>(() =>
-    readInitialProjectRootFromLocalStorage()
-  );
+  // the root starts as the API's own rather than one an earlier session remembered, so the bar shows the folder
+  // actually being edited. Starting on it, rather than correcting a default later, means no resource ever loads, or
+  // skips loading, on any other root.
+  const [ projectRoot, setProjectRoot ] = useState<string>(initialProjectRoot);
   const [ systemDataGeneration, setSystemDataGeneration ] = useState(0);
   const [ projectReloadGeneration, setProjectReloadGeneration ] = useState(0);
 
@@ -80,7 +69,6 @@ export function ProjectPathProvider({ children }: { children: React.ReactNode })
       return;
     }
 
-    localStorage.setItem(LS_KEY_PROJECT_ROOT, projectRoot);
     SystemService.loadSystemData(rmmzDataPath)
       .then(() =>
       {

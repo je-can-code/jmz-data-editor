@@ -23,37 +23,48 @@ import { WeatherProvider } from '@presentation/context/resources/weather.context
 import { NotetagLinesProvider } from '@presentation/context/resources/notetag-lines.context.tsx';
 import { OmniProvider } from '@presentation/context/resources/omni.context.tsx';
 
-const AppProviders = ({ children }: { children: React.ReactNode }) =>
+type AppProvidersProps = {
+  /**
+   * The project root the API serves, which the editor starts on.
+   */
+  projectRoot: string;
+  children: React.ReactNode;
+};
+
+const AppProviders = ({ projectRoot, children }: AppProvidersProps) =>
 {
+  // the project path sits outside the composer, since it alone is handed something: the root every provider below
+  // loads from, there from the first render.
   return (
-    <ProviderComposer
-      providers={[
-        BoardActionsProvider,
-        ProjectPathProvider,
-        IconSetAtlasProvider,
-        SdpsProvider,
-        ProficiencyProvider,
-        QuestsProvider,
-        CraftingProvider,
-        JabsProvider,
-        LevelProvider,
-        DifficultyProvider,
-        MotionProvider,
-        WeatherProvider,
-        NotetagLinesProvider,
-        OmniProvider,
-        ItemsProvider,
-        WeaponsProvider,
-        ArmorsProvider,
-        ActorsProvider,
-        SkillsProvider,
-        StatesProvider,
-        ClassesProvider,
-        EnemiesProvider,
-      ]}
-    >
-      {children}
-    </ProviderComposer>
+    <ProjectPathProvider initialProjectRoot={projectRoot}>
+      <ProviderComposer
+        providers={[
+          BoardActionsProvider,
+          IconSetAtlasProvider,
+          SdpsProvider,
+          ProficiencyProvider,
+          QuestsProvider,
+          CraftingProvider,
+          JabsProvider,
+          LevelProvider,
+          DifficultyProvider,
+          MotionProvider,
+          WeatherProvider,
+          NotetagLinesProvider,
+          OmniProvider,
+          ItemsProvider,
+          WeaponsProvider,
+          ArmorsProvider,
+          ActorsProvider,
+          SkillsProvider,
+          StatesProvider,
+          ClassesProvider,
+          EnemiesProvider,
+        ]}
+      >
+        {children}
+      </ProviderComposer>
+    </ProjectPathProvider>
   );
 };
 

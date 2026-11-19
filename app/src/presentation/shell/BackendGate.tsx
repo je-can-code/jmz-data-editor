@@ -3,22 +3,7 @@ import { Box, CircularProgress, Typography } from "@mui/material";
 import { HashRouter } from "react-router-dom";
 import { AppRouter } from "@presentation/routing/app.router.tsx";
 import { AppProviders } from "@presentation/shell/app.providers.tsx";
-
-type HealthEnvelope = {
-  path: string;
-  error?: string;
-  data?: {
-    ok: boolean;
-    projectRoot?: string;
-    projectRootOk: boolean;
-  };
-};
-
-type BackendState =
-  | { type: "checking" }
-  | { type: "unreachable"; apiBase: string }
-  | { type: "missing-project-root"; apiBase: string }
-  | { type: "ready"; apiBase: string };
+import { type BackendState, probeBackend } from "@presentation/shell/backendHealth.ts";
 
 type BackendGateProps = {
   apiBase: string;
@@ -34,60 +19,15 @@ const BackendGate = (props: BackendGateProps) =>
   {
     let cancelled = false;
 
-    const probeBackendHealth = async () =>
-    {
-      try
-      {
-        const res = await fetch(`${apiBase}/api/health`, { method: "GET" });
-        if (!res.ok)
-        {
-          if (!cancelled)
-          {
-            setState({ type: "unreachable", apiBase });
-          }
-          return;
-        }
-
-        const json = await res.json() as HealthEnvelope;
-        if (cancelled)
-        {
-          return;
-        }
-
-        if (json.error && json.error.trim().length > 0)
-        {
-          setState({ type: "unreachable", apiBase });
-          return;
-        }
-
-        const ok = json.data?.ok === true;
-        const rootOk = json.data?.projectRootOk === true;
-
-        if (!ok)
-        {
-          setState({ type: "unreachable", apiBase });
-          return;
-        }
-
-        if (!rootOk)
-        {
-          setState({ type: "missing-project-root", apiBase });
-          return;
-        }
-
-        setState({ type: "ready", apiBase });
-      }
-      catch
-      {
-        if (!cancelled)
-        {
-          setState({ type: "unreachable", apiBase });
-        }
-      }
-    };
-
     // An effect body cannot be async, so the probe is started and not awaited.
-    probeBackendHealth();
+    probeBackend(apiBase)
+      .then(next =>
+      {
+        if (cancelled === false)
+        {
+          setState(next);
+        }
+      });
 
     return () =>
     {
@@ -95,11 +35,12 @@ const BackendGate = (props: BackendGateProps) =>
     };
   }, [ apiBase ]);
 
+  // the editor starts on the API's own root, so the bar shows the folder actually being edited.
   if (state.type === "ready")
   {
     return (
       <HashRouter>
-        <AppProviders>
+        <AppProviders projectRoot={state.projectRoot}>
           <AppRouter/>
         </AppProviders>
       </HashRouter>

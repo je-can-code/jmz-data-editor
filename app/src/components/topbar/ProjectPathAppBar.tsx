@@ -84,6 +84,7 @@ const ProjectPathAppBar = () =>
             minWidth: 0,
           }}
         >
+          {/* the folder the API reads and writes, which the editor started on. */}
           <Typography
             component="span"
             fontFamily={'monospace'}
@@ -96,9 +97,7 @@ const ProjectPathAppBar = () =>
               textAlign: 'right',
             }}
           >
-            {projectRoot === ''
-              ? 'project root unset — set it in the app (stored in localStorage) and ensure JMZ_PROJECT_ROOT is set for the Go API.'
-              : projectRoot}
+            {projectRoot}
           </Typography>
           <Button
             color="inherit"
