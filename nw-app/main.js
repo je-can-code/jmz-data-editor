@@ -842,8 +842,10 @@ function reportProblem(problem, found)
  * Brings the bundled editor forward when it is launched again. The second launch finds this one holding the profile,
  * hands over its command line and exits, and the person expects the editor already open to come to the front: an error
  * window first, since it says what is wrong, and otherwise the first page's window, opened again when it was closed.
- * Before the windows can open, the first one is on its way already.
- * @param {string} commandLine The second launch's command line.
+ * Before the windows can open, the first one is on its way already. What the second launch asked for is only logged:
+ * this copy stays on its own project.
+ * @param {string | string[]} commandLine The second launch's command line, as NW.js hands it over (0.118 wraps it in
+ * an array).
  */
 function bringForward(commandLine)
 {
