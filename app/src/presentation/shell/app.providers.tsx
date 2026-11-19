@@ -31,6 +31,12 @@ type AppProvidersProps = {
   children: React.ReactNode;
 };
 
+/**
+ * Mounts everything the editor's boards read from: the project path, holding the root the API serves, around every
+ * resource provider, each of which loads its own share of the project from that root and keeps the edits made to it.
+ * @param {AppProvidersProps} props The project root the API serves, and the editor that sits inside.
+ * @returns {React.JSX.Element} The providers, around the editor.
+ */
 const AppProviders = ({ projectRoot, children }: AppProvidersProps) =>
 {
   // the project path sits outside the composer, since it alone is handed something: the root every provider below
