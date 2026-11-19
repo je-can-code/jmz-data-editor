@@ -305,8 +305,10 @@ Modelled on the Zed builds' `laptop.js`.
 - Copies the tarball to a local temp folder, checks its SHA-256, and extracts it to
   `~/.local/jmz-editor/<version>/`. Modes come from the archive, so the share's `file_mode=0664` does not matter.
 - **Tries the build before switching to it:** `server/jmz-api -version` must print the expected version, and `ldd`
-  on `nwjs/nw` and `nwjs/lib/*.so` must report nothing `not found`. On failure it names what is missing and changes
-  nothing.
+  on `nwjs/nw`, `nwjs/lib/*.so` and `libvulkan.so.1` must report nothing `not found`. NW.js's libraries find each
+  other only through `nw`'s `RPATH` (`$ORIGIN/lib/`): plain `ldd` on the desktop's working copy reports
+  `libnw.so => not found` for `libnode.so` and `libffmpeg.so => not found` for `libnw.so`, so the check runs with
+  `LD_LIBRARY_PATH=<bundle>/nwjs/lib` (verified 2026-11-18). On failure it names what is missing and changes nothing.
 - Switches `~/.local/jmz-editor/current` to the new version, keeps the one it replaced as `previous`, and prunes older
   ones.
 - Writes `~/.local/bin/jmz-editor` (a link to `current/jmz-editor`) and
@@ -331,7 +333,7 @@ the demo never waits on the merge.
 | P1 Play | section 1 | first; **merged 2026-11-18** | P3: `nw-app/main.js`, `nw-app/shellRules.js` |
 | P2 Server | 2.2; 2.3; the API's `-version` flag (2.1, step 2); exit-with-parent (2.4) | beside P1; **merged 2026-11-18** | nothing |
 | P3 Bundle | the rest of 2.1, publish included; the rest of 2.4 except the atomic save | once P1's off-screen checks and P2 are done | P1 |
-| P4 Install | section 3's `install.ts`; the atomic save in 2.4; 2.5; the dead null checks named in 2.2 | beside P3, built against the layout in 2.1 | nothing |
+| P4 Install | section 3's `install.ts`; the atomic save in 2.4; 2.5; the dead null checks named in 2.2 | beside P3, built against the layout in 2.1; **merged 2026-11-18** | nothing |
 | P5 Projects | 2.6 | after Saturday, unless there is time before | P3 |
 
 **Off-screen** means an Xvfb display with `WAYLAND_DISPLAY` unset and no sound, run so it cannot touch an editor
@@ -408,10 +410,16 @@ rather than using the copy.
 
 One review over the whole branch once P1 to P4 are done, before anything reaches the laptop: process lifetimes (no
 API left holding the port, no playtest killed by the editor), the static handler and the origin checks, the installer
-never removing the version in use, and every config and log write. One known item for it: the static handler caches
-every file sitting directly in `assets/` for good, which suits Vite's hashed output, but a file copied there from
-`public/assets/` carries no hash and would be cached across an update. Then one more pass over the review's own fixes,
-and the findings go to Jeremy in one batch.
+never removing the version in use, and every config and log write. Known items for it:
+
+- The static handler caches every file sitting directly in `assets/` for good, which suits Vite's hashed output, but a
+  file copied there from `public/assets/` carries no hash and would be cached across an update.
+- The installer prunes by age alone, so two installs without restarting the editor remove the build still running.
+- The installer follows `versions.json`, so publishing an older build installs it and makes the newer one `previous`.
+- With `getJmzHttpApiBase()` always naming a base, the map editor's no-server mode is reachable only from tests.
+- The app menu entry is named "JMZ Editor"; the page title says "JMZ Data Editor".
+
+Then one more pass over the review's own fixes, and the findings go to Jeremy in one batch.
 
 ### The laptop
 
@@ -492,3 +500,6 @@ rest stand at their defaults until Jeremy changes one.
 - **One release for editor and plugins:** the editor installing fresh plugin builds into the open project, since its
   output is the plugins' data contract.
 - **Play from this map:** start the playtest on the map the map editor shows.
+- **Saves from the data editor carry no client id.** They reach the file-change stream with `client: ""`, so a map
+  editor holding `System.json` or `CommonEvents.json` takes a data editor save for a change made outside the editor.
+  This predates the bundle.
