@@ -4,6 +4,7 @@ import {
   openMapEditor,
   WindowShell,
   type OpenBrowserWindow,
+  type PlayResult,
 } from '../../../../src/core/infrastructure/shell/WindowShell.ts';
 import { MemoryChannelNetwork } from '../../../mapEditor/support/standIns.ts';
 
@@ -180,6 +181,210 @@ describe('WindowShell', () =>
     // Assert.
     expect(shell.isRelayed)
       .toBe(false);
+  });
+
+  it('tells whoever follows it when the NW.js shell answers, once, and no one who stopped following', () =>
+  {
+    // Arrange: one view following, and one that stopped before the answer came.
+    const { network, relay, shell } = buildShell();
+    const told: string[] = [];
+    shell.subscribe(() => told.push('following'));
+    const stop = shell.subscribe(() => told.push('stopped'));
+    stop();
+
+    // Act: the shell answers twice, as it does once when it starts and again for a hello.
+    relay.postMessage({ type: 'shell-ready' });
+    relay.postMessage({ type: 'shell-ready' });
+    network.flush();
+
+    // Assert.
+    expect([ shell.isRelayed, told ])
+      .toStrictEqual([ true, [ 'following' ] ]);
+  });
+
+  /*
+   * Play starts the open project's game, which only the NW.js shell can do: a page has no way to start a program. So a
+   * page with no shell says unavailable at once and asks nothing. Under the shell, a Play opens a reply channel of its
+   * own under a random name before it asks, and takes the answer from there alone, never from the shell channel every
+   * window hears, closing the channel once the Play is over. The shell first asks the API which project is open and then
+   * watches the new game for a second, so the page waits five seconds, well past the clipboard's two; a shell that never
+   * answers costs those five seconds, never a hang, and comes to unavailable.
+   */
+  describe('play', () =>
+  {
+    /**
+     * A page's shell the NW.js shell has answered.
+     * @returns {ReturnType<typeof buildShell>} The shell, with the channel's traffic so far cleared.
+     */
+    const relayedShell = () =>
+    {
+      const built = buildShell();
+      built.network.flush();
+      built.relay.postMessage({ type: 'shell-ready' });
+      built.network.flush();
+      built.heard.length = 0;
+      return built;
+    };
+
+    it('answers unavailable at once, asking nothing, where no NW.js shell answered', async () =>
+    {
+      // Arrange: a page in a plain browser, its hello unanswered.
+      const { network, heard, shell, replies } = buildShell();
+      network.flush();
+      heard.length = 0;
+
+      // Act.
+      const result = await shell.play();
+      network.flush();
+
+      // Assert.
+      expect([ result, heard, replies.length ])
+        .toStrictEqual([ 'unavailable', [], 0 ]);
+    });
+
+    it('asks the NW.js shell to play, naming a reply channel no other window knows', () =>
+    {
+      // Arrange.
+      const { network, heard, shell } = relayedShell();
+
+      // Act.
+      shell.play().catch(() => undefined);
+      network.flush();
+
+      // Assert.
+      const [ request ] = heard as { type: string; replyTo: string }[];
+      expect([ heard.length, request.type, /^jmz-play-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u.test(request.replyTo) ])
+        .toStrictEqual([ 1, 'play', true ]);
+    });
+
+    it('takes each of the shell\'s answers from its own reply channel, and closes the reply channel', async () =>
+    {
+      // Arrange: four Plays, each to be answered with a different one of the shell's results.
+      const { network, heard, shell, replies } = relayedShell();
+      const answers: PlayResult[] = [ 'started', 'already-running', 'not-a-game', 'failed' ];
+      const playing = answers.map(() => shell.play());
+      network.flush();
+      const requests = heard as { replyTo: string }[];
+
+      // Act.
+      requests.forEach((request, index) => network.open(request.replyTo).postMessage({ type: 'play-result', result: answers[index] }));
+      network.flush();
+      const results = await Promise.all(playing);
+
+      // Assert.
+      expect([ results, replies.map(reply => reply.closed) ])
+        .toStrictEqual([ [ 'started', 'already-running', 'not-a-game', 'failed' ], [ true, true, true, true ] ]);
+    });
+
+    it('waits up to five seconds for the answer, far past a clipboard read\'s wait', async () =>
+    {
+      // Arrange.
+      vi.useFakeTimers();
+      try
+      {
+        const { network, heard, shell } = relayedShell();
+        let settled: PlayResult | null = null;
+        const playing = shell.play().then(result =>
+        {
+          settled = result;
+          return result;
+        });
+        network.flush();
+        const [ request ] = heard as { replyTo: string }[];
+
+        // Act: the answer comes a moment before five seconds are up.
+        await vi.advanceTimersByTimeAsync(4_999);
+        const before = settled;
+        network.open(request.replyTo).postMessage({ type: 'play-result', result: 'started' });
+        network.flush();
+        const result = await playing;
+
+        // Assert.
+        expect([ before, result ])
+          .toStrictEqual([ null, 'started' ]);
+      }
+      finally
+      {
+        vi.useRealTimers();
+      }
+    });
+
+    it('comes to unavailable when the NW.js shell does not answer in time, and closes the reply channel', async () =>
+    {
+      // Arrange.
+      vi.useFakeTimers();
+      try
+      {
+        const { shell, replies } = relayedShell();
+
+        // Act.
+        const playing = shell.play();
+        await vi.advanceTimersByTimeAsync(5_000);
+        const result = await playing;
+
+        // Assert.
+        expect([ result, replies.map(reply => reply.closed) ])
+          .toStrictEqual([ 'unavailable', [ true ] ]);
+      }
+      finally
+      {
+        vi.useRealTimers();
+      }
+    });
+
+    it('passes over an answer said on the shell channel, and anything on its reply channel that is not the shell\'s answer', async () =>
+    {
+      // Arrange.
+      vi.useFakeTimers();
+      try
+      {
+        const { network, relay, heard, shell } = relayedShell();
+        const playing = shell.play();
+        network.flush();
+        const [ request ] = heard as { replyTo: string }[];
+        const reply = network.open(request.replyTo);
+
+        // Act: the shell's answer said where every window hears it, then near misses of it on the reply channel.
+        relay.postMessage({ type: 'play-result', result: 'started' });
+        reply.postMessage({ type: 'play-result', result: 'exploded' });
+        reply.postMessage({ type: 'clipboard-text', text: 'started' });
+        reply.postMessage('started');
+        reply.postMessage(null);
+        network.flush();
+        await vi.advanceTimersByTimeAsync(5_000);
+        const result = await playing;
+
+        // Assert.
+        expect(result)
+          .toBe('unavailable');
+      }
+      finally
+      {
+        vi.useRealTimers();
+      }
+    });
+
+    it('answers unavailable under the shell where it cannot open a reply channel', async () =>
+    {
+      // Arrange: a shell that answers, but no way to open a channel of the page's own.
+      const network = new MemoryChannelNetwork();
+      const relay = network.open('jmz-shell');
+      const heard: unknown[] = [];
+      relay.addEventListener('message', event => heard.push(event.data));
+      const shell = new WindowShell({ channel: network.open('jmz-shell'), origin: ORIGIN, openWindow: () => null });
+      network.flush();
+      relay.postMessage({ type: 'shell-ready' });
+      network.flush();
+      heard.length = 0;
+
+      // Act.
+      const result = await shell.play();
+      network.flush();
+
+      // Assert.
+      expect([ shell.isRelayed, result, heard ])
+        .toStrictEqual([ true, 'unavailable', [] ]);
+    });
   });
 
   /*
