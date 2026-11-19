@@ -631,8 +631,9 @@ function startRelay(uiUrl, apiBase, fallbackSize, ready)
 }
 
 /**
- * Opens a small window saying what went wrong, since a desktop launch has no terminal to say it in. It keeps the app
- * open as an editor window does, so the app quits once it closes, unless editor windows are still open.
+ * Opens a small window saying what went wrong, since a desktop launch has no terminal to say it in, and brings it to
+ * the front once its words are in. It keeps the app open as an editor window does, so the app quits once it closes,
+ * unless editor windows are still open.
  * @param {string} text What went wrong, in plain words.
  */
 function showProblem(text)
@@ -658,6 +659,10 @@ function showProblem(text)
       document.body.style.padding = '16px';
       document.body.style.overflowWrap = 'anywhere';
       document.body.innerText = text;
+
+      // a window replacing one after a relaunch would otherwise open behind whatever the person just fixed the config
+      // in, and look as though nothing had happened.
+      win.focus();
     });
     win.on('closed', () =>
     {
