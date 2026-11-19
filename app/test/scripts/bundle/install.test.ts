@@ -4,6 +4,7 @@ import { once } from 'node:events';
 import {
   chmodSync,
   copyFileSync,
+  existsSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
@@ -43,7 +44,9 @@ import {
  * changes nothing in the install folder, though its menu entry and link are written again. A newer build keeps the one
  * it replaces as previous. A run stopped between moving previous and moving current leaves both naming the old build,
  * still whole. And nothing is staged in the system's temporary folder, which is RAM there, since a run cut short never
- * cleans up after itself; it stages in the install folder, where the next install prunes what it left.
+ * cleans up after itself; it stages in the install folder, where the next install prunes what it left. Only one run
+ * installs at a time, since two would prune each other's staging folders: a second refuses while the first holds the
+ * lock, a lock whose run has ended is taken over, and a run lets the lock go however it ends.
  */
 
 /**
@@ -100,6 +103,11 @@ type Laptop = {
    * The install folder inside the home folder.
    */
   readonly root: string;
+
+  /**
+   * The lock a run holds while it installs, beside the install folder.
+   */
+  readonly lock: string;
 };
 
 /**
@@ -134,7 +142,7 @@ const laptop = (): Laptop =>
   const builds = join(folder, 'builds');
   mkdirSync(home);
   mkdirSync(builds);
-  return { home, builds, root: join(home, '.local', 'jmz-editor') };
+  return { home, builds, root: join(home, '.local', 'jmz-editor'), lock: join(home, '.local', 'jmz-editor.lock') };
 };
 
 /**
@@ -183,8 +191,8 @@ const publishBuild = (machine: Laptop, version: string, damage: (build: string) 
 };
 
 /**
- * Starts a program from inside an installed build and waits until it runs, the way the editor's NW.js, its API or a
- * playtest runs from the build that holds it.
+ * Starts a program and waits until it runs: from inside an installed build, the way the editor's NW.js, its API or a
+ * playtest runs from the build that holds it, or from anywhere, standing in for another run of the installer.
  * @param {string} executable The program.
  * @returns {Promise<ChildProcess>} The running program, which the test's cleanup stops.
  */
@@ -194,6 +202,16 @@ const startFrom = async (executable: string): Promise<ChildProcess> =>
   programs.push(program);
   await once(program, 'spawn');
   return program;
+};
+
+/**
+ * Finds the process id of a run that has ended, as the lock of a run cut short by a dropped SSH session holds one: a
+ * program started and waited for, whose id no running process has any more.
+ * @returns {number} The id.
+ */
+const endedRunId = (): number =>
+{
+  return spawnSync('/bin/true').pid;
 };
 
 /**
@@ -673,12 +691,85 @@ describe('install', () =>
           THIRD,
           SECOND,
           [
+            [ `Copying jmz-editor ${THIRD} and trying it. This can take a minute.` ],
             [ `Installed jmz-editor ${THIRD}.` ],
             [ `Kept ${SECOND} as the previous build.` ],
             [ `Removed ${FIRST}.` ],
             [ `Start it from the app menu, or with ${join(machine.home, '.local', 'bin', 'jmz-editor')}.` ],
           ],
         ]);
+    });
+
+    it('refuses while another run holds the lock, naming it, and changes nothing', async () =>
+    {
+      // Arrange- a build installed, a newer one published, and the lock held by a run still going, as a second SSH
+      // session's run would hold it.
+      const machine = laptop();
+      publishBuild(machine, FIRST);
+      install(machine.builds, machine.home);
+      publishBuild(machine, SECOND);
+      const otherRun = await startFrom(SLEEP);
+      writeFileSync(machine.lock, `${otherRun.pid}\n`);
+      const before = listing(machine.home);
+
+      // Act
+      const message = refusalFrom(() => install(machine.builds, machine.home));
+
+      // Assert
+      expect([ message, listing(machine.home) ])
+        .toEqual([
+          `Another install is already running, as process ${otherRun.pid}. Let it finish, then run this again.`,
+          before,
+        ]);
+    });
+
+    it('takes over a lock its run left when it ended, and lets it go once installed', () =>
+    {
+      // Arrange- a build published, and the lock a run cut short left behind.
+      const machine = laptop();
+      publishBuild(machine, FIRST);
+      mkdirSync(join(machine.home, '.local'));
+      writeFileSync(machine.lock, `${endedRunId()}\n`);
+
+      // Act
+      install(machine.builds, machine.home);
+
+      // Assert
+      expect([ readlinkSync(join(machine.root, 'current')), existsSync(machine.lock) ])
+        .toEqual([ FIRST, false ]);
+    });
+
+    it('lets the lock go when a build is refused, and changes nothing else', () =>
+    {
+      // Arrange- a build installed, a newer one whose launcher cannot be run, and the lock a run cut short left behind.
+      const machine = laptop();
+      publishBuild(machine, FIRST);
+      install(machine.builds, machine.home);
+      publishBuild(machine, SECOND, build => chmodSync(join(build, 'jmz-editor'), 0o644));
+      const before = listing(machine.home);
+      writeFileSync(machine.lock, `${endedRunId()}\n`);
+
+      // Act
+      const message = refusalFrom(() => install(machine.builds, machine.home));
+
+      // Assert- the home folder is as it was before that lock was left.
+      expect([ message, listing(machine.home) ])
+        .toEqual([ 'The build\'s jmz-editor launcher is not executable.', before ]);
+    });
+
+    it('leaves an empty home folder empty when the first build into it is refused', () =>
+    {
+      // Arrange- nothing in the home folder at all, not even the folder the lock and the install folder go in, and a
+      // build whose API reports another version than the one published.
+      const machine = laptop();
+      publishBuild(machine, FIRST, build => writeFileSync(join(build, 'server', 'jmz-api'), '#!/bin/sh\necho 0.0.1\n'));
+
+      // Act
+      const message = refusalFrom(() => install(machine.builds, machine.home));
+
+      // Assert
+      expect([ message, listing(machine.home) ])
+        .toEqual([ `server/jmz-api reports version 0.0.1, but versions.json names ${FIRST}.`, [] ]);
     });
 
     it('keeps a build the editor is still running from when two newer builds have been installed since', async () =>

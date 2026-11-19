@@ -17,6 +17,10 @@
  * removed or replaced: it stays until an install finds it closed. Running it again with nothing new to install says so,
  * puts back the menu entry and the command line link if either one has gone, and stops.
  *
+ * One run installs at a time. A run holds a lock beside the install folder from start to end, so one started meanwhile,
+ * as from a second SSH session, refuses rather than prune the first one's staging folder; a lock whose run was cut
+ * short is taken over.
+ *
  * Only Bun and Node built-ins are used, nothing from the repo or node_modules, since this file runs far from both.
  */
 import { spawnSync, type SpawnSyncReturns } from 'node:child_process';
@@ -33,6 +37,7 @@ import {
   readlinkSync,
   realpathSync,
   renameSync,
+  rmdirSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -56,6 +61,12 @@ const VERSIONS_FILE = 'versions.json';
  * ones.
  */
 const INSTALL_FOLDER = '.local/jmz-editor';
+
+/**
+ * The lock a run holds while it installs, under the home folder. It sits beside the install folder rather than in it,
+ * since a refused first install removes the install folder, and the lock has to outlast that.
+ */
+const LOCK_FILE = '.local/jmz-editor.lock';
 
 /**
  * The link naming the build in use.
@@ -189,6 +200,11 @@ type InstallPlaces = {
    * The app menu entry.
    */
   readonly desktopFile: string;
+
+  /**
+   * The lock a run holds while it installs, holding its process id.
+   */
+  readonly lock: string;
 };
 
 /**
@@ -426,6 +442,7 @@ const placesIn = (home: string): InstallPlaces =>
     root: join(home, INSTALL_FOLDER),
     binLink: join(home, BIN_FOLDER, LAUNCHER),
     desktopFile: join(home, DESKTOP_FILE),
+    lock: join(home, LOCK_FILE),
   };
 };
 
@@ -715,8 +732,10 @@ const stage = (buildsFolder: string, build: PublishedBuild, root: string): Stage
   const incoming = mkdtempSync(join(root, INCOMING_PREFIX));
   try
   {
-    // the share is read once, and what gets checked is exactly what gets unpacked.
+    // the share is read once, and what gets checked is exactly what gets unpacked. The copy is the long wait of an
+    // install and prints nothing of its own, so it is announced, lest it look hung.
     const local = join(incoming, build.file);
+    console.log(`Copying jmz-editor ${build.version} and trying it. This can take a minute.`);
     copyFileSync(tarball, local);
     const digest = sha256Of(local);
     if (digest !== build.sha256)
@@ -807,12 +826,121 @@ const writeMenuEntry = (places: InstallPlaces): void =>
 };
 
 /**
- * Installs the build versions.json names. When it is already the current one, only the menu entry and the command line
- * link are written again, which changes nothing when both are already there.
- * @param {string} buildsFolder The folder holding versions.json and the tarball.
- * @param {string} home The home folder to install into, absolute.
+ * Makes the lock file, holding this run's process id, but only when no lock is there: it is opened to be created and
+ * fails if it exists, so of two runs making it at once, exactly one does.
+ * @param {string} lock The lock file.
+ * @returns {boolean} True when this run made it; false when a lock was there already.
  */
-const install = (buildsFolder: string, home: string): void =>
+const tryCreateLock = (lock: string): boolean =>
+{
+  try
+  {
+    writeFileSync(lock, `${process.pid}\n`, { flag: 'wx' });
+    return true;
+  }
+  catch (error)
+  {
+    if ((error as NodeJS.ErrnoException).code === 'EEXIST')
+    {
+      return false;
+    }
+
+    throw error;
+  }
+};
+
+/**
+ * Reads a lock file.
+ * @param {string} lock The lock file.
+ * @returns {string} What it holds, or empty when it was let go before it could be read.
+ */
+const readLock = (lock: string): string =>
+{
+  try
+  {
+    return readFileSync(lock, 'utf8')
+      .trim();
+  }
+  catch
+  {
+    return '';
+  }
+};
+
+/**
+ * Reads which run holds a lock. A run still going has a folder of its own in /proc, and one that has ended, however it
+ * ended, does not, so a lock naming no running process is held by no one.
+ * @param {string} lock The lock file.
+ * @returns {string} The process id of the run holding it, or empty when no running process holds it.
+ */
+const lockHolder = (lock: string): string =>
+{
+  const holder = readLock(lock);
+  return PROCESS_ID.test(holder) && existsSync(join(PROC, holder))
+    ? holder
+    : '';
+};
+
+/**
+ * Takes the lock, or refuses when a run still going holds it. A lock whose run has ended, as one a dropped SSH session
+ * leaves behind, is taken over: removed, then taken like any lock, so a run that makes its own in that moment is found
+ * holding it.
+ * @param {string} lock The lock file.
+ */
+const acquireLock = (lock: string): void =>
+{
+  if (tryCreateLock(lock))
+  {
+    return;
+  }
+
+  const holder = lockHolder(lock);
+  if (holder !== '')
+  {
+    throw new Refusal(`Another install is already running, as process ${holder}. Let it finish, then run this again.`);
+  }
+
+  rmSync(lock, { force: true });
+  acquireLock(lock);
+};
+
+/**
+ * Takes the lock that keeps two runs from installing at once, as two SSH sessions could. Without it, whichever run
+ * finished first would prune the other's staging folder, and a refused first install would remove the install folder
+ * the other was filling. The folder the lock goes in is made when missing, as in a home folder nothing has used yet.
+ * @param {string} lock The lock file.
+ * @returns {string} The outermost folder made to hold the lock, or empty when the folder it goes in was already there.
+ */
+const takeLock = (lock: string): string =>
+{
+  const made = outermostMissingFolder(dirname(lock));
+  mkdirSync(dirname(lock), { recursive: true });
+  acquireLock(lock);
+  return made;
+};
+
+/**
+ * Lets the lock go at the end of a run, whether it installed or was refused, and takes away the folder made to hold
+ * the lock when nothing else came to be kept in it, as when a first install into an empty home folder is refused.
+ * @param {string} lock The lock file.
+ * @param {string} made The outermost folder made to hold the lock, or empty.
+ */
+const releaseLock = (lock: string, made: string): void =>
+{
+  rmSync(lock, { force: true });
+  if (made !== '' && readdirSync(made).length === 0)
+  {
+    rmdirSync(made);
+  }
+};
+
+/**
+ * Installs the build versions.json names, as install does once it holds the lock. When it is already the current one,
+ * only the menu entry and the command line link are written again, which changes nothing when both are already there.
+ * @param {string} buildsFolder The folder holding versions.json and the tarball.
+ * @param {InstallPlaces} places Where the install goes.
+ */
+const installHoldingLock = (buildsFolder: string, places: InstallPlaces): void =>
 {
   const versionsPath = join(buildsFolder, VERSIONS_FILE);
   if (existsSync(versionsPath) === false)
@@ -820,7 +948,6 @@ const install = (buildsFolder: string, home: string): void =>
     throw new Refusal(`There is no ${VERSIONS_FILE} beside this installer.`);
   }
 
-  const places = placesIn(home);
   const build = readPublishedBuild(readFileSync(versionsPath, 'utf8'));
   const replaced = linkedVersion(places.root, CURRENT_LINK);
   if (replaced === build.version)
@@ -845,6 +972,27 @@ const install = (buildsFolder: string, home: string): void =>
     console.log(`Removed ${removed.join(', ')}.`);
   }
   console.log(`Start it from the app menu, or with ${places.binLink}.`);
+};
+
+/**
+ * Installs the build versions.json names, with no other run installing at the same time: everything a run reads and
+ * writes, from which build is current to every folder pruned, is done holding the lock, and the lock is let go however
+ * the run ends, short of being killed.
+ * @param {string} buildsFolder The folder holding versions.json and the tarball.
+ * @param {string} home The home folder to install into, absolute.
+ */
+const install = (buildsFolder: string, home: string): void =>
+{
+  const places = placesIn(home);
+  const lockMade = takeLock(places.lock);
+  try
+  {
+    installHoldingLock(buildsFolder, places);
+  }
+  finally
+  {
+    releaseLock(places.lock, lockMade);
+  }
 };
 
 /**
