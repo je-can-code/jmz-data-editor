@@ -6,8 +6,8 @@
  *
  * It runs from the builds folder rather than from a checkout because publishing copies it there beside the tarball and
  * the versions.json it reads, so the three always match, and it finds them beside itself. The share mounts with every
- * execute bit off, so nothing runs from it: the tarball is copied to a local temporary folder and checked against its
- * SHA-256 there, and every mode comes from the archive.
+ * execute bit off, so nothing runs from it: the tarball is copied into a staging folder inside the install folder and
+ * checked against its SHA-256 there, and every mode comes from the archive.
  *
  * A new build is tried before anything switches to it. Its API has to report the version versions.json names, and
  * NW.js and every library beside it have to find what they load on this machine. A build that fails either is refused
@@ -37,7 +37,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
-import { homedir, tmpdir } from 'node:os';
+import { homedir } from 'node:os';
 import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -68,10 +68,17 @@ const CURRENT_LINK = 'current';
 const PREVIOUS_LINK = 'previous';
 
 /**
- * The start of the name of the folder a build is unpacked into to be tried. It sits inside the install folder, so
- * moving a build into place is a rename and never a copy.
+ * The start of the name of the folder a build is staged in to be tried: the tarball's local copy, and the build
+ * unpacked from it. It sits inside the install folder, so moving a build into place is a rename and never a copy, and
+ * so one a run cut short leaves behind is a folder the next install prunes, never memory held in the system's
+ * temporary folder.
  */
 const INCOMING_PREFIX = '.incoming-';
+
+/**
+ * The folder inside a staging folder that the build is unpacked into, beside the tarball's local copy.
+ */
+const UNPACKED_FOLDER = 'unpacked';
 
 /**
  * The start of the name of the one folder a bundle's tarball holds, which ends in the build's version.
@@ -194,7 +201,7 @@ type StagedBuild = {
   readonly folder: string;
 
   /**
-   * The folder it was unpacked into, inside the install folder.
+   * The staging folder it was unpacked in, beside the tarball's local copy, inside the install folder.
    */
   readonly incoming: string;
 };
@@ -685,8 +692,11 @@ const tryBuild = (build: string, version: string): void =>
 };
 
 /**
- * Copies the tarball off the share, checks it, unpacks it into the install folder off to one side, and tries the
- * build there. A refusal at any point takes away everything this made, the install folder too when this made it.
+ * Copies the tarball off the share into a staging folder of its own inside the install folder, checks it, unpacks it
+ * there, and tries the build. A refusal at any point takes away everything this made, the install folder too when this
+ * made it. Nothing is staged in the system's temporary folder, which is RAM on these machines: a run cut short by
+ * Ctrl-C or a dropped SSH session skips every clean-up, so a tarball staged there would hold that memory until the
+ * machine restarts, while a staging folder left in the install folder is one the next install prunes.
  * @param {string} buildsFolder The folder holding versions.json and the tarball.
  * @param {PublishedBuild} build The build versions.json names.
  * @param {string} root The install folder.
@@ -700,11 +710,13 @@ const stage = (buildsFolder: string, build: PublishedBuild, root: string): Stage
     throw new Refusal(`The builds folder has no ${build.file}.`);
   }
 
-  // the share is read once, and what gets checked is exactly what gets unpacked.
-  const temporary = mkdtempSync(join(tmpdir(), 'jmz-editor-install-'));
+  const made = outermostMissingFolder(root);
+  mkdirSync(root, { recursive: true });
+  const incoming = mkdtempSync(join(root, INCOMING_PREFIX));
   try
   {
-    const local = join(temporary, build.file);
+    // the share is read once, and what gets checked is exactly what gets unpacked.
+    const local = join(incoming, build.file);
     copyFileSync(tarball, local);
     const digest = sha256Of(local);
     if (digest !== build.sha256)
@@ -715,28 +727,21 @@ const stage = (buildsFolder: string, build: PublishedBuild, root: string): Stage
       ].join('\n'));
     }
 
-    const made = outermostMissingFolder(root);
-    mkdirSync(root, { recursive: true });
-    const incoming = mkdtempSync(join(root, INCOMING_PREFIX));
-    try
-    {
-      const folder = unpack(local, incoming, build.version);
-      tryBuild(folder, build.version);
-      return { folder, incoming };
-    }
-    catch (error)
-    {
-      // a refused build leaves nothing behind: its folder goes, and so does every folder made to hold it.
-      const ownFolder = made === ''
-        ? incoming
-        : made;
-      rmSync(ownFolder, { recursive: true, force: true });
-      throw error;
-    }
+    // the build unpacks into a folder of its own beside the tarball, since unpacking checks it holds nothing else.
+    const unpacked = join(incoming, UNPACKED_FOLDER);
+    mkdirSync(unpacked);
+    const folder = unpack(local, unpacked, build.version);
+    tryBuild(folder, build.version);
+    return { folder, incoming };
   }
-  finally
+  catch (error)
   {
-    rmSync(temporary, { recursive: true, force: true });
+    // a refused build leaves nothing behind: its staging folder goes, and so does every folder made to hold it.
+    const ownFolder = made === ''
+      ? incoming
+      : made;
+    rmSync(ownFolder, { recursive: true, force: true });
+    throw error;
   }
 };
 

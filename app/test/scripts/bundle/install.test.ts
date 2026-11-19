@@ -111,6 +111,7 @@ afterEach(() =>
   folders.splice(0)
     .forEach(folder => rmSync(folder, { recursive: true, force: true }));
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
 });
 
 /**
@@ -671,6 +672,42 @@ describe('install', () =>
       // Assert
       expect([ message, listing(machine.home) ])
         .toEqual([ 'The build has no nwjs/nw.', before ]);
+    });
+
+    it('stages nothing in the system\'s temporary folder, where a run cut short would leave its tarball in RAM', () =>
+    {
+      // Arrange- a TMPDIR that is not there, so anything staged in it would stop the install.
+      const machine = laptop();
+      publishBuild(machine, FIRST);
+      vi.stubEnv('TMPDIR', join(machine.builds, 'not-there'));
+
+      // Act
+      install(machine.builds, machine.home);
+
+      // Assert
+      expect(readlinkSync(join(machine.root, 'current')))
+        .toBe(FIRST);
+    });
+
+    it('removes the staging folder a run cut short left, tarball copy and all, at the next install', () =>
+    {
+      // Arrange- a staging folder holding a tarball copy and a half-unpacked build, as Ctrl-C or a dropped SSH session
+      // leaves one, beside an installed build.
+      const machine = laptop();
+      publishBuild(machine, FIRST);
+      install(machine.builds, machine.home);
+      const leftover = join(machine.root, '.incoming-cutoff');
+      mkdirSync(join(leftover, 'unpacked', `jmz-editor-${SECOND}`), { recursive: true });
+      writeFileSync(join(leftover, `jmz-editor-linux-x64-${SECOND}.tar.gz`), 'the first half of a tarball');
+      publishBuild(machine, SECOND);
+
+      // Act
+      install(machine.builds, machine.home);
+
+      // Assert
+      expect(readdirSync(machine.root)
+        .sort())
+        .toEqual([ FIRST, SECOND, 'current', 'previous' ]);
     });
   });
 });
