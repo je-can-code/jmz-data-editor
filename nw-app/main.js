@@ -23,19 +23,30 @@
 // their closing away from the page, and a page holding unsaved edits asks before it closes through its own
 // beforeunload.
 //
+// In a bundle, which its build marks by writing bundle.json beside the shell's folder, the shell starts the bundle's
+// own API instead of the dev stack, on one fixed loopback origin that serves the pages as well. The project comes from
+// --project-root, JMZ_PROJECT_ROOT or the person's config, which the shell reads and never writes. The shell checks the
+// project and the port before the API starts, and waits for the API's health check before it opens a window; whatever
+// stops it on the way goes in a small error window naming the log that says more, since a desktop launch has no
+// terminal. The API's output is appended to a log of its own, and the API ends with the shell however the shell ends:
+// it reads its stdin, a pipe the shell holds open for the life of the app. A second launch hands itself over to the
+// first, which brings its window forward.
+//
 // Flags, read from nw.App.argv (under NW.js, process.argv holds only the binary's path):
 //   --project-root <path>   the RMMZ project, handed to the Go API
-//   --api-base <origin>     where the Go API listens
-//   --ui-url <origin>       where the UI is served; every window opens on this one origin
+//   --api-base <origin>     where the Go API listens (the dev stack only)
+//   --ui-url <origin>       where the UI is served; every window opens on this one origin (the dev stack only)
 //   --maps                  boot straight into the map editor
-//   --attach                use a UI and API that are already running instead of starting them
-//   --log <path>            append one JSON line per shell event, since nothing here reaches a console
+//   --attach                use a UI and API that are already running instead of starting them (the dev stack only)
+//   --log <path>            append one JSON line per shell event, since nothing here reaches a console; a bundle logs
+//                           to shell.log in the person's state folder unless told otherwise
 // Each flag also takes the --flag=value form.
 const { spawn } = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const http = require('node:http');
+const net = require('node:net');
 const rules = require('./shellRules.js');
 
 const DEFAULT_API_BASE = 'http://127.0.0.1:8080';
@@ -52,8 +63,19 @@ const PLAY_HEALTH_TIMEOUT_MS = 2000;
 // itself over to the game running there and exits within a few dozen.
 const PLAY_WATCH_MS = 1000;
 
+// how long a bundle waits for its API's health check to answer ok, in milliseconds; it answers within a moment of
+// starting, so running out means something is wrong with it.
+const API_READY_TIMEOUT_MS = 10_000;
+
 const { argv } = nw.App;
-const logPath = rules.readFlag(argv, '--log') || '';
+
+// a bundle's build writes bundle.json beside the shell's folder; a checkout has none, and runs the dev stack.
+const bundled = rules.isBundled(__dirname, fs.existsSync);
+
+// a bundle's config and logs, kept for the person outside the bundle, so an update leaves them alone.
+const userFiles = rules.bundleUserFiles(process.env, os.homedir());
+
+const logPath = rules.readFlag(argv, '--log') || (bundled ? userFiles.shellLog : '');
 
 function log(event, data)
 {
@@ -100,6 +122,37 @@ function writeJsonFileSafe(filePath, data)
   {
     // ignore
   }
+}
+
+/**
+ * Reads the text of a bundle's config, which the person writes by hand. No file yet is a config with nothing set; a
+ * file that is there but cannot be read gives empty text, which is no config at all, so the person learns it is wrong.
+ * @param {string} filePath The config file.
+ * @returns {string | null} The text, or null when there is no file.
+ */
+function readConfigText(filePath)
+{
+  try
+  {
+    return fs.readFileSync(filePath, 'utf-8');
+  }
+  catch (error)
+  {
+    return error.code === 'ENOENT' ? null : '';
+  }
+}
+
+/**
+ * Waits a while.
+ * @param {number} ms How long, in milliseconds.
+ * @returns {Promise<void>} Settles once the time is up.
+ */
+function sleep(ms)
+{
+  return new Promise((resolve) =>
+  {
+    setTimeout(resolve, ms);
+  });
 }
 
 function httpGet(url, timeoutMs)
@@ -223,18 +276,43 @@ function repoRoot()
 
 const CONFIG_PATH = path.join(repoRoot(), '.config', 'jmz-data-editor.json');
 
-// the dev stack this shell started, if any; everything the app started stops with it.
+// the dev stack or the bundle's API this shell started, if any; everything the app started stops with it.
 let child = null;
+
+// set once the app is ending, so the API's exit is taken for the shutdown it is and not a failure.
+let stopping = false;
 
 function shutdown()
 {
-  killTree(child);
+  stopping = true;
+
+  // a bundle's one child is the API itself, which child.kill reaches on every system; the dev stack is a tree of
+  // processes under bun, ended as a process group.
+  if (bundled)
+  {
+    if (child !== null)
+    {
+      child.kill();
+    }
+  }
+  else
+  {
+    killTree(child);
+  }
+
   child = null;
 }
 
 // every visible window, by the page it shows, and the pages whose windows are still opening.
 const openWindows = new Map();
 const opening = new Set();
+
+// the error windows on screen, and how many are still opening; each keeps the app open as an editor window does.
+const problemWindows = new Set();
+let problemsOpening = 0;
+
+// the first page's window, once the windows can open: a second launch of a bundle brings it forward.
+let bootWindow = null;
 
 // held for the life of the app, so the channel is never collected.
 let shellChannel = null;
@@ -243,11 +321,11 @@ let shellChannel = null;
 const playtests = new Map();
 
 /**
- * Quits once the last visible window has closed; the hidden relay window does not count.
+ * Quits once the last visible window has closed, an error window included; the hidden relay window does not count.
  */
 function quitWhenLastWindowCloses()
 {
-  if (openWindows.size > 0 || opening.size > 0)
+  if (openWindows.size > 0 || opening.size > 0 || problemWindows.size > 0 || problemsOpening > 0)
   {
     return;
   }
@@ -543,28 +621,327 @@ function startRelay(uiUrl, apiBase, fallbackSize, ready)
 }
 
 /**
- * Opens a small window explaining that no project is configured, and quits when it closes.
+ * Opens a small window saying what went wrong, since a desktop launch has no terminal to say it in. It keeps the app
+ * open as an editor window does, so the app quits once it closes, unless editor windows are still open.
+ * @param {string} text What went wrong, in plain words.
  */
-function showMissingProjectRoot()
+function showProblem(text)
 {
+  problemsOpening += 1;
   nw.Window.open('about:blank', { width: 720, height: 320 }, (win) =>
   {
+    problemsOpening -= 1;
+    problemWindows.add(win);
     win.on('loaded', () =>
     {
-      win.window.document.body.style.background = '#121212';
-      win.window.document.body.style.color = '#fff';
-      win.window.document.body.style.fontFamily = 'monospace';
-      win.window.document.body.style.padding = '16px';
-      win.window.document.body.innerText =
-        'JMZ_PROJECT_ROOT is not set.\n\n'
-        + 'Set it as an env var, pass --project-root, or set projectRoot in:\n'
-        + CONFIG_PATH;
+      const { document } = win.window;
+
+      // a bundle's window carries the app's name, where the dev stack's has always shown the blank page's.
+      if (bundled)
+      {
+        document.title = 'JMZ Editor';
+      }
+
+      document.body.style.background = '#121212';
+      document.body.style.color = '#fff';
+      document.body.style.fontFamily = 'monospace';
+      document.body.style.padding = '16px';
+      document.body.style.overflowWrap = 'anywhere';
+      document.body.innerText = text;
     });
-    win.on('closed', () => nw.App.quit());
+    win.on('closed', () =>
+    {
+      problemWindows.delete(win);
+      quitWhenLastWindowCloses();
+    });
   });
 }
 
-async function main()
+/**
+ * Opens the error window explaining that no project is configured for the dev stack.
+ */
+function showMissingProjectRoot()
+{
+  showProblem(
+    'JMZ_PROJECT_ROOT is not set.\n\n'
+    + 'Set it as an env var, pass --project-root, or set projectRoot in:\n'
+    + CONFIG_PATH
+  );
+}
+
+/**
+ * Ends the app on SIGINT and SIGTERM the way closing its last window does, taking everything it started with it.
+ */
+function stopOnSignals()
+{
+  process.on('SIGINT', () =>
+  {
+    shutdown();
+    process.exit(0);
+  });
+  process.on('SIGTERM', () =>
+  {
+    shutdown();
+    process.exit(0);
+  });
+}
+
+/**
+ * Reads the size new windows open at from the shell's own manifest.
+ * @returns {{ width: number, height: number }} The size.
+ */
+function windowDefaults()
+{
+  const nwManifest = readJsonFileSafe(path.join(__dirname, 'package.json')) || {};
+  const { width = 1400, height = 900 } = nwManifest.window || {};
+  return { width, height };
+}
+
+/**
+ * Opens the hidden relay, then the first page's window.
+ * @param {string} uiUrl The UI's origin.
+ * @param {string} apiBase The API's origin.
+ */
+function openFirstWindow(uiUrl, apiBase)
+{
+  const size = windowDefaults();
+  startRelay(uiUrl, apiBase, size, () =>
+  {
+    bootWindow = { url: `${uiUrl}${rules.bootPath(argv, bundled)}`, ...size };
+    openWindow(bootWindow.url, size.width, size.height);
+  });
+}
+
+/**
+ * Asks whether another program already listens on the bundle's port, by listening there as the API would and letting
+ * go at once. Anything else in the way, such as a port this user may not take, is left for the API's own attempt to
+ * report.
+ * @param {number} port The port.
+ * @returns {Promise<boolean>} True when another program holds it.
+ */
+function isPortTaken(port)
+{
+  return new Promise((resolve) =>
+  {
+    const probe = net.createServer();
+    probe.once('error', (error) =>
+    {
+      resolve(error.code === 'EADDRINUSE');
+    });
+    probe.once('listening', () =>
+    {
+      probe.close(() => resolve(false));
+    });
+    probe.listen(port, '127.0.0.1');
+  });
+}
+
+/**
+ * Starts the bundle's API on the project, its output appended to its log behind a line naming the launch. Its stdin is
+ * a pipe this shell holds for the life of the app, and the API ends once that pipe closes, which happens however the
+ * shell ends, a crash or a kill included, so no API is ever left holding the port against the next launch.
+ * @param {{ api: string, ui: string }} layout The bundle's paths.
+ * @param {string} version The bundle's version.
+ * @param {string} origin The bundle's origin.
+ * @param {string} projectRoot The project's folder.
+ * @returns {Promise<void>} Settles once the API has stopped, or could not start at all.
+ */
+function startApi(layout, version, origin, projectRoot)
+{
+  const output = fs.openSync(userFiles.apiLog, 'a');
+  fs.writeSync(output, `\n--- ${new Date().toISOString()} jmz-api ${version} on ${origin} for ${projectRoot}\n`);
+
+  const api = spawn(layout.api, [], {
+    env: { ...process.env, ...rules.bundleServerEnvironment(origin, projectRoot, layout.ui) },
+    stdio: [ 'pipe', output, output ],
+  });
+
+  // the API writes the log through its own copy of it, so the shell lets go of this one.
+  fs.closeSync(output);
+  child = api;
+  log('api-start', { pid: api.pid, api: layout.api, origin, projectRoot });
+
+  return new Promise((resolve) =>
+  {
+    api.once('exit', (code, signal) =>
+    {
+      log('api-exit', { code, signal });
+      resolve();
+    });
+
+    // a binary that cannot run at all never exits; it failed to start.
+    api.once('error', (error) =>
+    {
+      log('api-error', { error: String(error) });
+      resolve();
+    });
+  });
+}
+
+/**
+ * Asks the API's health check every quarter second until it answers ready, or the asking is called off.
+ * @param {string} origin The bundle's origin.
+ * @param {() => boolean} asking Whether to keep asking.
+ * @returns {Promise<'ready' | 'silent'>} 'ready' once the API answered so, and 'silent' when the asking was called off.
+ */
+async function pollHealth(origin, asking)
+{
+  while (asking())
+  {
+    try
+    {
+      const answer = await httpGetJson(`${origin}/api/health`, 400);
+      if (rules.isApiReady(answer))
+      {
+        return 'ready';
+      }
+    }
+    catch
+    {
+      // nothing is listening yet; it is asked again in a moment.
+    }
+
+    await sleep(250);
+  }
+
+  return 'silent';
+}
+
+/**
+ * Waits for the bundle's API to say it is ready, for it to stop, or for the wait to run out, whichever comes first.
+ * @param {string} origin The bundle's origin.
+ * @param {Promise<void>} ended Settles once the API has stopped.
+ * @returns {Promise<'ready' | 'stopped' | 'silent'>} Which came first.
+ */
+async function waitForApi(origin, ended)
+{
+  let asking = true;
+  const outcome = await Promise.race([
+    pollHealth(origin, () => asking),
+    ended.then(() => 'stopped'),
+    sleep(API_READY_TIMEOUT_MS).then(() => 'silent'),
+  ]);
+
+  asking = false;
+  return outcome;
+}
+
+/**
+ * Logs what stopped the bundled editor, and shows it in the error window.
+ * @param {string} problem What stopped it, one of the problems the rules word.
+ * @param {{ projectRoot: string, port: number }} found The project and the port, as far as the shell got.
+ */
+function reportProblem(problem, found)
+{
+  log('problem', { problem });
+  const files = { config: userFiles.config, apiLog: userFiles.apiLog, shellLog: logPath };
+  showProblem(rules.problemText(problem, { ...found, ...files }));
+}
+
+/**
+ * Brings the bundled editor forward when it is launched again. The second launch finds this one holding the profile,
+ * hands over its command line and exits, and the person expects the editor already open to come to the front: an error
+ * window first, since it says what is wrong, and otherwise the first page's window, opened again when it was closed.
+ * Before the windows can open, the first one is on its way already. What the second launch asked for is only logged:
+ * this copy stays on its own project.
+ * @param {string | string[]} commandLine The second launch's command line, as NW.js hands it over (0.118 wraps it in
+ * an array).
+ */
+function bringForward(commandLine)
+{
+  log('relaunch', { commandLine });
+  const [ problem ] = problemWindows;
+  if (problem !== undefined)
+  {
+    problem.focus();
+    return;
+  }
+
+  if (bootWindow !== null)
+  {
+    openWindow(bootWindow.url, bootWindow.width, bootWindow.height);
+  }
+}
+
+/**
+ * Starts the bundled editor: reads the person's config, checks the project and the port, starts the bundle's API,
+ * waits for it to be ready, and opens the first window. Whatever stops it on the way is shown in the error window.
+ * @returns {Promise<void>} Settles once the first window is on its way, or an error window is.
+ */
+async function startBundle()
+{
+  // a second launch hands its command line over to this one instead of starting.
+  nw.App.on('open', bringForward);
+
+  // the logs live in the person's state folder, which a first launch has yet to make.
+  fs.mkdirSync(path.dirname(userFiles.apiLog), { recursive: true });
+  fs.mkdirSync(path.dirname(logPath), { recursive: true });
+
+  const layout = rules.bundleLayout(__dirname);
+  const manifest = JSON.parse(fs.readFileSync(layout.manifest, 'utf-8'));
+  const config = rules.parseBundleConfig(readConfigText(userFiles.config));
+
+  // a config that cannot be read sets nothing, and the window below says the file is wrong.
+  const settings = config === null ? { projectRoot: '', port: null } : config;
+  const projectRoot = rules.bundleProjectRoot(argv, process.env, settings, process.cwd());
+  const port = rules.bundlePort(settings, manifest.port);
+  const origin = rules.bundleOrigin(port);
+  const found = { projectRoot, port };
+  const { version } = manifest;
+  log('boot', { argv, execPath: process.execPath, version, config: userFiles.config, origin, projectRoot });
+
+  if (config === null)
+  {
+    reportProblem('bad-config', found);
+    return;
+  }
+
+  // the API's health check says only that a project is set, so the project is checked here, before the API starts.
+  const rootProblem = rules.projectRootProblem(projectRoot, fs.existsSync);
+  if (rootProblem !== null)
+  {
+    reportProblem(rootProblem, found);
+    return;
+  }
+
+  // a port another program holds would stop the API at once; saying so names the actual problem.
+  if (await isPortTaken(port))
+  {
+    reportProblem('port-in-use', found);
+    return;
+  }
+
+  stopOnSignals();
+  const ended = startApi(layout, version, origin, projectRoot);
+  const outcome = await waitForApi(origin, ended);
+  log('api-ready', { outcome });
+  if (outcome !== 'ready')
+  {
+    // an API that never answered is ended, so it holds nothing against the next launch.
+    shutdown();
+    reportProblem(outcome === 'stopped' ? 'api-stopped' : 'api-silent', found);
+    return;
+  }
+
+  // from here on every load and save goes through the API, so its stopping is something the person must hear about.
+  ended.then(() =>
+  {
+    if (stopping === false)
+    {
+      child = null;
+      reportProblem('api-stopped', found);
+    }
+  });
+
+  openFirstWindow(origin, origin);
+}
+
+/**
+ * Starts the dev stack, or attaches to one already running, and opens the first window once the UI answers or ten
+ * seconds pass.
+ * @returns {Promise<void>} Settles once the first window is on its way, or the error window is.
+ */
+async function startDev()
 {
   const cfg = readJsonFileSafe(CONFIG_PATH) || {};
   const attach = rules.hasFlag(argv, '--attach');
@@ -625,32 +1002,36 @@ async function main()
     );
   }
 
-  process.on('SIGINT', () =>
-  {
-    shutdown();
-    process.exit(0);
-  });
-  process.on('SIGTERM', () =>
-  {
-    shutdown();
-    process.exit(0);
-  });
+  stopOnSignals();
 
   const ok = await waitForUrlOk(uiUrl, 10_000);
   log('ui', { ok });
 
-  const nwManifest = readJsonFileSafe(path.join(__dirname, 'package.json')) || {};
-  const { width = 1400, height = 900 } = nwManifest.window || {};
+  openFirstWindow(uiUrl, apiBase);
+}
 
-  startRelay(uiUrl, apiBase, { width, height }, () =>
+async function main()
+{
+  if (bundled)
   {
-    openWindow(`${uiUrl}${rules.bootPath(argv)}`, width, height);
-  });
+    await startBundle();
+    return;
+  }
+
+  await startDev();
 }
 
 main().catch((error) =>
 {
   log('crash', { error: String(error) });
   shutdown();
+
+  // a bundle has no terminal, so its crash is shown rather than the app quitting without a word.
+  if (bundled)
+  {
+    reportProblem('crashed', { projectRoot: '', port: 0 });
+    return;
+  }
+
   nw.App.quit();
 });

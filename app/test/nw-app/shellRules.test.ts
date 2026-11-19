@@ -20,7 +20,7 @@ const rules = load('../../../nw-app/shellRules.js') as {
   readFlag(argv: string[], name: string): string | null;
   hasFlag(argv: string[], name: string): boolean;
   trimOrigin(origin: string): string;
-  bootPath(argv: string[]): string;
+  bootPath(argv: string[], bundled: boolean): string;
   resolveWindowUrl(requested: unknown, uiUrl: string): string | null;
   windowKey(url: string): string;
   windowSize(requested: unknown, fallback: number): number;
@@ -35,6 +35,17 @@ const rules = load('../../../nw-app/shellRules.js') as {
   playtestProfileDirectory(cacheRoot: string, projectRoot: string): string;
   playArguments(projectRoot: string, profileDirectory: string): string[];
   playOutcome(exit: { code: number | null; signal: string | null } | null): string;
+  bundleLayout(shellDirectory: string): { root: string; manifest: string; api: string; ui: string };
+  isBundled(shellDirectory: string, exists: (filePath: string) => boolean): boolean;
+  bundleUserFiles(environment: Record<string, string | undefined>, homeDirectory: string): { config: string; apiLog: string; shellLog: string };
+  parseBundleConfig(text: string | null): { projectRoot: string; port: number | null } | null;
+  bundleProjectRoot(argv: string[], environment: Record<string, string | undefined>, config: { projectRoot: string }, workingDirectory: string): string;
+  bundlePort(config: { port: number | null }, defaultPort: number): number;
+  bundleOrigin(port: number): string;
+  bundleServerEnvironment(origin: string, projectRoot: string, uiDirectory: string): Record<string, string>;
+  projectRootProblem(projectRoot: string, exists: (filePath: string) => boolean): string | null;
+  isApiReady(answer: { status: number; body: unknown }): boolean;
+  problemText(problem: string, facts: { projectRoot: string; port: number; config: string; apiLog: string; shellLog: string }): string;
 };
 
 describe('shellRules', () =>
@@ -97,11 +108,23 @@ describe('shellRules', () =>
       // Arrange: with and without the flag, beside a near miss.
 
       // Act.
-      const paths = [ rules.bootPath(ARGV), rules.bootPath([ '--attach' ]), rules.bootPath([ '--mapsx' ]) ];
+      const paths = [ rules.bootPath(ARGV, false), rules.bootPath([ '--attach' ], false), rules.bootPath([ '--mapsx' ], false) ];
 
       // Assert.
       expect([ paths, rules.hasFlag(ARGV, '--attach') ])
         .toStrictEqual([ [ '/map.html', '/', '/' ], true ]);
+    });
+
+    it('boots a bundle on the map editor, with or without --maps', () =>
+    {
+      // Arrange: the arguments that boot the data editor in the dev stack, and --maps.
+
+      // Act.
+      const paths = [ rules.bootPath([ '--attach' ], true), rules.bootPath(ARGV, true) ];
+
+      // Assert.
+      expect(paths)
+        .toStrictEqual([ '/map.html', '/map.html' ]);
     });
   });
 
@@ -542,6 +565,395 @@ describe('shellRules', () =>
         // Assert.
         expect(outcomes)
           .toStrictEqual([ 'failed', 'failed' ]);
+      });
+    });
+  });
+
+  /*
+   * The bundled editor is one folder holding NW.js, the shell, the API and the UI's pages. The shell knows it runs from
+   * one by the bundle.json the build wrote beside the shell's folder, and a checkout of the repo, having none there,
+   * runs the dev stack exactly as before. A bundle keeps the person's files outside itself, where an update leaves them
+   * alone: its config in the XDG config folder and its logs in the XDG state folder, under the editor's own name. It
+   * serves its pages and its API from one loopback origin on a fixed port, the config's when it names a usable one,
+   * since everything the pages save belongs to that origin. The config is written by hand, so text that is not a config
+   * is refused rather than half read. Before the API starts, the project must be chosen, there, and an RPG Maker MZ
+   * project, because the API's health check only says one is set; the API counts as ready only once that check answers
+   * ok; and whatever stops the editor is put in plain words that name the log saying more.
+   */
+  describe('bundle mode', () =>
+  {
+    describe('isBundled', () =>
+    {
+      it('finds a bundle by the manifest beside the shell\'s folder, and lays the bundle out around it', () =>
+      {
+        // Arrange: a bundle whose build wrote its manifest.
+        const exists = (filePath: string) => filePath === '/opt/jmz-editor-1/bundle.json';
+
+        // Act.
+        const found = [ rules.isBundled('/opt/jmz-editor-1/editor', exists), rules.bundleLayout('/opt/jmz-editor-1/editor') ];
+
+        // Assert.
+        expect(found)
+          .toStrictEqual([
+            true,
+            {
+              root: '/opt/jmz-editor-1',
+              manifest: '/opt/jmz-editor-1/bundle.json',
+              api: '/opt/jmz-editor-1/server/jmz-api',
+              ui: '/opt/jmz-editor-1/ui',
+            },
+          ]);
+      });
+
+      it('runs a checkout as the dev stack, even beside a manifest in the shell\'s own folder', () =>
+      {
+        // Arrange: a checkout, and a manifest one folder too deep.
+        const exists = (filePath: string) => filePath === '/repo/nw-app/bundle.json';
+
+        // Act.
+        const found = rules.isBundled('/repo/nw-app', exists);
+
+        // Assert.
+        expect(found)
+          .toBe(false);
+      });
+    });
+
+    describe('bundleUserFiles', () =>
+    {
+      it('keeps the config and the logs in the XDG folders the variables name', () =>
+      {
+        // Arrange.
+        const environment = { XDG_CONFIG_HOME: '/scratch/config', XDG_STATE_HOME: '/scratch/state' };
+
+        // Act.
+        const files = rules.bundleUserFiles(environment, '/home/maker');
+
+        // Assert.
+        expect(files)
+          .toStrictEqual({
+            config: '/scratch/config/jmz-editor/config.json',
+            apiLog: '/scratch/state/jmz-editor/api.log',
+            shellLog: '/scratch/state/jmz-editor/shell.log',
+          });
+      });
+
+      it('falls back to ~/.config and ~/.local/state when the variables are unset, empty or relative', () =>
+      {
+        // Arrange: the three values the spec says to ignore, and the cache's variable, which names neither folder.
+        const environments = [
+          {},
+          { XDG_CONFIG_HOME: '', XDG_STATE_HOME: '' },
+          { XDG_CONFIG_HOME: 'scratch/config', XDG_STATE_HOME: 'scratch/state' },
+          { XDG_CACHE_HOME: '/scratch/cache' },
+        ];
+
+        // Act.
+        const files = environments.map(environment => rules.bundleUserFiles(environment, '/home/maker'));
+
+        // Assert.
+        expect(files)
+          .toStrictEqual(environments.map(() => ({
+            config: '/home/maker/.config/jmz-editor/config.json',
+            apiLog: '/home/maker/.local/state/jmz-editor/api.log',
+            shellLog: '/home/maker/.local/state/jmz-editor/shell.log',
+          })));
+      });
+    });
+
+    describe('parseBundleConfig', () =>
+    {
+      it('reads the project and the port, trimmed, and leaves keys it does not know alone', () =>
+      {
+        // Arrange: a config with a key a later version may add, beside the lowest and highest ports.
+        const texts = [ '{ "projectRoot": " /games/chef ", "port": 47390, "theme": "dark" }', '{ "port": 1 }', '{ "port": 65535 }' ];
+
+        // Act.
+        const configs = texts.map(text => rules.parseBundleConfig(text));
+
+        // Assert.
+        expect(configs)
+          .toStrictEqual([ { projectRoot: '/games/chef', port: 47390 }, { projectRoot: '', port: 1 }, { projectRoot: '', port: 65535 } ]);
+      });
+
+      it('reads no file, an empty object, and keys set to null as nothing set', () =>
+      {
+        // Arrange.
+        const texts = [ null, '{}', '{ "projectRoot": null, "port": null }' ];
+
+        // Act.
+        const configs = texts.map(text => rules.parseBundleConfig(text));
+
+        // Assert.
+        expect(configs)
+          .toStrictEqual([ { projectRoot: '', port: null }, { projectRoot: '', port: null }, { projectRoot: '', port: null } ]);
+      });
+
+      it('refuses text that is not a config, rather than reading part of it', () =>
+      {
+        // Arrange: an empty file, text that is not JSON or is cut short, JSON that is not an object, a folder that is
+        // not text, and ports that are text, zero, past the last port, a fraction or negative.
+        const texts = [
+          '',
+          'projectRoot=/games/chef',
+          '{ "projectRoot": "/games/chef"',
+          '[]',
+          'null',
+          '42',
+          '"/games/chef"',
+          '{ "projectRoot": 42 }',
+          '{ "port": "47390" }',
+          '{ "port": 0 }',
+          '{ "port": 65536 }',
+          '{ "port": 47390.5 }',
+          '{ "port": -47390 }',
+        ];
+
+        // Act.
+        const configs = texts.map(text => rules.parseBundleConfig(text));
+
+        // Assert.
+        expect(configs)
+          .toStrictEqual(texts.map(() => null));
+      });
+    });
+
+    describe('bundleProjectRoot', () =>
+    {
+      it('takes --project-root first, then JMZ_PROJECT_ROOT, then the config', () =>
+      {
+        // Arrange: all three set, then the flag gone, then the variable gone too.
+        const config = { projectRoot: '/games/from-config' };
+        const environment = { JMZ_PROJECT_ROOT: '/games/from-environment' };
+
+        // Act.
+        const roots = [
+          rules.bundleProjectRoot([ '--project-root', '/games/from-flag' ], environment, config, '/home/maker'),
+          rules.bundleProjectRoot([ '--maps' ], environment, config, '/home/maker'),
+          rules.bundleProjectRoot([ '--maps' ], {}, config, '/home/maker'),
+        ];
+
+        // Assert.
+        expect(roots)
+          .toStrictEqual([ '/games/from-flag', '/games/from-environment', '/games/from-config' ]);
+      });
+
+      it('makes a relative folder absolute from where the editor was started', () =>
+      {
+        // Arrange: a relative flag, and a relative config.
+
+        // Act.
+        const roots = [
+          rules.bundleProjectRoot([ '--project-root=games/chef' ], {}, { projectRoot: '' }, '/home/maker'),
+          rules.bundleProjectRoot([], {}, { projectRoot: './chef/' }, '/home/maker'),
+        ];
+
+        // Assert.
+        expect(roots)
+          .toStrictEqual([ '/home/maker/games/chef', '/home/maker/chef' ]);
+      });
+
+      it('answers an empty folder when none is set, a blank variable included', () =>
+      {
+        // Arrange: no flag, a variable of spaces, and an empty config.
+
+        // Act.
+        const root = rules.bundleProjectRoot([], { JMZ_PROJECT_ROOT: '   ' }, { projectRoot: '' }, '/home/maker');
+
+        // Assert.
+        expect(root)
+          .toBe('');
+      });
+    });
+
+    describe('origin and environment', () =>
+    {
+      it('uses the config\'s port when it sets one, and the bundle\'s own otherwise', () =>
+      {
+        // Arrange: a config with a port, and one without.
+
+        // Act.
+        const ports = [ rules.bundlePort({ port: 47390 }, 47380), rules.bundlePort({ port: null }, 47380) ];
+
+        // Assert.
+        expect(ports)
+          .toStrictEqual([ 47390, 47380 ]);
+      });
+
+      it('serves the pages and the API from one loopback origin on that port', () =>
+      {
+        // Arrange: the bundle's own port.
+
+        // Act.
+        const origin = rules.bundleOrigin(47380);
+
+        // Assert.
+        expect(origin)
+          .toBe('http://127.0.0.1:47380');
+      });
+
+      it('starts the API on that origin, allowing it alone, on the project, serving the pages, and ending with the shell', () =>
+      {
+        // Arrange: a project folder with a space in it.
+
+        // Act.
+        const environment = rules.bundleServerEnvironment('http://127.0.0.1:47380', '/games/chef adventure', '/opt/jmz-editor-1/ui');
+
+        // Assert.
+        expect(environment)
+          .toStrictEqual({
+            JMZ_API_ADDRESS: '127.0.0.1:47380',
+            JMZ_UI_ORIGINS: 'http://127.0.0.1:47380',
+            JMZ_PROJECT_ROOT: '/games/chef adventure',
+            JMZ_UI_DIR: '/opt/jmz-editor-1/ui',
+            JMZ_EXIT_WITH_PARENT: '1',
+          });
+      });
+    });
+
+    describe('projectRootProblem', () =>
+    {
+      // a project, a folder with no data/System.json, and one keeping System.json outside its data folder.
+      const present = new Set([
+        '/games/chef',
+        '/games/chef/data/System.json',
+        '/games/empty',
+        '/games/stray',
+        '/games/stray/data',
+        '/games/stray/System.json',
+      ]);
+      const exists = (filePath: string) => present.has(filePath);
+
+      it('passes a folder holding data/System.json', () =>
+      {
+        // Arrange: the project above.
+
+        // Act.
+        const problem = rules.projectRootProblem('/games/chef', exists);
+
+        // Assert.
+        expect(problem)
+          .toBeNull();
+      });
+
+      it('names what is wrong with no project, a folder that is not there, and a folder that is not a project', () =>
+      {
+        // Arrange: the folders above, and one that is not there.
+
+        // Act.
+        const problems = [ '', '/games/gone', '/games/empty', '/games/stray' ].map(root => rules.projectRootProblem(root, exists));
+
+        // Assert.
+        expect(problems)
+          .toStrictEqual([ 'no-project', 'missing-project', 'not-a-project', 'not-a-project' ]);
+      });
+    });
+
+    describe('isApiReady', () =>
+    {
+      it('calls the API ready on a 200 whose data says ok', () =>
+      {
+        // Arrange: the health check's answer.
+        const answer = { status: 200, body: { path: '/api/health', data: { ok: true, projectRoot: '/games/chef', projectRootOk: true } } };
+
+        // Act.
+        const ready = rules.isApiReady(answer);
+
+        // Assert.
+        expect(ready)
+          .toBe(true);
+      });
+
+      it('calls any other answer not ready', () =>
+      {
+        // Arrange: the same body under an error status, no body, a body that is text, no data, data saying not ok, ok
+        // outside the data, and ok as text.
+        const answers = [
+          { status: 503, body: { data: { ok: true } } },
+          { status: 200, body: null },
+          { status: 200, body: 'ok' },
+          { status: 200, body: { data: null } },
+          { status: 200, body: { data: { ok: false } } },
+          { status: 200, body: { ok: true } },
+          { status: 200, body: { data: { ok: 'true' } } },
+        ];
+
+        // Act.
+        const ready = answers.map(answer => rules.isApiReady(answer));
+
+        // Assert.
+        expect(ready)
+          .toStrictEqual([ false, false, false, false, false, false, false ]);
+      });
+    });
+
+    describe('problemText', () =>
+    {
+      const FACTS = {
+        projectRoot: '/games/gone',
+        port: 47380,
+        config: '/home/maker/.config/jmz-editor/config.json',
+        apiLog: '/home/maker/.local/state/jmz-editor/api.log',
+        shellLog: '/home/maker/.local/state/jmz-editor/shell.log',
+      };
+
+      it('says a port is taken in plain words, how to free it, and where the log is', () =>
+      {
+        // Arrange: the facts above.
+
+        // Act.
+        const text = rules.problemText('port-in-use', FACTS);
+
+        // Assert.
+        expect(text)
+          .toBe([
+            'Port 47380 is already in use by another program.',
+            '',
+            'Close that program, or set "port" in /home/maker/.config/jmz-editor/config.json to a free port.',
+            '',
+            'The log is at /home/maker/.local/state/jmz-editor/shell.log',
+          ].join('\n'));
+      });
+
+      it('names the shell\'s log for what the shell found, and the API\'s for what became of the API', () =>
+      {
+        // Arrange: every problem the shell can report.
+        const problems = [ 'no-project', 'missing-project', 'not-a-project', 'bad-config', 'port-in-use', 'api-stopped', 'api-silent', 'crashed' ];
+
+        // Act.
+        const lastLines = problems.map(problem => rules.problemText(problem, FACTS)
+          .split('\n')
+          .at(-1));
+
+        // Assert.
+        expect(lastLines)
+          .toStrictEqual([
+            'The log is at /home/maker/.local/state/jmz-editor/shell.log',
+            'The log is at /home/maker/.local/state/jmz-editor/shell.log',
+            'The log is at /home/maker/.local/state/jmz-editor/shell.log',
+            'The log is at /home/maker/.local/state/jmz-editor/shell.log',
+            'The log is at /home/maker/.local/state/jmz-editor/shell.log',
+            'The log is at /home/maker/.local/state/jmz-editor/api.log',
+            'The log is at /home/maker/.local/state/jmz-editor/api.log',
+            'The log is at /home/maker/.local/state/jmz-editor/shell.log',
+          ]);
+      });
+
+      it('names the folder and the config wherever the person has a project to fix', () =>
+      {
+        // Arrange: the problems with the project or its config.
+        const problems = [ 'no-project', 'missing-project', 'not-a-project', 'bad-config' ];
+
+        // Act.
+        const named = problems.map(problem =>
+        {
+          const text = rules.problemText(problem, FACTS);
+          return [ text.includes(FACTS.projectRoot), text.includes(FACTS.config) ];
+        });
+
+        // Assert.
+        expect(named)
+          .toStrictEqual([ [ false, true ], [ true, true ], [ true, true ], [ false, true ] ]);
       });
     });
   });
