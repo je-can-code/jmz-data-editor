@@ -320,13 +320,18 @@ let bootWindow = null;
 let stoppedBy = '';
 
 // the error windows a stopped start left on screen, which the next start replaces: each closes once the window taking
-// its place is on its way, since closing the last window quits the app. One the person closes first is forgotten.
+// its place holds the app open, since closing the last window quits the app. One the person closes first is forgotten.
 const replacedProblems = new Set();
 
 // set while a relaunch runs the start again, until the window taking the old error windows' place is on its way. The
-// person may well close the old ones meanwhile, as their words ask, and the app must not quit halfway through a start:
-// that would end the API it has just started.
+// person may well close the old ones meanwhile, as their words ask, and the shell must not take that for the last window
+// closing: quitting halfway through a start would end the API it has just started.
 let rerunning = false;
+
+// a hidden window held open while a relaunch runs the start again, or null while none does. NW.js ends the app by itself
+// the moment its last window closes, whatever the shell decides, and until the new start's relay window opens, which
+// waits on its API, the old error windows are the app's only ones, which the person may well close.
+let rerunKeeper = null;
 
 // held for the life of the app, so the channel is never collected.
 let shellChannel = null;
@@ -649,6 +654,10 @@ function showProblem(text)
   {
     problemsOpening -= 1;
     problemWindows.add(win);
+
+    // the window taking the place of a stopped start's ones is open now, so they can go without the app ever being
+    // left with no window at all.
+    closeReplacedProblems();
     win.on('loaded', () =>
     {
       const { document } = win.window;
@@ -680,8 +689,9 @@ function showProblem(text)
 }
 
 /**
- * Closes the error windows a new start replaces, once the window taking their place is on its way and keeps the app
- * open in their stead; from then on, closing the last window quits the app again.
+ * Closes the error windows a new start replaces, and the keeper that held the app open while it ran, once the window
+ * taking their place keeps the app open in their stead: a fresh error window once it is open, or the editor's on its
+ * way beside the relay window. From then on, closing the last window quits the app again.
  */
 function closeReplacedProblems()
 {
@@ -689,6 +699,13 @@ function closeReplacedProblems()
   replacedProblems.clear();
   rerunning = false;
   replaced.forEach(win => win.close(true));
+
+  // a rerun's keeper goes last, its work done.
+  if (rerunKeeper !== null)
+  {
+    rerunKeeper.close(true);
+    rerunKeeper = null;
+  }
 }
 
 /**
@@ -878,23 +895,26 @@ function reportProblem(problem, found)
   stoppedBy = problem;
   const files = { config: userFiles.config, apiLog: userFiles.apiLog, shellLog: logPath };
   showProblem(rules.problemText(problem, { ...found, ...files }));
-
-  // this window is on its way, so the error windows of a start that stopped before this one can go.
-  closeReplacedProblems();
 }
 
 /**
  * Runs the bundled editor's start again, for a relaunch after a problem the person can put right stopped it, on this
  * copy's own flags and environment, and the config as it reads now. The error windows on screen stay up until the
- * window taking their place is on its way, the editor's or a fresh error window, and closing them meanwhile never
- * quits the app.
+ * window taking their place holds the app open, the editor's or a fresh error window, and closing them meanwhile never
+ * quits the app: a hidden keeper holds it open until then.
  */
 function runAgain()
 {
   stoppedBy = '';
   rerunning = true;
   problemWindows.forEach(win => replacedProblems.add(win));
-  runBundle().catch(crashed);
+
+  // the keeper is open before the start runs again, so no moment of the rerun leaves the old windows as the only ones.
+  nw.Window.open('about:blank', { show: false, width: 200, height: 100 }, (win) =>
+  {
+    rerunKeeper = win;
+    runBundle().catch(crashed);
+  });
 }
 
 /**
