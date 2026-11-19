@@ -897,7 +897,7 @@ describe('shellRules', () =>
         shellLog: '/home/maker/.local/state/jmz-editor/shell.log',
       };
 
-      it('says a port is taken in plain words, how to free it, and where the log is', () =>
+      it('says a port is taken in plain words, how to free it, how to start afresh, and where the log is', () =>
       {
         // Arrange: the facts above.
 
@@ -910,9 +910,25 @@ describe('shellRules', () =>
             'Port 47380 is already in use by another program.',
             '',
             'Close that program, or set "port" in /home/maker/.config/jmz-editor/config.json to a free port.',
+            'Then close this window and open the editor again.',
             '',
             'The log is at /home/maker/.local/state/jmz-editor/shell.log',
           ].join('\n'));
+      });
+
+      it('asks the person to close this window before opening the editor again wherever they have something to put right', () =>
+      {
+        // Arrange: the problems the person fixes in the config or by closing another program, then the ones they cannot
+        // fix, where there is nothing to start afresh for.
+        const problems = [ 'no-project', 'missing-project', 'not-a-project', 'bad-config', 'port-in-use', 'api-stopped', 'api-silent', 'crashed' ];
+
+        // Act.
+        const asked = problems.map(problem => rules.problemText(problem, FACTS)
+          .includes('close this window and open the editor again.'));
+
+        // Assert.
+        expect(asked)
+          .toStrictEqual([ true, true, true, true, true, false, false, false ]);
       });
 
       it('names the shell\'s log for what the shell found, and the API\'s for what became of the API', () =>

@@ -610,6 +610,11 @@ function isApiReady(answer)
  * What the bundled editor's error window says about each thing that can stop it, in plain words, line by line, and the
  * log that says more: the shell's, for what the shell found before starting the API, and the API's, for what became of
  * the API. A desktop launch has no terminal, so this window is the one place the person learns what went wrong.
+ *
+ * Whatever the person can put right themselves ends by asking them to close this window before opening the editor
+ * again. The checks run only as the editor starts, and while this window is up the editor is still running: opening it
+ * again hands the launch over to this copy, which brings this window forward and checks nothing, so the fix would look
+ * as though it had failed.
  */
 const PROBLEMS = {
   'no-project': {
@@ -617,7 +622,8 @@ const PROBLEMS = {
     lines: facts => [
       'No project is chosen yet.',
       '',
-      `Set "projectRoot" in ${facts.config} to your game's folder, then open the editor again.`,
+      `Set "projectRoot" in ${facts.config} to your game's folder.`,
+      'Then close this window and open the editor again.',
     ],
   },
   'missing-project': {
@@ -627,6 +633,7 @@ const PROBLEMS = {
       facts.projectRoot,
       '',
       `Set "projectRoot" in ${facts.config} to your game's folder.`,
+      'Then close this window and open the editor again.',
     ],
   },
   'not-a-project': {
@@ -636,6 +643,7 @@ const PROBLEMS = {
       facts.projectRoot,
       '',
       `Set "projectRoot" in ${facts.config} to your game's folder.`,
+      'Then close this window and open the editor again.',
     ],
   },
   'bad-config': {
@@ -645,6 +653,7 @@ const PROBLEMS = {
       '',
       'The file should hold { "projectRoot": "/path/to/your/game" }, and "port" too when the editor needs another',
       'port: a whole number from 1 to 65535.',
+      'Once it does, close this window and open the editor again.',
     ],
   },
   'port-in-use': {
@@ -653,6 +662,7 @@ const PROBLEMS = {
       `Port ${facts.port} is already in use by another program.`,
       '',
       `Close that program, or set "port" in ${facts.config} to a free port.`,
+      'Then close this window and open the editor again.',
     ],
   },
   'api-stopped': {
