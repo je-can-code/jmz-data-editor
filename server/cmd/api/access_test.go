@@ -2,6 +2,8 @@ package main
 
 import (
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -211,17 +213,60 @@ func TestConfigurationDefaultsToTodaysPorts(t *testing.T) {
 		strings.Join(policy.AllowedHosts, ",") != "127.0.0.1:8080,localhost:8080" {
 		t.Errorf("defaults were address %q, origins %v, hosts %v", config.address, policy.AllowedOrigins, policy.AllowedHosts)
 	}
+	if config.uiDirectory != "" || config.exitWithParent {
+		t.Errorf("defaults served the UI from %q and ended with the parent: %v", config.uiDirectory, config.exitWithParent)
+	}
+}
+
+// TestConfigurationReadsTheBundlesSettings covers the two settings only the bundled editor's shell
+// passes: the folder of the UI's pages, and ending with the parent, on at 1 and off at 0.
+func TestConfigurationReadsTheBundlesSettings(t *testing.T) {
+	ui := t.TempDir()
+	cases := []struct {
+		name           string
+		exitWithParent string
+		expected       bool
+	}{
+		{name: "ending with the parent", exitWithParent: "1", expected: true},
+		{name: "outliving the parent", exitWithParent: "0", expected: false},
+	}
+
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			// Arrange- the folder above, written with the stray spaces a hand-edited setting picks up.
+			values := map[string]string{"JMZ_UI_DIR": " " + ui + " ", "JMZ_EXIT_WITH_PARENT": testCase.exitWithParent}
+
+			// Act.
+			config, err := configFrom(environment(values))
+
+			// Assert.
+			if err != nil {
+				t.Fatal(err)
+			}
+			if config.uiDirectory != ui || config.exitWithParent != testCase.expected {
+				t.Errorf("read the UI from %q and ending with the parent as %v", config.uiDirectory, config.exitWithParent)
+			}
+		})
+	}
 }
 
 // TestConfigurationRefusesWhatWouldExposeTheApi covers an address off the loopback interface, which would
-// hand the game's files to the network, and settings too malformed to mean anything.
+// hand the game's files to the network, settings too malformed to mean anything, and a UI folder that
+// is not there, which would otherwise start a server answering every page with a 404.
 func TestConfigurationRefusesWhatWouldExposeTheApi(t *testing.T) {
+	page := filepath.Join(t.TempDir(), "index.html")
+	if err := os.WriteFile(page, []byte(uiFixture["index.html"]), 0644); err != nil {
+		t.Fatal(err)
+	}
 	cases := map[string]map[string]string{
-		"every interface":     {"JMZ_API_ADDRESS": "0.0.0.0:8080"},
-		"a network address":   {"JMZ_API_ADDRESS": "192.168.1.20:8080"},
-		"no port":             {"JMZ_API_ADDRESS": "127.0.0.1"},
-		"an origin with path": {"JMZ_UI_ORIGINS": "http://127.0.0.1:3000/app"},
-		"not an origin":       {"JMZ_UI_ORIGINS": "127.0.0.1:3000"},
+		"every interface":                 {"JMZ_API_ADDRESS": "0.0.0.0:8080"},
+		"a network address":               {"JMZ_API_ADDRESS": "192.168.1.20:8080"},
+		"no port":                         {"JMZ_API_ADDRESS": "127.0.0.1"},
+		"an origin with path":             {"JMZ_UI_ORIGINS": "http://127.0.0.1:3000/app"},
+		"not an origin":                   {"JMZ_UI_ORIGINS": "127.0.0.1:3000"},
+		"a UI folder that is not there":   {"JMZ_UI_DIR": filepath.Join(t.TempDir(), "missing")},
+		"a UI folder that is a file":      {"JMZ_UI_DIR": page},
+		"ending with the parent in words": {"JMZ_EXIT_WITH_PARENT": "true"},
 	}
 
 	for name, values := range cases {

@@ -79,18 +79,18 @@ func newProject(t *testing.T) *project {
 	t.Helper()
 
 	current := writeProject(t)
-	current.handler = routes(current.hub, accessPolicy())
+	current.handler = routes(current.hub, accessPolicy(), "")
 	current.host = listenAddress
 	return current
 }
 
 // newConfiguredProject is newProject for a server started with a configuration, such as a UI moved to
-// another port.
+// another port, or the bundled editor's server, which serves the UI's pages too.
 func newConfiguredProject(t *testing.T, config serverConfig) *project {
 	t.Helper()
 
 	current := writeProject(t)
-	current.handler = routes(current.hub, config.policy())
+	current.handler = routes(current.hub, config.policy(), config.uiDirectory)
 	current.host = config.address
 	return current
 }
