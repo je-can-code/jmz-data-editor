@@ -332,7 +332,7 @@ the demo never waits on the merge.
 |---|---|---|---|
 | P1 Play | section 1 | first; **merged 2026-11-18** | P3: `nw-app/main.js`, `nw-app/shellRules.js` |
 | P2 Server | 2.2; 2.3; the API's `-version` flag (2.1, step 2); exit-with-parent (2.4) | beside P1; **merged 2026-11-18** | nothing |
-| P3 Bundle | the rest of 2.1, publish included; the rest of 2.4 except the atomic save | once P1's off-screen checks and P2 are done | P1 |
+| P3 Bundle | the rest of 2.1, publish included; the rest of 2.4 except the atomic save | once P1's off-screen checks and P2 are done; **merged 2026-11-18** | P1 |
 | P4 Install | section 3's `install.ts`; the atomic save in 2.4; 2.5; the dead null checks named in 2.2 | beside P3, built against the layout in 2.1; **merged 2026-11-18** | nothing |
 | P5 Projects | 2.6 | after Saturday, unless there is time before | P3 |
 
@@ -418,6 +418,13 @@ never removing the version in use, and every config and log write. Known items f
 - The installer follows `versions.json`, so publishing an older build installs it and makes the newer one `previous`.
 - With `getJmzHttpApiBase()` always naming a base, the map editor's no-server mode is reachable only from tests.
 - The app menu entry is named "JMZ Editor"; the page title says "JMZ Data Editor".
+- A playtest inherits a socket to the editor's crash reporter, so the editor's two `chrome_crashpad_handler`
+  processes live on until the game exits.
+- `config.json` sits in `~/.config/jmz-editor`, which is also the bundle's NW.js profile folder, so deleting the
+  profile deletes the config.
+- A `~` in `projectRoot` is not expanded.
+- Untracked files mark a build `-dirty`, so a build from a checkout holding an untracked doc carries the label.
+- Publish never removes old tarballs from the publish folder.
 
 Then one more pass over the review's own fixes, and the findings go to Jeremy in one batch.
 
@@ -438,8 +445,8 @@ The build started on the evening of 2026-11-18. The latest each step can land an
 
 | Day | Steps |
 |---|---|
-| Wednesday 2026-11-18, evening | P1 beside P2: both merged; P3 beside P4 started |
-| Thursday 2026-11-19 | P3 and P4 done; the bundle installed into a stand-in laptop on the desktop; the review and its fixes |
+| Wednesday 2026-11-18, evening | P1 beside P2, then P3 beside P4: all four merged. The chain checked on the merged branch: built, published into a scratch folder, installed into a stand-in laptop (twice, the second a no-op), then launched off-screen with no `bun`, `go` or `nw` on `PATH`: the API on the configured root, the map editor first, the data editor showing the project folder, the port freed on quit |
+| Thursday 2026-11-19 | the review and its fixes |
 | Friday 2026-11-20 | L1; L2 by the evening |
 | Saturday 2026-11-21 | the demo |
 
