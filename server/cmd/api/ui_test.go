@@ -13,12 +13,13 @@ import (
 
 // The bundled editor has no Vite server: the API serves the UI's built pages itself, from the folder
 // JMZ_UI_DIR names, on the one origin the pages and the API share. That makes the API a web server for
-// everything outside /api, and it owes the editor four things there. It serves the UI's files and
+// everything outside /api, and it owes the editor five things there. It serves the UI's files and
 // nothing outside their folder, however the path is encoded. Pages are never kept by the browser and
 // never answered from a copy it holds, because every installed build shares the one origin and the one
 // profile: going back to the previous build must run that build's own pages, not the newer pages the
-// browser kept, while the files Vite names after their content may be kept. The same access policy
-// guards the pages as guards the API. And every /api route answers exactly as it does with no UI at all.
+// browser kept, while the files Vite names after their content may be kept. No other site may frame
+// the pages, since a framed editor's saves and deletions are its own. The same access policy guards
+// the pages as guards the API. And every /api route answers exactly as it does with no UI at all.
 
 // bundleOrigin is the bundled editor's one origin, for the pages and the API alike.
 const bundleOrigin = "http://127.0.0.1:47380"
@@ -218,6 +219,28 @@ func TestTheUisPagesAreServedWholeToABrowserHoldingANewerCopy(t *testing.T) {
 			assertStatus(t, response, testCase.expected)
 			if testCase.expected == http.StatusOK && response.Body.String() != uiFixture[testCase.file] {
 				t.Errorf("served %q", response.Body.String())
+			}
+		})
+	}
+}
+
+// TestTheUisFilesCanOnlyBeFramedByItsOwnPages covers framing: a page on any other site that framed the
+// editor could steer a click into a save or a map's deletion, which the framed page would send as the
+// editor's own, so no site but the editor's own may frame any of its files. Its own pages still may,
+// so they can embed each other.
+func TestTheUisFilesCanOnlyBeFramedByItsOwnPages(t *testing.T) {
+	for _, target := range []string{"/", "/map.html", "/shell.html", "/favicon.ico", "/assets/main-DzIJpNIu.js"} {
+		t.Run(target, func(t *testing.T) {
+			// Arrange.
+			current, _ := newBundledProject(t)
+
+			// Act.
+			response := current.call(t, http.MethodGet, target, "")
+
+			// Assert.
+			assertStatus(t, response, http.StatusOK)
+			if policy := response.Header().Get("Content-Security-Policy"); policy != "frame-ancestors 'self'" {
+				t.Errorf("sent Content-Security-Policy %q, expected frame-ancestors 'self'", policy)
 			}
 		})
 	}

@@ -10,7 +10,8 @@ import (
 // ServeUI serves the UI's built pages from folder, for a server that is also the UI's own, as the API
 // is in the bundled editor. It answers GET and HEAD for the plain files inside the folder and nothing
 // more: the site's root is the data editor's index.html, a folder is never listed, and a path that
-// would leave the folder, encoded or not, is not found. Each file's type comes from its extension.
+// would leave the folder, encoded or not, is not found. Each file's type comes from its extension, and no
+// site but the editor's own may frame any of them.
 func ServeUI(folder string) http.HandlerFunc {
 	return func(responseWriter http.ResponseWriter, httpRequest *http.Request) {
 		// the pages are only ever read.
@@ -41,6 +42,11 @@ func ServeUI(folder string) http.HandlerFunc {
 
 		cacheControl, modTime := uiCaching(relativePath, info.ModTime())
 		responseWriter.Header().Set("Cache-Control", cacheControl)
+
+		// a page on any other site that framed the editor could steer a click into a save or a map's deletion,
+		// which the framed page would send as the editor's own. Only the editor's own pages may frame it, so they
+		// can still embed each other.
+		responseWriter.Header().Set("Content-Security-Policy", "frame-ancestors 'self'")
 		http.ServeContent(responseWriter, httpRequest, info.Name(), modTime, file)
 	}
 }
