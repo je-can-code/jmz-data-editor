@@ -30,8 +30,8 @@
 // stops it on the way goes in a small error window naming the log that says more, since a desktop launch has no
 // terminal. The API's output is appended to a log of its own, and the API ends with the shell however the shell ends:
 // it reads its stdin, a pipe the shell holds open for the life of the app. A second launch hands itself over to the
-// first, which brings its window forward, or, when its checks stopped it before anything started, runs them again: the
-// person has likely just put right what its error window named.
+// first, which brings its window forward, or, when a problem the person can put right stopped it, runs its start again:
+// they have likely just put right what its error window named.
 //
 // Flags, read from nw.App.argv (under NW.js, process.argv holds only the binary's path):
 //   --project-root <path>   the RMMZ project, handed to the Go API
@@ -315,9 +315,9 @@ let problemsOpening = 0;
 // the first page's window, once the windows can open: a second launch of a bundle brings it forward.
 let bootWindow = null;
 
-// set while a bundle's start stands stopped at its checks, which come before its API starts or any window but the error
-// window opens: a second launch then runs the checks again.
-let stoppedAtChecks = false;
+// what stopped a bundle's start, or the editor once it ran: one of the problems the rules word, or an empty string while
+// nothing has. A second launch asks the rules what to do with it, which may be to run the start again.
+let stoppedBy = '';
 
 // the error windows a stopped start left on screen, which the next start replaces: each closes once the window taking
 // its place is on its way, since closing the last window quits the app.
@@ -854,13 +854,14 @@ async function waitForApi(origin, ended)
 }
 
 /**
- * Logs what stopped the bundled editor, and shows it in the error window.
+ * Logs what stopped the bundled editor, keeps it for a second launch to answer, and shows it in the error window.
  * @param {string} problem What stopped it, one of the problems the rules word.
  * @param {{ projectRoot: string, port: number }} found The project and the port, as far as the shell got.
  */
 function reportProblem(problem, found)
 {
   log('problem', { problem });
+  stoppedBy = problem;
   const files = { config: userFiles.config, apiLog: userFiles.apiLog, shellLog: logPath };
   showProblem(rules.problemText(problem, { ...found, ...files }));
 
@@ -869,59 +870,51 @@ function reportProblem(problem, found)
 }
 
 /**
- * Stops the bundled editor's start at its checks, before any API starts, and says why. The person is asked to put it
- * right, and may well open the editor again while this copy still runs, so a relaunch runs the checks again.
- * @param {string} problem What stopped it, one of the problems the rules word.
- * @param {{ projectRoot: string, port: number }} found The project and the port.
- */
-function stopAtChecks(problem, found)
-{
-  reportProblem(problem, found);
-  stoppedAtChecks = true;
-}
-
-/**
- * Runs the bundled editor's start again, for a relaunch after its checks stopped it, on this copy's own flags and the
- * config as it reads now. The error windows on screen stay up until the window taking their place is on its way, the
- * editor's or a fresh error window, since closing the last window quits the app.
+ * Runs the bundled editor's start again, for a relaunch after a problem the person can put right stopped it, on this
+ * copy's own flags and the config as it reads now. The error windows on screen stay up until the window taking their
+ * place is on its way, the editor's or a fresh error window, since closing the last window quits the app.
  */
 function runAgain()
 {
-  stoppedAtChecks = false;
+  stoppedBy = '';
   replacedProblems = [ ...problemWindows ];
   runBundle().catch(crashed);
 }
 
 /**
- * Brings the bundled editor forward when it is launched again. The second launch finds this one holding the profile,
- * hands over its command line and exits, and the person expects the editor already open to come to the front. When the
- * checks stopped this copy's start, nothing but its error window is open, and the person has likely just put right what
- * that window named, so the checks run again and their window, the editor's or a fresh error window, takes its place.
- * Otherwise an error window comes forward first, since it says what is wrong, and then the first page's window, opened
- * again when it was closed; before the windows can open, the first one is on its way already. What the second launch
- * asked for is only logged: this copy stays on its own flags.
+ * Answers the bundled editor being launched again. The second launch finds this one holding the profile, hands over
+ * its command line and exits, and the person expects the editor already open to come to the front, or, after a problem
+ * they can put right stopped it, to start again now that they have. The rules decide which (relaunchAction): run the
+ * start again, bring the error window forward, or open the first page's window again, or bring it forward. What the
+ * second launch asked for is only logged: this copy stays on its own flags.
  * @param {string | string[]} commandLine The second launch's command line, as NW.js hands it over (0.118 wraps it in
  * an array).
  */
 function bringForward(commandLine)
 {
-  log('relaunch', { commandLine });
+  const action = rules.relaunchAction({
+    problem: stoppedBy,
+    problemsOpening,
+    problemsShown: problemWindows.size,
+    editorReady: bootWindow !== null,
+  });
+  log('relaunch', { commandLine, action });
 
-  // the error window must be on screen to be replaced: one still opening could not be closed, and would stay up.
-  if (stoppedAtChecks && problemsOpening === 0)
+  if (action === 'run-again')
   {
     runAgain();
     return;
   }
 
-  const [ problem ] = problemWindows;
-  if (problem !== undefined)
+  if (action === 'focus-problem')
   {
+    const [ problem ] = problemWindows;
     problem.focus();
     return;
   }
 
-  if (bootWindow !== null)
+  // before the windows can open there is nothing to do: the first one is on its way already.
+  if (action === 'open-editor')
   {
     openWindow(bootWindow.url, bootWindow.width, bootWindow.height);
   }
@@ -946,7 +939,7 @@ async function startBundle()
 /**
  * Runs the bundled editor's start: reads the person's config, checks the project and the port, starts the bundle's
  * API, waits for it to be ready, and opens the first window. Whatever stops it on the way is shown in the error window,
- * and a relaunch runs it again when the checks stopped it, since nothing had started yet.
+ * and a relaunch runs it again when the problem is one the person can put right.
  * @returns {Promise<void>} Settles once the first window is on its way, or an error window is.
  */
 async function runBundle()
@@ -966,7 +959,7 @@ async function runBundle()
 
   if (config === null)
   {
-    stopAtChecks('bad-config', found);
+    reportProblem('bad-config', found);
     return;
   }
 
@@ -974,14 +967,14 @@ async function runBundle()
   const rootProblem = rules.projectRootProblem(projectRoot, fs.existsSync);
   if (rootProblem !== null)
   {
-    stopAtChecks(rootProblem, found);
+    reportProblem(rootProblem, found);
     return;
   }
 
   // a port another program holds would stop the API at once; saying so names the actual problem.
   if (await isPortTaken(port))
   {
-    stopAtChecks('port-in-use', found);
+    reportProblem('port-in-use', found);
     return;
   }
 

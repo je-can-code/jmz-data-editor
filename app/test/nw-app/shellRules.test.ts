@@ -49,6 +49,7 @@ const rules = load('../../../nw-app/shellRules.js') as {
   projectRootProblem(projectRoot: string, exists: (filePath: string) => boolean): string | null;
   isApiReady(answer: { status: number; body: unknown }): boolean;
   problemText(problem: string, facts: { projectRoot: string; port: number; config: string; apiLog: string; shellLog: string }): string;
+  relaunchAction(state: { problem: string; problemsOpening: number; problemsShown: number; editorReady: boolean }): string;
 };
 
 describe('shellRules', () =>
@@ -1037,16 +1038,18 @@ describe('shellRules', () =>
       });
     });
 
+    // what the shell knows when something stops the bundled editor, and every problem it can report.
+    const FACTS = {
+      projectRoot: '/games/gone',
+      port: 47380,
+      config: '/home/maker/.config/jmz-editor/config.json',
+      apiLog: '/home/maker/.local/state/jmz-editor/api.log',
+      shellLog: '/home/maker/.local/state/jmz-editor/shell.log',
+    };
+    const PROBLEMS = [ 'no-project', 'missing-project', 'not-a-project', 'bad-config', 'port-in-use', 'api-start-failed', 'api-stopped', 'api-silent', 'crashed' ];
+
     describe('problemText', () =>
     {
-      const FACTS = {
-        projectRoot: '/games/gone',
-        port: 47380,
-        config: '/home/maker/.config/jmz-editor/config.json',
-        apiLog: '/home/maker/.local/state/jmz-editor/api.log',
-        shellLog: '/home/maker/.local/state/jmz-editor/shell.log',
-      };
-
       it('says a port is taken in plain words, how to free it, how to start afresh, and where the log is', () =>
       {
         // Arrange: the facts above.
@@ -1066,14 +1069,33 @@ describe('shellRules', () =>
           ].join('\n'));
       });
 
-      it('asks the person to close this window before opening the editor again wherever they have something to put right', () =>
+      it('says the config cannot be read, what to make it hold, how to start afresh, and where the log is', () =>
       {
-        // Arrange: the problems the person fixes in the config or by closing another program, then the ones they cannot
-        // fix, where there is nothing to start afresh for.
-        const problems = [ 'no-project', 'missing-project', 'not-a-project', 'bad-config', 'port-in-use', 'api-start-failed', 'api-stopped', 'api-silent', 'crashed' ];
+        // Arrange: the facts above.
 
         // Act.
-        const asked = problems.map(problem => rules.problemText(problem, FACTS)
+        const text = rules.problemText('bad-config', FACTS);
+
+        // Assert.
+        expect(text)
+          .toBe([
+            'The settings in /home/maker/.config/jmz-editor/config.json can\'t be read.',
+            '',
+            'Make it hold { "projectRoot": "/path/to/your/game" }, and "port" too when the editor needs another port:',
+            'a whole number from 1 to 65535.',
+            'Then close this window and open the editor again.',
+            '',
+            'The log is at /home/maker/.local/state/jmz-editor/shell.log',
+          ].join('\n'));
+      });
+
+      it('asks the person to close this window before opening the editor again wherever they have something to put right', () =>
+      {
+        // Arrange: every problem above: first the ones the person fixes in the config or by closing another program,
+        // then the ones they cannot fix, where there is nothing to start afresh for.
+
+        // Act.
+        const asked = PROBLEMS.map(problem => rules.problemText(problem, FACTS)
           .includes('close this window and open the editor again.'));
 
         // Assert.
@@ -1083,11 +1105,10 @@ describe('shellRules', () =>
 
       it('names the API\'s log where the API ran and could have written to it, and the shell\'s everywhere else', () =>
       {
-        // Arrange: every problem the shell can report.
-        const problems = [ 'no-project', 'missing-project', 'not-a-project', 'bad-config', 'port-in-use', 'api-start-failed', 'api-stopped', 'api-silent', 'crashed' ];
+        // Arrange: every problem above.
 
         // Act.
-        const lastLines = problems.map(problem => rules.problemText(problem, FACTS)
+        const lastLines = PROBLEMS.map(problem => rules.problemText(problem, FACTS)
           .split('\n')
           .at(-1));
 
@@ -1137,6 +1158,118 @@ describe('shellRules', () =>
         // Assert.
         expect(named)
           .toStrictEqual([ [ false, true ], [ true, true ], [ true, true ], [ false, true ] ]);
+      });
+    });
+
+    /*
+     * A second launch hands itself over to the copy already running, which decides what to do with it. When a problem
+     * the person can put right stopped the start, they have likely just put it right, so the start runs again; the very
+     * problems whose window asks for a fresh start are the ones that run again, so the window never promises a fresh
+     * start a relaunch would not give. The start runs again only once its error window is on screen to be replaced, since
+     * one still opening could not be closed, and would stay up. Otherwise an error window comes forward, since it says
+     * what is wrong; then the editor's window, opened again when it was closed; and before the windows can open, nothing,
+     * since the first one is on its way already.
+     */
+    describe('relaunchAction', () =>
+    {
+      // nothing stopped the start, no error window is up or opening, and the windows cannot open yet.
+      const STATE = { problem: '', problemsOpening: 0, problemsShown: 0, editorReady: false };
+
+      it('runs the start again when a problem the person can put right stopped it and its window is on screen', () =>
+      {
+        // Arrange: a project folder that was not there, its window up.
+        const state = { ...STATE, problem: 'missing-project', problemsShown: 1 };
+
+        // Act.
+        const action = rules.relaunchAction(state);
+
+        // Assert.
+        expect(action)
+          .toBe('run-again');
+      });
+
+      it('runs the start again for exactly the problems whose window asks for a fresh start', () =>
+      {
+        // Arrange: every problem above, each with its window up.
+
+        // Act.
+        const runsAgain = PROBLEMS.map(problem => rules.relaunchAction({ ...STATE, problem, problemsShown: 1 }) === 'run-again');
+        const asksForFreshStart = PROBLEMS.map(problem => rules.problemText(problem, FACTS)
+          .includes('close this window and open the editor again.'));
+
+        // Assert.
+        expect([ runsAgain, asksForFreshStart ])
+          .toStrictEqual([
+            [ true, true, true, true, true, false, false, false, false ],
+            [ true, true, true, true, true, false, false, false, false ],
+          ]);
+      });
+
+      it('brings the error window forward for a problem a fresh start would not put right', () =>
+      {
+        // Arrange: a server that never answered, its window up.
+        const state = { ...STATE, problem: 'api-silent', problemsShown: 1 };
+
+        // Act.
+        const action = rules.relaunchAction(state);
+
+        // Assert.
+        expect(action)
+          .toBe('focus-problem');
+      });
+
+      it('runs nothing again while the error window is still opening, bringing forward one already up', () =>
+      {
+        // Arrange: a problem that runs again, its window still opening, alone and beside one already up.
+        const states = [
+          { ...STATE, problem: 'missing-project', problemsOpening: 1 },
+          { ...STATE, problem: 'missing-project', problemsOpening: 1, problemsShown: 1 },
+        ];
+
+        // Act.
+        const actions = states.map(state => rules.relaunchAction(state));
+
+        // Assert.
+        expect(actions)
+          .toStrictEqual([ 'wait', 'focus-problem' ]);
+      });
+
+      it('brings an error window forward while nothing has stopped the start, as while it runs again', () =>
+      {
+        // Arrange: the start running again, the window it will replace still up, and the windows able to open.
+        const state = { ...STATE, problemsShown: 1, editorReady: true };
+
+        // Act.
+        const action = rules.relaunchAction(state);
+
+        // Assert.
+        expect(action)
+          .toBe('focus-problem');
+      });
+
+      it('opens the editor\'s window again, or brings it forward, once the windows can open', () =>
+      {
+        // Arrange: the editor running, no error window up.
+        const state = { ...STATE, editorReady: true };
+
+        // Act.
+        const action = rules.relaunchAction(state);
+
+        // Assert.
+        expect(action)
+          .toBe('open-editor');
+      });
+
+      it('does nothing before the windows can open, since the first one is on its way already', () =>
+      {
+        // Arrange: nothing to set up; the state above is a start still on its way.
+
+        // Act.
+        const action = rules.relaunchAction(STATE);
+
+        // Assert.
+        expect(action)
+          .toBe('wait');
       });
     });
   });

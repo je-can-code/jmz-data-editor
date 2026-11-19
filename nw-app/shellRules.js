@@ -691,79 +691,90 @@ function healthProjectRoot(answer)
  * wrote a word of its own. A desktop launch has no terminal, so this window is the one place the person learns what
  * went wrong.
  *
- * Whatever the person can put right themselves ends by asking them to close this window before opening the editor
- * again, so the editor starts afresh and runs every check again. Opening it with this window still up hands the launch
- * over to this copy, which runs the checks again as well, but closing first is the instruction that always holds.
+ * Whatever the person can put right themselves reruns on a relaunch, and that one setting decides two things: the
+ * window ends by asking them to close it and open the editor again, so the editor starts afresh and runs every check
+ * again, and a second launch while the window is still up runs the start again in this copy (see relaunchAction). The
+ * two can never part, so the window never promises a fresh start that a relaunch would not give.
  */
 const PROBLEMS = {
   'no-project': {
     log: 'shellLog',
+    rerunsOnRelaunch: true,
     lines: facts => [
       'No project is chosen yet.',
       '',
       `Set "projectRoot" in ${facts.config} to your game's folder.`,
-      'Then close this window and open the editor again.',
     ],
   },
   'missing-project': {
     log: 'shellLog',
+    rerunsOnRelaunch: true,
     lines: facts => [
       'The project folder isn\'t there:',
       facts.projectRoot,
       '',
       `Set "projectRoot" in ${facts.config} to your game's folder.`,
-      'Then close this window and open the editor again.',
     ],
   },
   'not-a-project': {
     log: 'shellLog',
+    rerunsOnRelaunch: true,
     lines: facts => [
       'This folder isn\'t an RPG Maker MZ project, since it has no data/System.json:',
       facts.projectRoot,
       '',
       `Set "projectRoot" in ${facts.config} to your game's folder.`,
-      'Then close this window and open the editor again.',
     ],
   },
   'bad-config': {
     log: 'shellLog',
+    rerunsOnRelaunch: true,
     lines: facts => [
       `The settings in ${facts.config} can't be read.`,
       '',
-      'The file should hold { "projectRoot": "/path/to/your/game" }, and "port" too when the editor needs another',
-      'port: a whole number from 1 to 65535.',
-      'Once it does, close this window and open the editor again.',
+      'Make it hold { "projectRoot": "/path/to/your/game" }, and "port" too when the editor needs another port:',
+      'a whole number from 1 to 65535.',
     ],
   },
   'port-in-use': {
     log: 'shellLog',
+    rerunsOnRelaunch: true,
     lines: facts => [
       `Port ${facts.port} is already in use by another program.`,
       '',
       `Close that program, or set "port" in ${facts.config} to a free port.`,
-      'Then close this window and open the editor again.',
     ],
   },
   'api-start-failed': {
     log: 'shellLog',
+    rerunsOnRelaunch: false,
     lines: () => [ 'The editor\'s server couldn\'t start.' ],
   },
   'api-stopped': {
     log: 'apiLog',
+    rerunsOnRelaunch: false,
     lines: () => [ 'The editor\'s server stopped.' ],
   },
   'api-silent': {
     log: 'apiLog',
+    rerunsOnRelaunch: false,
     lines: () => [ 'The editor\'s server didn\'t answer in time.' ],
   },
   'crashed': {
     log: 'shellLog',
+    rerunsOnRelaunch: false,
     lines: () => [ 'The editor couldn\'t start.' ],
   },
 };
 
 /**
- * Words what went wrong for the error window, and names the log that says more.
+ * How every window for a problem that reruns on a relaunch ends, once the person knows what to put right.
+ */
+const START_AFRESH = 'Then close this window and open the editor again.';
+
+/**
+ * Words what went wrong for the error window, and names the log that says more. A problem the person can put right
+ * ends by asking for a fresh start, which a relaunch gives as well.
  * @param {string} problem What went wrong, one of the problems above.
  * @param {{ projectRoot: string, port: number, config: string, apiLog: string, shellLog: string }} facts The project,
  * the port, and the config and log files, as the bundle has them.
@@ -771,8 +782,40 @@ const PROBLEMS = {
  */
 function problemText(problem, facts)
 {
-  const { log, lines } = PROBLEMS[problem];
-  return [ ...lines(facts), '', `The log is at ${facts[log]}` ].join('\n');
+  const { log, rerunsOnRelaunch, lines } = PROBLEMS[problem];
+  const startAfresh = rerunsOnRelaunch ? [ START_AFRESH ] : [];
+  return [ ...lines(facts), ...startAfresh, '', `The log is at ${facts[log]}` ].join('\n');
+}
+
+/**
+ * Decides what a second launch of the bundled editor does in the copy already running, which the second launch hands
+ * itself over to. When a problem the person can put right stopped the start, they have likely just put it right, so
+ * the start runs again; but only once its error window is on screen to be replaced, since one still opening could not
+ * be closed, and would stay up. Otherwise an error window comes forward, since it says what is wrong; then the editor's
+ * window, opened again when it was closed; and before the windows can open, nothing, since the first one is on its way
+ * already.
+ * @param {{ problem: string, problemsOpening: number, problemsShown: number, editorReady: boolean }} state What stopped
+ * the start or the editor, one of the problems above, or an empty string while nothing has; how many error windows are
+ * still opening, and how many are on screen; and whether the editor's window can open.
+ * @returns {'run-again' | 'focus-problem' | 'open-editor' | 'wait'} What the relaunch does.
+ */
+function relaunchAction(state)
+{
+  const { problem, problemsOpening, problemsShown, editorReady } = state;
+
+  // the problem says whether a fresh start would put it right, and its window must be up to be replaced.
+  if (problem !== '' && PROBLEMS[problem].rerunsOnRelaunch && problemsOpening === 0)
+  {
+    return 'run-again';
+  }
+
+  // an error window says what is wrong, so it comes before the editor.
+  if (problemsShown > 0)
+  {
+    return 'focus-problem';
+  }
+
+  return editorReady ? 'open-editor' : 'wait';
 }
 
 module.exports = {
@@ -802,6 +845,7 @@ module.exports = {
   problemText,
   projectRootProblem,
   readFlag,
+  relaunchAction,
   resolveWindowUrl,
   serverEnvironment,
   trimOrigin,
