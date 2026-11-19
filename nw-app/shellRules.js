@@ -1,7 +1,7 @@
 // The NW.js shell's decisions, kept apart from main.js so they can be tested without NW.js: reading the app's
 // flags, deciding which page boots, naming and vetting the windows pages ask for, what a page may read off the
-// clipboard, how a project's playtest is started and judged, and how the bundled editor finds its files, its
-// project and its address, and when its API is ready.
+// clipboard, how a project's playtest is started and judged, what the API's health check says, and how the bundled
+// editor finds its files, its project and its address, and starts its API.
 const crypto = require('node:crypto');
 const path = require('node:path');
 
@@ -352,6 +352,18 @@ function playOutcome(exit)
 }
 
 /**
+ * Builds the options a playtest starts with, so the game outlives the editor as a game started from a terminal does,
+ * and closing the editor never ends a playtest. It is detached, the leader of a process group of its own, so no signal
+ * sent to the editor's group reaches it; and its streams are ignored, so it holds no pipe to the editor, which would
+ * end the game, or stall it, once the editor is gone. The shell still lets go of the process itself once it starts.
+ * @returns {{ detached: true, stdio: 'ignore' }} The options.
+ */
+function playtestSpawnOptions()
+{
+  return { detached: true, stdio: 'ignore' };
+}
+
+/**
  * Builds the environment the Go API reads its configuration from, out of the same origins that tell the UI
  * where everything is: the address to listen on, from the API base, and the one page origin allowed to call it,
  * from the UI's URL. A UI moved off port 3000 is then allowed, and the default origins are not.
@@ -587,6 +599,26 @@ function bundleServerEnvironment(origin, projectRoot, uiDirectory)
 }
 
 /**
+ * Builds the options the bundle's API starts with. Its stdin is a pipe the shell holds for the life of the app: the API
+ * ends the moment its stdin closes, which is how it ends with the shell however the shell ends, so with its stdin
+ * ignored it would end the moment it started. Both of its outputs go to its log, the one place anything it says can be
+ * read after a desktop launch. It runs on the shell's own environment with the bundle's variables over it, so a value
+ * the environment happens to carry never moves the API off the bundle's origin, project or pages, nor keeps it running
+ * once the shell is gone.
+ * @param {Record<string, string | undefined>} environment The shell's own environment.
+ * @param {Record<string, string>} serverVariables The variables the API reads its configuration from.
+ * @param {number} output The API's log, open for appending.
+ * @returns {{ env: Record<string, string | undefined>, stdio: [ 'pipe', number, number ] }} The options.
+ */
+function apiSpawnOptions(environment, serverVariables, output)
+{
+  return {
+    env: { ...environment, ...serverVariables },
+    stdio: [ 'pipe', output, output ],
+  };
+}
+
+/**
  * Checks the project before the API starts on it, since the API's health check only says a project is set, never that
  * one is there: a project must be chosen, its folder must be there, and it must be an RPG Maker MZ project, which always
  * has data/System.json.
@@ -610,6 +642,25 @@ function projectRootProblem(projectRoot, exists)
 }
 
 /**
+ * Reads the data out of the API's answer to its health check: what a 200 carries in its envelope's data. Any other
+ * answer, an error, a body that is not JSON, or one that is not the API's envelope, carries none.
+ * @param {{ status: number, body: unknown }} answer The status, and the body, parsed.
+ * @returns {Record<string, unknown>} The data, or an empty object for an answer carrying none, which says neither that
+ * the API is ready nor which project it serves.
+ */
+function healthData(answer)
+{
+  const { status, body } = answer;
+  if (status !== 200 || body === null || typeof body !== 'object')
+  {
+    return {};
+  }
+
+  const { data } = body;
+  return data !== null && typeof data === 'object' ? data : {};
+}
+
+/**
  * Reports whether the API's answer to its health check says it is ready: a 200 whose data says ok. Any other answer is
  * an API not ready yet, or not the editor's at all.
  * @param {{ status: number, body: unknown }} answer The status, and the body, parsed.
@@ -617,14 +668,20 @@ function projectRootProblem(projectRoot, exists)
  */
 function isApiReady(answer)
 {
-  const { status, body } = answer;
-  if (status !== 200 || body === null || typeof body !== 'object')
-  {
-    return false;
-  }
+  return healthData(answer).ok === true;
+}
 
-  const { data } = body;
-  return data !== null && typeof data === 'object' && data.ok === true;
+/**
+ * Reads which project the API serves out of its answer to the health check: the folder a 200's data names. The API is
+ * the one place that knows which project is open, whether the shell started it or attached to one already running. Any
+ * other answer names none, and neither does an API serving no project, which leaves the folder out.
+ * @param {{ status: number, body: unknown }} answer The status, and the body, parsed.
+ * @returns {string} The project's folder, or an empty string when the answer names none.
+ */
+function healthProjectRoot(answer)
+{
+  const { projectRoot } = healthData(answer);
+  return typeof projectRoot === 'string' ? projectRoot : '';
 }
 
 /**
@@ -720,6 +777,7 @@ function problemText(problem, facts)
 }
 
 module.exports = {
+  apiSpawnOptions,
   bootPath,
   bundleLayout,
   bundleOrigin,
@@ -732,6 +790,7 @@ module.exports = {
   CLIPBOARD_KINDS,
   devStackArgs,
   hasFlag,
+  healthProjectRoot,
   isApiReady,
   isBundled,
   isGameFolder,
@@ -740,6 +799,7 @@ module.exports = {
   playOutcome,
   playReplyChannel,
   playtestProfileDirectory,
+  playtestSpawnOptions,
   problemText,
   projectRootProblem,
   readFlag,

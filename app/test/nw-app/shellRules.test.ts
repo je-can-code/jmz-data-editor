@@ -35,6 +35,8 @@ const rules = load('../../../nw-app/shellRules.js') as {
   playtestProfileDirectory(cacheRoot: string, projectRoot: string): string;
   playArguments(projectRoot: string, profileDirectory: string): string[];
   playOutcome(exit: { code: number | null; signal: string | null } | null): string;
+  playtestSpawnOptions(): { detached: boolean; stdio: string };
+  healthProjectRoot(answer: { status: number; body: unknown }): string;
   bundleLayout(shellDirectory: string): { root: string; manifest: string; api: string; ui: string };
   isBundled(shellDirectory: string, exists: (filePath: string) => boolean): boolean;
   bundleUserFiles(environment: Record<string, string | undefined>, homeDirectory: string): { config: string; apiLog: string; shellLog: string };
@@ -43,6 +45,7 @@ const rules = load('../../../nw-app/shellRules.js') as {
   bundlePort(config: { port: number | null }, defaultPort: number): number;
   bundleOrigin(port: number): string;
   bundleServerEnvironment(origin: string, projectRoot: string, uiDirectory: string): Record<string, string>;
+  apiSpawnOptions(environment: Record<string, string | undefined>, serverVariables: Record<string, string>, output: number): { env: Record<string, string | undefined>; stdio: unknown[] };
   projectRootProblem(projectRoot: string, exists: (filePath: string) => boolean): string | null;
   isApiReady(answer: { status: number; body: unknown }): boolean;
   problemText(problem: string, facts: { projectRoot: string; port: number; config: string; apiLog: string; shellLog: string }): string;
@@ -378,7 +381,9 @@ describe('shellRules', () =>
    * whatever runs there: RPG Maker games all share one default profile, so without one of its own Play would hand off to
    * a copy of the game started some other way. A launch that exits at once with code 0 was handed off, so its game is
    * already running; any other early ending failed; one still running is the game. Only a folder holding a game is
-   * launched at all, and the answer goes only to a reply channel the asking page opened under a random name.
+   * launched at all, and the answer goes only to a reply channel the asking page opened under a random name. The game
+   * played is the project the API's health check names, since the API knows which project is open, and an answer naming
+   * none plays nothing. The game must outlive the editor, so it is started detached and holding nothing of the editor's.
    */
   describe('playtests', () =>
   {
@@ -565,6 +570,61 @@ describe('shellRules', () =>
         // Assert.
         expect(outcomes)
           .toStrictEqual([ 'failed', 'failed' ]);
+      });
+    });
+
+    describe('playtestSpawnOptions', () =>
+    {
+      it('starts the game detached, in a process group of its own, with no stream tied to the editor, so it outlives it', () =>
+      {
+        // Arrange: nothing to set up; every playtest starts the same way. Detached, no signal sent to the editor's group
+        // reaches the game; with its streams ignored, it holds no pipe to the editor that would end it, or stall it,
+        // once the editor is gone.
+
+        // Act.
+        const options = rules.playtestSpawnOptions();
+
+        // Assert.
+        expect(options)
+          .toStrictEqual({ detached: true, stdio: 'ignore' });
+      });
+    });
+
+    describe('healthProjectRoot', () =>
+    {
+      it('reads the project the API serves out of a 200\'s data', () =>
+      {
+        // Arrange: the health check's answer, as the API gives it.
+        const answer = { status: 200, body: { path: '/api/health', data: { ok: true, projectRoot: '/games/chef', projectRootOk: true } } };
+
+        // Act.
+        const root = rules.healthProjectRoot(answer);
+
+        // Assert.
+        expect(root)
+          .toBe('/games/chef');
+      });
+
+      it('reads no project out of any other answer', () =>
+      {
+        // Arrange: the same data under an error status, no body, a body that is text, no data, an API serving no project,
+        // which leaves the folder out, a folder outside the data, and a folder that is not text.
+        const answers = [
+          { status: 503, body: { data: { ok: true, projectRoot: '/games/chef' } } },
+          { status: 200, body: null },
+          { status: 200, body: '/games/chef' },
+          { status: 200, body: { data: null } },
+          { status: 200, body: { data: { ok: true, projectRootOk: false } } },
+          { status: 200, body: { projectRoot: '/games/chef', data: { ok: true } } },
+          { status: 200, body: { data: { ok: true, projectRoot: 42 } } },
+        ];
+
+        // Act.
+        const roots = answers.map(answer => rules.healthProjectRoot(answer));
+
+        // Assert.
+        expect(roots)
+          .toStrictEqual([ '', '', '', '', '', '', '' ]);
       });
     });
   });
@@ -857,6 +917,44 @@ describe('shellRules', () =>
             JMZ_API_ADDRESS: '127.0.0.1:47380',
             JMZ_UI_ORIGINS: 'http://127.0.0.1:47380',
             JMZ_PROJECT_ROOT: '/games/chef adventure',
+            JMZ_UI_DIR: '/opt/jmz-editor-1/ui',
+            JMZ_EXIT_WITH_PARENT: '1',
+          });
+      });
+    });
+
+    describe('apiSpawnOptions', () =>
+    {
+      it('gives the API a stdin the shell holds open, since it ends once that closes, and its log for both its outputs', () =>
+      {
+        // Arrange: the API's log, opened as descriptor 7. The API ends the moment its stdin closes, which is how it ends
+        // with the shell however the shell ends; a stdin ignored would end it the moment it started.
+
+        // Act.
+        const { stdio } = rules.apiSpawnOptions({}, {}, 7);
+
+        // Assert.
+        expect(stdio)
+          .toStrictEqual([ 'pipe', 7, 7 ]);
+      });
+
+      it('runs the API on the shell\'s environment, with the bundle\'s variables over any the environment already sets', () =>
+      {
+        // Arrange: an environment carrying a variable the API needs from it, and stale values of two the bundle sets,
+        // one of which would keep the API running after the shell is gone.
+        const environment = { PATH: '/usr/bin:/bin', JMZ_PROJECT_ROOT: '/games/elsewhere', JMZ_EXIT_WITH_PARENT: '0' };
+        const variables = rules.bundleServerEnvironment('http://127.0.0.1:47380', '/games/chef', '/opt/jmz-editor-1/ui');
+
+        // Act.
+        const { env } = rules.apiSpawnOptions(environment, variables, 7);
+
+        // Assert.
+        expect(env)
+          .toStrictEqual({
+            PATH: '/usr/bin:/bin',
+            JMZ_API_ADDRESS: '127.0.0.1:47380',
+            JMZ_UI_ORIGINS: 'http://127.0.0.1:47380',
+            JMZ_PROJECT_ROOT: '/games/chef',
             JMZ_UI_DIR: '/opt/jmz-editor-1/ui',
             JMZ_EXIT_WITH_PARENT: '1',
           });

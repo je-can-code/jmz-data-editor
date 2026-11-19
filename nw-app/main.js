@@ -421,13 +421,12 @@ async function openProjectRoot(apiBase)
 {
   try
   {
-    const { status, body } = await httpGetJson(`${apiBase}/api/health`, PLAY_HEALTH_TIMEOUT_MS);
-    const data = status === 200 && body !== null && typeof body === 'object' ? body.data : null;
-    const root = data !== null && typeof data === 'object' ? data.projectRoot : '';
-    return typeof root === 'string' ? root : '';
+    const answer = await httpGetJson(`${apiBase}/api/health`, PLAY_HEALTH_TIMEOUT_MS);
+    return rules.healthProjectRoot(answer);
   }
   catch
   {
+    // no answer at all names no project either.
     return '';
   }
 }
@@ -469,7 +468,9 @@ function launchPlaytest(projectRoot)
   }
 
   const args = rules.playArguments(projectRoot, profile);
-  const game = spawn(process.execPath, args, { detached: true, stdio: 'ignore' });
+  const game = spawn(process.execPath, args, rules.playtestSpawnOptions());
+
+  // the shell lets go of the game too, so the shell's own exit never waits on it.
   game.unref();
 
   // the game counts as running from its launch, so a second Play during the watch never launches another; it is
@@ -752,10 +753,8 @@ function startApi(layout, version, origin, projectRoot)
   const output = fs.openSync(userFiles.apiLog, 'a');
   fs.writeSync(output, `\n--- ${new Date().toISOString()} jmz-api ${version} on ${origin} for ${projectRoot}\n`);
 
-  const api = spawn(layout.api, [], {
-    env: { ...process.env, ...rules.bundleServerEnvironment(origin, projectRoot, layout.ui) },
-    stdio: [ 'pipe', output, output ],
-  });
+  const variables = rules.bundleServerEnvironment(origin, projectRoot, layout.ui);
+  const api = spawn(layout.api, [], rules.apiSpawnOptions(process.env, variables, output));
 
   // the API writes the log through its own copy of it, so the shell lets go of this one.
   fs.closeSync(output);
