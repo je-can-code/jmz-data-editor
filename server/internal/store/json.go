@@ -67,11 +67,15 @@ func Save[T any](data T, path string) error {
 }
 
 // save executes the saving of whatever type T is on behalf of the caller.
+//
+// The bytes land through WriteFileAtomic rather than a write in place, so a save that stops part-way
+// (the bundled editor ends its API the moment its shell closes, and a disk can fill) leaves the file
+// as it was instead of cut short.
 func save[T any](data T, path string) error {
 	bytes, err := json.MarshalIndent(data, "", "  ")
 	if err != nil {
 		return err
 	}
 
-	return os.WriteFile(path, bytes, 0644)
+	return WriteFileAtomic(path, bytes)
 }
