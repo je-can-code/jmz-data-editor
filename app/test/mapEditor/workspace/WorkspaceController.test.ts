@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { DockviewApi, IDockviewPanel } from 'dockview-react';
+import type { PlayResult } from '../../../src/core/infrastructure/shell/WindowShell.ts';
 import { MapEditorApiError, type MapEditorApi } from '../../../src/mapEditor/core/api/MapEditorApi.ts';
 import { apiDocumentStore } from '../../../src/mapEditor/core/api/apiDocumentStore.ts';
 import { saveBlueprint } from '../../../src/mapEditor/core/blueprints/blueprintEdits.ts';
@@ -653,6 +654,64 @@ describe('WorkspaceController', () =>
       // Assert.
       expect([ controller.getState().notice?.text, controller.getState().notice?.severity ])
         .toStrictEqual([ 'The event\'s window was blocked; allow pop-ups for the editor to open it.', 'error' ]);
+    });
+  });
+
+  /*
+   * Play asks the window's shell to start the project's game, once per click, and the author hears what became of it:
+   * a game that started, or was running already, is news; a game that did not start, whatever the reason, is a refusal,
+   * which stays up longer.
+   */
+  describe('playing the project', () =>
+  {
+    /**
+     * Builds a controller whose shell answers every Play with the same result.
+     * @param {PlayResult} result What the shell answers.
+     * @returns {{ controller: WorkspaceController, plays: () => number }} The controller, and how many Plays it asked for.
+     */
+    const withPlay = (result: PlayResult) =>
+    {
+      const { hub, api } = buildController();
+      let plays = 0;
+      const shell = {
+        play: async () =>
+        {
+          plays += 1;
+          return result;
+        },
+      };
+      const services = { hub, api, shell, openDocument: (key: string) => hub.load(key as never) } as unknown as MapEditorServices;
+      return { controller: new WorkspaceController(services), plays: () => plays };
+    };
+
+    it('says the game is playing, or was running already, as news', async () =>
+    {
+      // Arrange.
+      const played = [ withPlay('started'), withPlay('already-running') ];
+
+      // Act.
+      await Promise.all(played.map(({ controller }) => controller.play()));
+
+      // Assert.
+      expect(played.map(({ controller, plays }) => [ controller.getState().notice?.text, controller.getState().notice?.severity, plays() ]))
+        .toStrictEqual([ [ 'Playing.', 'info', 1 ], [ 'Already running.', 'info', 1 ] ]);
+    });
+
+    it('says why the game did not start, as a refusal', async () =>
+    {
+      // Arrange: a folder with no game in it, a game that failed to start, and no shell to start one.
+      const played = [ withPlay('not-a-game'), withPlay('failed'), withPlay('unavailable') ];
+
+      // Act.
+      await Promise.all(played.map(({ controller }) => controller.play()));
+
+      // Assert.
+      expect(played.map(({ controller }) => [ controller.getState().notice?.text, controller.getState().notice?.severity ]))
+        .toStrictEqual([
+          [ 'This folder isn\'t a game.', 'error' ],
+          [ 'The game didn\'t start.', 'error' ],
+          [ 'Play isn\'t available right now.', 'error' ],
+        ]);
     });
   });
 

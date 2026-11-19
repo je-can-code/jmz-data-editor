@@ -1,8 +1,25 @@
-import React, { useEffect, useState } from 'react';
-import { Alert, AppBar, Button, IconButton, ListItemIcon, ListItemText, Menu, MenuItem, Snackbar, Toolbar, Tooltip, Typography } from '@mui/material';
-import { Check, KeyboardDoubleArrowLeft, KeyboardDoubleArrowRight, ListAlt, Save, Storage, ToggleOn } from '@mui/icons-material';
+import React, { useEffect, useState, useSyncExternalStore } from 'react';
+import {
+  Alert,
+  AppBar,
+  Button,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogContentText,
+  IconButton,
+  ListItemIcon,
+  ListItemText,
+  Menu,
+  MenuItem,
+  Snackbar,
+  Toolbar,
+  Tooltip,
+  Typography,
+} from '@mui/material';
+import { Check, KeyboardDoubleArrowLeft, KeyboardDoubleArrowRight, ListAlt, PlayArrow, Save, Storage, ToggleOn } from '@mui/icons-material';
 import type { DockviewApi } from 'dockview-react';
-import { openDataEditor } from '../../core/infrastructure/shell/WindowShell.ts';
+import { openDataEditor, type WindowShell } from '../../core/infrastructure/shell/WindowShell.ts';
 import type { Side } from '../core/workspace/sideCollapse.ts';
 import { APP_TITLE, openCommonEventsWindow, openSwitchesVariablesWindow } from '../views/mapEditorViews.ts';
 import { openSidePanel, SIDE_PANEL_SPECS } from './defaultLayout.ts';
@@ -155,10 +172,88 @@ const PanelsMenu = () =>
 };
 
 /**
+ * Follows whether the NW.js shell has answered this page, which it may well do only after the bar first draws.
+ * @param {WindowShell} shell The page's window shell.
+ * @returns {boolean} True once it has.
+ */
+const useShellRelayed = (shell: WindowShell): boolean =>
+{
+  return useSyncExternalStore(shell.subscribe, () => shell.isRelayed);
+};
+
+/**
+ * The button that plays the project in test mode, there only under the NW.js shell, since nothing in a plain browser
+ * can start a game. The game plays what is on disk, so with edits here not yet saved it first asks whether to play
+ * without them. It rests while a Play is on its way, and the notice at the foot says what became of it.
+ * @returns {React.JSX.Element | null} The button and its question, or nothing without the shell.
+ */
+const PlayButton = () =>
+{
+  const controller = useWorkspace();
+  const { hub, shell } = controller.services;
+  const relayed = useShellRelayed(shell);
+  const [ asking, setAsking ] = useState(false);
+  const [ playing, setPlaying ] = useState(false);
+
+  if (relayed === false)
+  {
+    return null;
+  }
+
+  /**
+   * Plays, resting the button until the shell has said what became of it.
+   */
+  const play = () =>
+  {
+    setAsking(false);
+    setPlaying(true);
+    controller.play().finally(() => setPlaying(false));
+  };
+
+  /**
+   * Plays at once when nothing is unsaved, and asks first otherwise.
+   */
+  const choose = () =>
+  {
+    if (hub.dirtyKeys().length > 0)
+    {
+      setAsking(true);
+      return;
+    }
+
+    play();
+  };
+
+  return (
+    <>
+      <Button color={'inherit'} size={'small'} startIcon={<PlayArrow/>} disabled={playing} onClick={choose}>
+        Play
+      </Button>
+      <Dialog open={asking} onClose={() => setAsking(false)}>
+        <DialogContent>
+          <DialogContentText>
+            Play without your unsaved changes?
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setAsking(false)}>
+            Cancel
+          </Button>
+          <Button autoFocus onClick={play}>
+            Play
+          </Button>
+        </DialogActions>
+      </Dialog>
+    </>
+  );
+};
+
+/**
  * The strip across the top of the workspace: the left side's own fold button, the app's name, saving (with how many
- * documents have unsaved edits), the layout reset, the Panels menu, the way to the common events, the switches and
- * variables and the data editor, and the right side's own fold button. The two fold buttons sit at the bar's own edges,
- * each under the column it folds, the same side a browser's own minimized side panels sit on.
+ * documents have unsaved edits), playing the project under the desktop app, the layout reset, the Panels menu, the way
+ * to the common events, the switches and variables and the data editor, and the right side's own fold button. The two
+ * fold buttons sit at the bar's own edges, each under the column it folds, the same side a browser's own minimized side
+ * panels sit on.
  * @param {{ onResetLayout: () => void }} props What resetting the layout does.
  * @returns {React.JSX.Element} The bar.
  */
@@ -186,6 +281,7 @@ const WorkspaceBar = (props: { onResetLayout: () => void }) =>
         >
           {unsaved === 0 ? 'Saved' : `Save (${unsaved})`}
         </Button>
+        <PlayButton/>
         <Button color={'inherit'} size={'small'} onClick={onResetLayout}>
           Reset layout
         </Button>

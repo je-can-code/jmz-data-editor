@@ -17,6 +17,7 @@ import { WorkspaceController } from '../../../src/mapEditor/workspace/WorkspaceC
 import { WorkspaceProvider } from '../../../src/mapEditor/workspace/workspaceHooks.tsx';
 import { buildMapJson } from '../support/fixtures.ts';
 import { createRealDock, type RealDock } from '../support/realDock.ts';
+import { MemoryChannelNetwork } from '../support/standIns.ts';
 
 /*
  * The workspace's chrome owes the author three things at a glance: whether anything is unsaved, and a way to save
@@ -182,6 +183,172 @@ describe('WorkspaceChrome', () =>
       .toBeNull());
   });
 
+  /*
+   * Play starts the project's game, which only the NW.js shell can do, so the button is there only once the shell has
+   * answered the page, however long after the bar first draws that is. The game plays what is on disk: with nothing
+   * unsaved a click plays at once, and with edits not yet saved it asks first, playing only when told to. The button
+   * rests while a Play is on its way, and the notice at the foot says what became of it.
+   */
+  describe('Play', () =>
+  {
+    /**
+     * Renders the bar and the notices over a page's shell on an in-memory shell channel, whose NW.js end the test plays,
+     * and a hub holding one map.
+     * @returns {object} The network, the shell's end of the channel, the requests it heard, and the hub.
+     */
+    const renderWithShell = () =>
+    {
+      const network = new MemoryChannelNetwork();
+      const relay = network.open('jmz-shell');
+      const heard: { type: string; replyTo?: string }[] = [];
+      relay.addEventListener('message', event => heard.push(event.data as { type: string; replyTo?: string }));
+      const shell = new WindowShell({
+        channel: network.open('jmz-shell'),
+        origin: 'http://127.0.0.1:3000',
+        openWindow: () => null,
+        openChannel: name => network.open(name),
+      });
+      const hub = new DocumentHub({ clientId: 'window-a' });
+      hub.adopt('map:2', buildMapJson() as unknown as JsonValue);
+      const services = { hub, shell, api: null } as unknown as MapEditorServices;
+      render(
+        <WorkspaceProvider controller={new WorkspaceController(services)}>
+          <WorkspaceBar onResetLayout={() => undefined}/>
+          <NoticeBar/>
+        </WorkspaceProvider>
+      );
+
+      return { network, relay, heard, hub };
+    };
+
+    /**
+     * Answers the page's hello as the NW.js shell does, and clears what the shell heard so far.
+     * @param {ReturnType<typeof renderWithShell>} rendered The rendered bar and its channel.
+     */
+    const answerHello = (rendered: ReturnType<typeof renderWithShell>) =>
+    {
+      act(() =>
+      {
+        rendered.network.flush();
+        rendered.relay.postMessage({ type: 'shell-ready' });
+        rendered.network.flush();
+      });
+      rendered.heard.length = 0;
+    };
+
+    /**
+     * The play requests the shell heard.
+     * @param {ReturnType<typeof renderWithShell>} rendered The rendered bar and its channel.
+     * @returns {{ type: string, replyTo?: string }[]} The requests.
+     */
+    const playRequests = (rendered: ReturnType<typeof renderWithShell>) =>
+    {
+      act(() =>
+      {
+        rendered.network.flush();
+      });
+      return rendered.heard.filter(request => request.type === 'play');
+    };
+
+    it('has no Play button until the NW.js shell answers, and one from then on', () =>
+    {
+      // Arrange: the bar drawn before the shell's answer is in.
+      const rendered = renderWithShell();
+      const before = screen.queryByRole('button', { name: 'Play' });
+
+      // Act.
+      answerHello(rendered);
+
+      // Assert.
+      expect([ before, screen.queryByRole('button', { name: 'Play' }) !== null ])
+        .toStrictEqual([ null, true ]);
+    });
+
+    it('plays at once with nothing unsaved, resting until the shell says what became of it', async () =>
+    {
+      // Arrange.
+      const rendered = renderWithShell();
+      answerHello(rendered);
+
+      // Act.
+      fireEvent.click(screen.getByRole('button', { name: 'Play' }));
+      const [ request ] = playRequests(rendered);
+      const restingWhileAsked = screen.getByRole('button', { name: 'Play' }).hasAttribute('disabled');
+      act(() =>
+      {
+        rendered.network.open(request.replyTo as string).postMessage({ type: 'play-result', result: 'started' });
+        rendered.network.flush();
+      });
+
+      // Assert.
+      await waitFor(() => expect(screen.getByTestId('workspace-notice').textContent)
+        .toBe('Playing.'));
+      expect([ restingWhileAsked, screen.getByRole('button', { name: 'Play' }).hasAttribute('disabled'), screen.queryByRole('dialog') ])
+        .toStrictEqual([ true, false, null ]);
+    });
+
+    it('asks before playing over unsaved edits, and plays nothing when told not to', () =>
+    {
+      // Arrange: the map edited and not saved.
+      const rendered = renderWithShell();
+      answerHello(rendered);
+      act(() =>
+      {
+        rendered.hub.edit('Rename map', [ mapHistoryKey(2) ], tx => tx.set('map:2', [ 'displayName' ], 'Harbor'));
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'Play' }));
+      const question = within(screen.getByRole('dialog')).getByText('Play without your unsaved changes?') !== null;
+
+      // Act.
+      fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Cancel' }));
+
+      // Assert.
+      expect([ question, playRequests(rendered) ])
+        .toStrictEqual([ true, [] ]);
+    });
+
+    it('puts the question away on Escape, playing nothing', async () =>
+    {
+      // Arrange: the map edited and not saved, and the question asked.
+      const rendered = renderWithShell();
+      answerHello(rendered);
+      act(() =>
+      {
+        rendered.hub.edit('Rename map', [ mapHistoryKey(2) ], tx => tx.set('map:2', [ 'displayName' ], 'Harbor'));
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'Play' }));
+
+      // Act.
+      fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' });
+
+      // Assert.
+      await waitFor(() => expect(screen.queryByRole('dialog'))
+        .toBeNull());
+      expect(playRequests(rendered))
+        .toStrictEqual([]);
+    });
+
+    it('plays over unsaved edits once told to', () =>
+    {
+      // Arrange: the map edited and not saved, and the question asked.
+      const rendered = renderWithShell();
+      answerHello(rendered);
+      act(() =>
+      {
+        rendered.hub.edit('Rename map', [ mapHistoryKey(2) ], tx => tx.set('map:2', [ 'displayName' ], 'Harbor'));
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'Play' }));
+      const before = playRequests(rendered).length;
+
+      // Act.
+      fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Play' }));
+
+      // Assert.
+      expect([ before, playRequests(rendered).length ])
+        .toStrictEqual([ 0, 1 ]);
+    });
+  });
+
   describe('the Panels menu', () =>
   {
     let dock: RealDock;
@@ -202,7 +369,8 @@ describe('WorkspaceChrome', () =>
      */
     const renderWithDock = () =>
     {
-      const services = { hub: new DocumentHub({ clientId: 'window-a' }), api: null } as unknown as MapEditorServices;
+      const shell = new WindowShell({ channel: null, origin: 'http://127.0.0.1:3000', openWindow: () => null });
+      const services = { hub: new DocumentHub({ clientId: 'window-a' }), shell, api: null } as unknown as MapEditorServices;
       const controller = new WorkspaceController(services);
       controller.attach(dock.api);
       controller.collapses.attach(dock.api);
@@ -317,7 +485,8 @@ describe('WorkspaceChrome', () =>
      */
     const renderWithDock = () =>
     {
-      const services = { hub: new DocumentHub({ clientId: 'window-a' }), api: null } as unknown as MapEditorServices;
+      const shell = new WindowShell({ channel: null, origin: 'http://127.0.0.1:3000', openWindow: () => null });
+      const services = { hub: new DocumentHub({ clientId: 'window-a' }), shell, api: null } as unknown as MapEditorServices;
       const controller = new WorkspaceController(services);
       controller.attach(dock.api);
       controller.sides.attach(dock.api);

@@ -1,4 +1,5 @@
 import type { DockviewApi, DockviewGroupPanel, IDockviewPanel } from 'dockview-react';
+import type { PlayResult } from '../../core/infrastructure/shell/WindowShell.ts';
 import { nameInSteps } from '../core/blueprints/blueprintEdits.ts';
 import { blueprintsKeptGuard } from '../core/blueprints/blueprintMoves.ts';
 import { BLUEPRINTS_DOCUMENT, blueprintIn } from '../core/blueprints/blueprints.ts';
@@ -61,6 +62,18 @@ type Notice = {
   readonly id: number;
   readonly text: string;
   readonly severity: NoticeSeverity;
+};
+
+/**
+ * What the workspace says after each Play: news when the game started or was running already, and a refusal when it
+ * did not start, for whatever reason.
+ */
+const PLAY_NOTICES: Readonly<Record<PlayResult, { readonly text: string; readonly severity: NoticeSeverity }>> = {
+  'started': { text: 'Playing.', severity: 'info' },
+  'already-running': { text: 'Already running.', severity: 'info' },
+  'not-a-game': { text: 'This folder isn\'t a game.', severity: 'error' },
+  'failed': { text: 'The game didn\'t start.', severity: 'error' },
+  'unavailable': { text: 'Play isn\'t available right now.', severity: 'error' },
 };
 
 /**
@@ -1006,6 +1019,22 @@ class WorkspaceController
   }
 
   //endregion tree
+
+  //region playing
+
+  /**
+   * Plays the project in test mode through the window's shell, as the bar's Play asks, and says what became of it. The
+   * game plays what is on disk; asking first about edits not yet saved is the bar's part.
+   * @returns {Promise<void>} Settles once the shell has answered, or the wait for it is over; never rejects.
+   */
+  async play(): Promise<void>
+  {
+    const result = await this.services.shell.play();
+    const { text, severity } = PLAY_NOTICES[result];
+    this.notify(text, severity);
+  }
+
+  //endregion playing
 
   //region notices
 
