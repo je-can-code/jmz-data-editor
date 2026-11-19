@@ -14,8 +14,8 @@
  * by name and changes nothing. One that passes becomes ~/.local/jmz-editor/current, the build it replaced is kept as
  * previous, older ones are removed, and the app menu gets an entry that starts it with no terminal. A build something
  * is still running from, such as an editor opened before the install or a rollback started through previous, is never
- * removed or replaced: it stays until an install finds it closed. Running it again with nothing new to install says so
- * and stops.
+ * removed or replaced: it stays until an install finds it closed. Running it again with nothing new to install says so,
+ * puts back the menu entry and the command line link if either one has gone, and stops.
  *
  * Only Bun and Node built-ins are used, nothing from the repo or node_modules, since this file runs far from both.
  */
@@ -756,7 +756,8 @@ const switchTo = (places: InstallPlaces, version: string, staged: StagedBuild, r
 
 /**
  * Writes the command line link and the app menu entry. Both go through the current link, so they follow every later
- * switch without being written again; writing them on every install puts back either one if it was deleted.
+ * switch without being written again; writing them on every run, one with nothing new to install included, puts back
+ * either one if it was deleted, or never written because a run was cut short after switching.
  * @param {InstallPlaces} places Where the install goes.
  */
 const writeMenuEntry = (places: InstallPlaces): void =>
@@ -772,7 +773,8 @@ const writeMenuEntry = (places: InstallPlaces): void =>
 };
 
 /**
- * Installs the build versions.json names, unless it is already the current one.
+ * Installs the build versions.json names. When it is already the current one, only the menu entry and the command line
+ * link are written again, which changes nothing when both are already there.
  * @param {string} buildsFolder The folder holding versions.json and the tarball.
  * @param {string} home The home folder to install into, absolute.
  */
@@ -789,6 +791,8 @@ const install = (buildsFolder: string, home: string): void =>
   const replaced = linkedVersion(places.root, CURRENT_LINK);
   if (replaced === build.version)
   {
+    // a run cut short after switching never wrote these, and every later run lands here, so this is where they return.
+    writeMenuEntry(places);
     console.log(`jmz-editor ${build.version} is already installed.`);
     return;
   }

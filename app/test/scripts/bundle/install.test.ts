@@ -583,5 +583,40 @@ describe('install', () =>
           join(realpathSync(machine.root), FIRST, 'nwjs', 'nw'),
         ]);
     });
+
+    it('puts back the menu entry and the command line link when the build is already the current one', () =>
+    {
+      // Arrange- an installed build whose menu entry and link are gone, as a run cut short after switching leaves it.
+      const machine = laptop();
+      publishBuild(machine, FIRST);
+      install(machine.builds, machine.home);
+      const binLink = join(machine.home, '.local', 'bin', 'jmz-editor');
+      const desktopFile = join(machine.home, '.local', 'share', 'applications', 'jmz-editor.desktop');
+      rmSync(binLink);
+      rmSync(desktopFile);
+      vi.mocked(console.log)
+        .mockClear();
+
+      // Act
+      install(machine.builds, machine.home);
+
+      // Assert
+      expect([ vi.mocked(console.log).mock.calls, readlinkSync(binLink), readFileSync(desktopFile, 'utf8').split('\n') ])
+        .toEqual([
+          [ [ `jmz-editor ${FIRST} is already installed.` ] ],
+          join(machine.root, 'current', 'jmz-editor'),
+          [
+            '[Desktop Entry]',
+            'Type=Application',
+            'Name=JMZ Editor',
+            'Comment=Edit and playtest an RPG Maker MZ project',
+            `Exec=${binLink}`,
+            `Icon=${join(machine.root, 'current', 'ui', 'favicon.ico')}`,
+            'Terminal=false',
+            'Categories=Development;',
+            '',
+          ],
+        ]);
+    });
   });
 });
