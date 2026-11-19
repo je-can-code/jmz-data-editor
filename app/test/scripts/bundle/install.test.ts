@@ -27,6 +27,7 @@ import {
   prunable,
   readPublishedBuild,
   Refusal,
+  switchRefusal,
 } from '../../../../scripts/bundle/install.ts';
 
 /*
@@ -513,29 +514,56 @@ describe('install', () =>
       ];
 
       // Act
-      const inUse = foldersInUse(root, entries, { readable: true, executables });
+      const inUse = foldersInUse(root, entries, executables);
 
       // Assert
       expect(inUse)
         .toEqual([ '20261119.0100-abc1234-dirty', '.incoming-x1y2z3' ]);
     });
+  });
 
-    it('counts every folder as in use when /proc could not be read, and never a link', () =>
+  describe('switchRefusal', () =>
+  {
+    it('refuses whenever /proc could not be listed, since nothing then shows which builds are running', () =>
     {
-      // Arrange- both links and two builds, with nothing known about what runs.
-      const entries = [
-        { name: 'current', isFolder: false },
-        { name: 'previous', isFolder: false },
-        { name: '20261119.0100-ccc', isFolder: true },
-        { name: '20261118.2200-aaa', isFolder: true },
-      ];
+      // Arrange- /proc not listed, so no program is known to run from any folder, the version's own included.
+      const running = { readable: false, executables: [] };
 
       // Act
-      const inUse = foldersInUse('/home/je/.local/jmz-editor', entries, { readable: false, executables: [] });
+      const refusal = switchRefusal(running, [], VERSION, `/home/je/.local/jmz-editor/${VERSION}`);
 
       // Assert
-      expect(inUse)
-        .toEqual([ '20261119.0100-ccc', '20261118.2200-aaa' ]);
+      expect(refusal)
+        .toBe('/proc could not be listed, so this cannot tell which builds are running, and it removes or replaces none'
+          + ' without knowing. Check that /proc is mounted, then run this again.');
+    });
+
+    it('refuses a build whose version is running from the folder it would take', () =>
+    {
+      // Arrange- the version itself in use, as a rollback started through previous is, beside an older build in use.
+      const destination = `/home/je/.local/jmz-editor/${VERSION}`;
+      const running = { readable: true, executables: [ `${destination}/nwjs/nw` ] };
+
+      // Act
+      const refusal = switchRefusal(running, [ '20261118.2200-aaa', VERSION ], VERSION, destination);
+
+      // Assert
+      expect(refusal)
+        .toBe('jmz-editor 20261119.0100-abc1234 is running from /home/je/.local/jmz-editor/20261119.0100-abc1234.'
+          + ' Close it, then run this again.');
+    });
+
+    it('lets a build through when /proc was listed and nothing runs from the folder it would take', () =>
+    {
+      // Arrange- another build in use, whose name the version's begins.
+      const running = { readable: true, executables: [ `/home/je/.local/jmz-editor/${VERSION}-dirty/nwjs/nw` ] };
+
+      // Act
+      const refusal = switchRefusal(running, [ `${VERSION}-dirty` ], VERSION, `/home/je/.local/jmz-editor/${VERSION}`);
+
+      // Assert
+      expect(refusal)
+        .toBe('');
     });
   });
 

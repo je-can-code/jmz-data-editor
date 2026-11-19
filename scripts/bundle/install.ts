@@ -220,6 +220,12 @@ type StagedBuild = {
    * The staging folder it was unpacked in, beside the tarball's local copy, inside the install folder.
    */
   readonly incoming: string;
+
+  /**
+   * The outermost folder the run made to hold the staging folder: the install folder itself on a first install, or
+   * empty when it was already there.
+   */
+  readonly made: string;
 };
 
 /**
@@ -242,7 +248,7 @@ type InstallEntry = {
  */
 type RunningPrograms = {
   /**
-   * False when /proc could not be read at all, so nothing can be shown not to be running.
+   * False when /proc could not be listed, so nothing can be shown not to be running, and an install is refused.
    */
   readonly readable: boolean;
 
@@ -396,22 +402,51 @@ const desktopEntry = (launcher: string, icon: string): string =>
  * Names the folders in the install folder that something is running from. The editor's NW.js, its API and a playtest
  * each run from inside the build that holds them, so a build with any of them running is in use, whichever link it was
  * started through. A folder is matched by its whole name, never by how a path starts, since one version's name can
- * begin another's, as 20261119.0100-abc1234 begins 20261119.0100-abc1234-dirty. When /proc could not be read, every
- * folder counts as in use, since none can be shown free.
+ * begin another's, as 20261119.0100-abc1234 begins 20261119.0100-abc1234-dirty.
  * @param {string} root The install folder's real path, since /proc names every executable by its real path.
  * @param {InstallEntry[]} entries Everything in the install folder.
- * @param {RunningPrograms} running What is running.
+ * @param {string[]} executables The real path of every running program's executable.
  * @returns {string[]} The names of the folders in use.
  */
-const foldersInUse = (root: string, entries: InstallEntry[], running: RunningPrograms): string[] =>
+const foldersInUse = (root: string, entries: InstallEntry[], executables: string[]): string[] =>
 {
   // an executable's path inside the install folder starts with the folder it runs from, while the path of one outside
-  // it starts by climbing out, which no folder in it is named.
-  const runFrom = running.executables.map(executable => relative(root, executable))
+  // it starts by climbing out, which no folder in it is named. A real path never runs through a link, so no link is
+  // ever named either.
+  const runFrom = executables.map(executable => relative(root, executable))
     .map(path => path.split(sep)[0]);
 
-  return entries.filter(entry => entry.isFolder && (running.readable === false || runFrom.includes(entry.name)))
+  return entries.filter(entry => runFrom.includes(entry.name))
     .map(entry => entry.name);
+};
+
+/**
+ * Says why a tried build cannot be switched to, or nothing when it can. A switch replaces one folder and prunes
+ * others, and neither is done to a build something is running from, so neither is done without knowing what runs:
+ * when /proc could not be listed, the install is refused rather than carried out blind. And a build of the version a
+ * program is running from, as a rollback started through previous is, cannot take that build's place.
+ * @param {RunningPrograms} running What is running.
+ * @param {string[]} inUse The folders something is running from, as foldersInUse names them.
+ * @param {string} version The tried build's version.
+ * @param {string} destination Where the build would go.
+ * @returns {string} Why it cannot be switched to, or empty when it can.
+ */
+const switchRefusal = (running: RunningPrograms, inUse: string[], version: string, destination: string): string =>
+{
+  if (running.readable === false)
+  {
+    return [
+      `${PROC} could not be listed, so this cannot tell which builds are running, and it removes or replaces none`,
+      `without knowing. Check that ${PROC} is mounted, then run this again.`,
+    ].join(' ');
+  }
+
+  if (inUse.includes(version))
+  {
+    return `jmz-editor ${version} is running from ${destination}. Close it, then run this again.`;
+  }
+
+  return '';
 };
 
 /**
@@ -493,25 +528,26 @@ const executableOf = (id: string): string[] =>
 
 /**
  * Reads what is running from /proc: the executable of every process, which is how a build folder is known to be in
- * use.
+ * use. A single process whose executable cannot be read is passed over, but a /proc that cannot be listed says nothing
+ * about what runs, and is reported as such.
  * @returns {RunningPrograms} What is running.
  */
 const runningPrograms = (): RunningPrograms =>
 {
-  // the installer is running too, so a /proc that cannot name the installer's own executable cannot be read at all.
+  // the installer is running too, so a /proc that cannot name the installer's own executable, as one that is not
+  // mounted cannot, lists nothing that can be trusted.
   try
   {
     readlinkSync(join(PROC, 'self', 'exe'));
+    const executables = readdirSync(PROC)
+      .filter(name => PROCESS_ID.test(name))
+      .flatMap(executableOf);
+    return { readable: true, executables };
   }
   catch
   {
     return { readable: false, executables: [] };
   }
-
-  const executables = readdirSync(PROC)
-    .filter(name => PROCESS_ID.test(name))
-    .flatMap(executableOf);
-  return { readable: true, executables };
 };
 
 /**
@@ -709,6 +745,20 @@ const tryBuild = (build: string, version: string): void =>
 };
 
 /**
+ * Takes away what a run made to stage a build it will not switch to, so a refused build leaves nothing behind: the
+ * install folder too when the run made it, as a first install does, and otherwise the staging folder alone.
+ * @param {string} made The outermost folder the run made to hold the staging folder, or empty.
+ * @param {string} incoming The staging folder.
+ */
+const unstage = (made: string, incoming: string): void =>
+{
+  const ownFolder = made === ''
+    ? incoming
+    : made;
+  rmSync(ownFolder, { recursive: true, force: true });
+};
+
+/**
  * Copies the tarball off the share into a staging folder of its own inside the install folder, checks it, unpacks it
  * there, and tries the build. A refusal at any point takes away everything this made, the install folder too when this
  * made it. Nothing is staged in the system's temporary folder, which is RAM on these machines: a run cut short by
@@ -751,23 +801,20 @@ const stage = (buildsFolder: string, build: PublishedBuild, root: string): Stage
     mkdirSync(unpacked);
     const folder = unpack(local, unpacked, build.version);
     tryBuild(folder, build.version);
-    return { folder, incoming };
+    return { folder, incoming, made };
   }
   catch (error)
   {
-    // a refused build leaves nothing behind: its staging folder goes, and so does every folder made to hold it.
-    const ownFolder = made === ''
-      ? incoming
-      : made;
-    rmSync(ownFolder, { recursive: true, force: true });
+    unstage(made, incoming);
     throw error;
   }
 };
 
 /**
  * Moves a tried build into place and switches to it, keeps the build it replaced as previous, and removes the rest,
- * except any build something is still running from. A build of the same version that something is running from is
- * refused rather than replaced, with the tried build taken away again, so nothing has changed.
+ * except any build something is still running from. When what runs cannot be told, or a build of the same version is
+ * running, the switch is refused rather than made, with everything staged for it taken away again, so nothing has
+ * changed.
  * @param {InstallPlaces} places Where the install goes.
  * @param {string} version The build's version.
  * @param {StagedBuild} staged The tried build.
@@ -777,16 +824,18 @@ const stage = (buildsFolder: string, build: PublishedBuild, root: string): Stage
 const switchTo = (places: InstallPlaces, version: string, staged: StagedBuild, replaced: string): string[] =>
 {
   // what is running is read once, just before anything moves, and decides both what may be replaced and what may go.
-  const inUse = foldersInUse(realpathSync(places.root), entriesIn(places.root), runningPrograms());
+  const running = runningPrograms();
+  const inUse = foldersInUse(realpathSync(places.root), entriesIn(places.root), running.executables);
 
   // a folder of the same version can only be a previous build or one an earlier run left, never the current one. A
   // previous build can be running, started through previous to go back, and its files are never pulled out from under
   // it.
   const destination = join(places.root, version);
-  if (inUse.includes(version))
+  const refusal = switchRefusal(running, inUse, version, destination);
+  if (refusal !== '')
   {
-    rmSync(staged.incoming, { recursive: true, force: true });
-    throw new Refusal(`jmz-editor ${version} is running from ${destination}. Close it, then run this again.`);
+    unstage(staged.made, staged.incoming);
+    throw new Refusal(refusal);
   }
   rmSync(destination, { recursive: true, force: true });
   renameSync(staged.folder, destination);
@@ -1035,5 +1084,6 @@ export {
   prunable,
   readPublishedBuild,
   Refusal,
+  switchRefusal,
 };
 export type { InstallEntry, PublishedBuild, RunningPrograms };
