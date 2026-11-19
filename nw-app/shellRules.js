@@ -692,9 +692,8 @@ function healthProjectRoot(answer)
  * went wrong.
  *
  * Whatever the person can put right themselves ends by asking them to close this window before opening the editor
- * again. The checks run only as the editor starts, and while this window is up the editor is still running: opening it
- * again hands the launch over to this copy, which brings this window forward and checks nothing, so the fix would look
- * as though it had failed.
+ * again, so the editor starts afresh and runs every check again. Opening it with this window still up hands the launch
+ * over to this copy, which runs the checks again as well, but closing first is the instruction that always holds.
  */
 const PROBLEMS = {
   'no-project': {

@@ -30,7 +30,8 @@
 // stops it on the way goes in a small error window naming the log that says more, since a desktop launch has no
 // terminal. The API's output is appended to a log of its own, and the API ends with the shell however the shell ends:
 // it reads its stdin, a pipe the shell holds open for the life of the app. A second launch hands itself over to the
-// first, which brings its window forward.
+// first, which brings its window forward, or, when its checks stopped it before anything started, runs them again: the
+// person has likely just put right what its error window named.
 //
 // Flags, read from nw.App.argv (under NW.js, process.argv holds only the binary's path):
 //   --project-root <path>   the RMMZ project, handed to the Go API
@@ -313,6 +314,14 @@ let problemsOpening = 0;
 
 // the first page's window, once the windows can open: a second launch of a bundle brings it forward.
 let bootWindow = null;
+
+// set while a bundle's start stands stopped at its checks, which come before its API starts or any window but the error
+// window opens: a second launch then runs the checks again.
+let stoppedAtChecks = false;
+
+// the error windows a stopped start left on screen, which the next start replaces: each closes once the window taking
+// its place is on its way, since closing the last window quits the app.
+let replacedProblems = [];
 
 // held for the life of the app, so the channel is never collected.
 let shellChannel = null;
@@ -659,6 +668,17 @@ function showProblem(text)
 }
 
 /**
+ * Closes the error windows a new start replaces, once the window taking their place is on its way and keeps the app
+ * open in their stead.
+ */
+function closeReplacedProblems()
+{
+  const replaced = replacedProblems;
+  replacedProblems = [];
+  replaced.forEach(win => win.close(true));
+}
+
+/**
  * Opens the error window explaining that no project is configured for the dev stack.
  */
 function showMissingProjectRoot()
@@ -710,6 +730,9 @@ function openFirstWindow(uiUrl, apiBase)
   {
     bootWindow = { url: `${uiUrl}${rules.bootPath(argv, bundled)}`, ...size };
     openWindow(bootWindow.url, size.width, size.height);
+
+    // the first page's window is on its way, so the error windows of a start that stopped before it can go.
+    closeReplacedProblems();
   });
 }
 
@@ -840,20 +863,57 @@ function reportProblem(problem, found)
   log('problem', { problem });
   const files = { config: userFiles.config, apiLog: userFiles.apiLog, shellLog: logPath };
   showProblem(rules.problemText(problem, { ...found, ...files }));
+
+  // this window is on its way, so the error windows of a start that stopped before this one can go.
+  closeReplacedProblems();
+}
+
+/**
+ * Stops the bundled editor's start at its checks, before any API starts, and says why. The person is asked to put it
+ * right, and may well open the editor again while this copy still runs, so a relaunch runs the checks again.
+ * @param {string} problem What stopped it, one of the problems the rules word.
+ * @param {{ projectRoot: string, port: number }} found The project and the port.
+ */
+function stopAtChecks(problem, found)
+{
+  reportProblem(problem, found);
+  stoppedAtChecks = true;
+}
+
+/**
+ * Runs the bundled editor's start again, for a relaunch after its checks stopped it, on this copy's own flags and the
+ * config as it reads now. The error windows on screen stay up until the window taking their place is on its way, the
+ * editor's or a fresh error window, since closing the last window quits the app.
+ */
+function runAgain()
+{
+  stoppedAtChecks = false;
+  replacedProblems = [ ...problemWindows ];
+  runBundle().catch(crashed);
 }
 
 /**
  * Brings the bundled editor forward when it is launched again. The second launch finds this one holding the profile,
- * hands over its command line and exits, and the person expects the editor already open to come to the front: an error
- * window first, since it says what is wrong, and otherwise the first page's window, opened again when it was closed.
- * Before the windows can open, the first one is on its way already. What the second launch asked for is only logged:
- * this copy stays on its own project.
+ * hands over its command line and exits, and the person expects the editor already open to come to the front. When the
+ * checks stopped this copy's start, nothing but its error window is open, and the person has likely just put right what
+ * that window named, so the checks run again and their window, the editor's or a fresh error window, takes its place.
+ * Otherwise an error window comes forward first, since it says what is wrong, and then the first page's window, opened
+ * again when it was closed; before the windows can open, the first one is on its way already. What the second launch
+ * asked for is only logged: this copy stays on its own flags.
  * @param {string | string[]} commandLine The second launch's command line, as NW.js hands it over (0.118 wraps it in
  * an array).
  */
 function bringForward(commandLine)
 {
   log('relaunch', { commandLine });
+
+  // the error window must be on screen to be replaced: one still opening could not be closed, and would stay up.
+  if (stoppedAtChecks && problemsOpening === 0)
+  {
+    runAgain();
+    return;
+  }
+
   const [ problem ] = problemWindows;
   if (problem !== undefined)
   {
@@ -868,8 +928,7 @@ function bringForward(commandLine)
 }
 
 /**
- * Starts the bundled editor: reads the person's config, checks the project and the port, starts the bundle's API,
- * waits for it to be ready, and opens the first window. Whatever stops it on the way is shown in the error window.
+ * Starts the bundled editor: listens for a second launch, makes the folders its logs live in, and runs its start.
  * @returns {Promise<void>} Settles once the first window is on its way, or an error window is.
  */
 async function startBundle()
@@ -881,6 +940,17 @@ async function startBundle()
   fs.mkdirSync(path.dirname(userFiles.apiLog), { recursive: true });
   fs.mkdirSync(path.dirname(logPath), { recursive: true });
 
+  await runBundle();
+}
+
+/**
+ * Runs the bundled editor's start: reads the person's config, checks the project and the port, starts the bundle's
+ * API, waits for it to be ready, and opens the first window. Whatever stops it on the way is shown in the error window,
+ * and a relaunch runs it again when the checks stopped it, since nothing had started yet.
+ * @returns {Promise<void>} Settles once the first window is on its way, or an error window is.
+ */
+async function runBundle()
+{
   const layout = rules.bundleLayout(__dirname);
   const manifest = JSON.parse(fs.readFileSync(layout.manifest, 'utf-8'));
   const config = rules.parseBundleConfig(readConfigText(userFiles.config), os.homedir());
@@ -896,7 +966,7 @@ async function startBundle()
 
   if (config === null)
   {
-    reportProblem('bad-config', found);
+    stopAtChecks('bad-config', found);
     return;
   }
 
@@ -904,14 +974,14 @@ async function startBundle()
   const rootProblem = rules.projectRootProblem(projectRoot, fs.existsSync);
   if (rootProblem !== null)
   {
-    reportProblem(rootProblem, found);
+    stopAtChecks(rootProblem, found);
     return;
   }
 
   // a port another program holds would stop the API at once; saying so names the actual problem.
   if (await isPortTaken(port))
   {
-    reportProblem('port-in-use', found);
+    stopAtChecks('port-in-use', found);
     return;
   }
 
@@ -1025,12 +1095,16 @@ async function main()
   await startDev();
 }
 
-main().catch((error) =>
+/**
+ * Ends what a start that crashed had started. A bundle has no terminal, so its crash is shown in the error window
+ * rather than the app quitting without a word; the dev stack quits.
+ * @param {unknown} error What the start threw.
+ */
+function crashed(error)
 {
   log('crash', { error: String(error) });
   shutdown();
 
-  // a bundle has no terminal, so its crash is shown rather than the app quitting without a word.
   if (bundled)
   {
     reportProblem('crashed', { projectRoot: '', port: 0 });
@@ -1038,4 +1112,6 @@ main().catch((error) =>
   }
 
   nw.App.quit();
-});
+}
+
+main().catch(crashed);
