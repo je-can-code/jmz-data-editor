@@ -6,20 +6,28 @@
  *
  * It runs from the builds folder rather than from a checkout because publishing copies it there beside the tarball and
  * the versions.json it reads, so the three always match, and it finds them beside itself. The share mounts with every
- * execute bit off, so nothing runs from it: the tarball is copied to a local temporary folder and checked against its
- * SHA-256 there, and every mode comes from the archive.
+ * execute bit off, so nothing runs from it: the tarball is copied into a staging folder inside the install folder and
+ * checked against its SHA-256 there, and every mode comes from the archive.
  *
  * A new build is tried before anything switches to it. Its API has to report the version versions.json names, and
  * NW.js and every library beside it have to find what they load on this machine. A build that fails either is refused
  * by name and changes nothing. One that passes becomes ~/.local/jmz-editor/current, the build it replaced is kept as
- * previous, older ones are removed, and the app menu gets an entry that starts it with no terminal. Running it again
- * with nothing new to install says so and stops.
+ * previous, older ones are removed, and the app menu gets an entry that starts it with no terminal. A build something
+ * is still running from, such as an editor opened before the install or a rollback started through previous, is never
+ * removed or replaced: it stays until an install finds it closed. Running it again with nothing new to install says so,
+ * puts back the menu entry and the command line link if either one has gone, and stops.
+ *
+ * One run installs at a time. A run holds a lock beside the install folder from start to end, so one started meanwhile,
+ * as from a second SSH session, refuses rather than prune the first one's staging folder; a lock whose run was cut
+ * short is taken over.
  *
  * Only Bun and Node built-ins are used, nothing from the repo or node_modules, since this file runs far from both.
  */
 import { spawnSync, type SpawnSyncReturns } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
+  accessSync,
+  constants,
   copyFileSync,
   existsSync,
   mkdirSync,
@@ -27,13 +35,15 @@ import {
   readdirSync,
   readFileSync,
   readlinkSync,
+  realpathSync,
   renameSync,
+  rmdirSync,
   rmSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
-import { homedir, tmpdir } from 'node:os';
-import { basename, dirname, join, resolve } from 'node:path';
+import { homedir } from 'node:os';
+import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 /**
@@ -53,6 +63,12 @@ const VERSIONS_FILE = 'versions.json';
 const INSTALL_FOLDER = '.local/jmz-editor';
 
 /**
+ * The lock a run holds while it installs, under the home folder. It sits beside the install folder rather than in it,
+ * since a refused first install removes the install folder, and the lock has to outlast that.
+ */
+const LOCK_FILE = '.local/jmz-editor.lock';
+
+/**
  * The link naming the build in use.
  */
 const CURRENT_LINK = 'current';
@@ -63,10 +79,17 @@ const CURRENT_LINK = 'current';
 const PREVIOUS_LINK = 'previous';
 
 /**
- * The start of the name of the folder a build is unpacked into to be tried. It sits inside the install folder, so
- * moving a build into place is a rename and never a copy.
+ * The start of the name of the folder a build is staged in to be tried: the tarball's local copy, and the build
+ * unpacked from it. It sits inside the install folder, so moving a build into place is a rename and never a copy, and
+ * so one a run cut short leaves behind is a folder the next install prunes, never memory held in the system's
+ * temporary folder.
  */
 const INCOMING_PREFIX = '.incoming-';
+
+/**
+ * The folder inside a staging folder that the build is unpacked into, beside the tarball's local copy.
+ */
+const UNPACKED_FOLDER = 'unpacked';
 
 /**
  * The start of the name of the one folder a bundle's tarball holds, which ends in the build's version.
@@ -112,6 +135,16 @@ const DESKTOP_FILE = '.local/share/applications/jmz-editor.desktop';
  * How long the API gets to answer -version before its build is refused, so a build that hangs cannot hang the install.
  */
 const VERSION_TIMEOUT_MS = 10_000;
+
+/**
+ * The folder Linux describes every running process in, one folder per process id.
+ */
+const PROC = '/proc';
+
+/**
+ * What a process's folder in /proc is named: its id, and nothing else.
+ */
+const PROCESS_ID = /^\d+$/u;
 
 /**
  * What a version and a tarball's name may look like: a plain file name, never a hidden one or a path, since a version
@@ -167,6 +200,11 @@ type InstallPlaces = {
    * The app menu entry.
    */
   readonly desktopFile: string;
+
+  /**
+   * The lock a run holds while it installs, holding its process id.
+   */
+  readonly lock: string;
 };
 
 /**
@@ -179,9 +217,15 @@ type StagedBuild = {
   readonly folder: string;
 
   /**
-   * The folder it was unpacked into, inside the install folder.
+   * The staging folder it was unpacked in, beside the tarball's local copy, inside the install folder.
    */
   readonly incoming: string;
+
+  /**
+   * The outermost folder the run made to hold the staging folder: the install folder itself on a first install, or
+   * empty when it was already there.
+   */
+  readonly made: string;
 };
 
 /**
@@ -197,6 +241,21 @@ type InstallEntry = {
    * True for a real folder; false for a link or a file, which pruning never touches.
    */
   readonly isFolder: boolean;
+};
+
+/**
+ * What is running on this machine, as /proc tells it.
+ */
+type RunningPrograms = {
+  /**
+   * False when /proc could not be listed, so nothing can be shown not to be running, and an install is refused.
+   */
+  readonly readable: boolean;
+
+  /**
+   * The executable of every running program /proc would name, each by the real path the system keeps for it.
+   */
+  readonly executables: string[];
 };
 
 /**
@@ -340,16 +399,70 @@ const desktopEntry = (launcher: string, icon: string): string =>
 };
 
 /**
+ * Names the folders in the install folder that something is running from. The editor's NW.js, its API and a playtest
+ * each run from inside the build that holds them, so a build with any of them running is in use, whichever link it was
+ * started through. A folder is matched by its whole name, never by how a path starts, since one version's name can
+ * begin another's, as 20261119.0100-abc1234 begins 20261119.0100-abc1234-dirty.
+ * @param {string} root The install folder's real path, since /proc names every executable by its real path.
+ * @param {InstallEntry[]} entries Everything in the install folder.
+ * @param {string[]} executables The real path of every running program's executable.
+ * @returns {string[]} The names of the folders in use.
+ */
+const foldersInUse = (root: string, entries: InstallEntry[], executables: string[]): string[] =>
+{
+  // an executable's path inside the install folder starts with the folder it runs from, while the path of one outside
+  // it starts by climbing out, which no folder in it is named. A real path never runs through a link, so no link is
+  // ever named either.
+  const runFrom = executables.map(executable => relative(root, executable))
+    .map(path => path.split(sep)[0]);
+
+  return entries.filter(entry => runFrom.includes(entry.name))
+    .map(entry => entry.name);
+};
+
+/**
+ * Says why a tried build cannot be switched to, or nothing when it can. A switch replaces one folder and prunes
+ * others, and neither is done to a build something is running from, so neither is done without knowing what runs:
+ * when /proc could not be listed, the install is refused rather than carried out blind. And a build of the version a
+ * program is running from, as a rollback started through previous is, cannot take that build's place.
+ * @param {RunningPrograms} running What is running.
+ * @param {string[]} inUse The folders something is running from, as foldersInUse names them.
+ * @param {string} version The tried build's version.
+ * @param {string} destination Where the build would go.
+ * @returns {string} Why it cannot be switched to, or empty when it can.
+ */
+const switchRefusal = (running: RunningPrograms, inUse: string[], version: string, destination: string): string =>
+{
+  if (running.readable === false)
+  {
+    return [
+      `${PROC} could not be listed, so this cannot tell which builds are running, and it removes or replaces none`,
+      `without knowing. Check that ${PROC} is mounted, then run this again.`,
+    ].join(' ');
+  }
+
+  if (inUse.includes(version))
+  {
+    return `jmz-editor ${version} is running from ${destination}. Close it, then run this again.`;
+  }
+
+  return '';
+};
+
+/**
  * Names what to remove from the install folder once a build has been switched to: every build folder but the current
- * and previous ones, and every folder a run that stopped part-way left behind. Links are never removed, so neither
- * current nor previous can ever be.
+ * and previous ones, and every folder a run that stopped part-way left behind, unless something is running from it.
+ * Links are never removed, so neither current nor previous can ever be.
  * @param {InstallEntry[]} entries Everything in the install folder.
  * @param {string[]} kept The builds to keep: the current one, and the previous one when there is one.
+ * @param {string[]} inUse The folders something is running from, as foldersInUse names them.
  * @returns {string[]} The names to remove.
  */
-const prunable = (entries: InstallEntry[], kept: string[]): string[] =>
+const prunable = (entries: InstallEntry[], kept: string[], inUse: string[]): string[] =>
 {
-  return entries.filter(entry => entry.isFolder && kept.includes(entry.name) === false)
+  return entries.filter(entry => entry.isFolder
+    && kept.includes(entry.name) === false
+    && inUse.includes(entry.name) === false)
     .map(entry => entry.name);
 };
 
@@ -364,6 +477,7 @@ const placesIn = (home: string): InstallPlaces =>
     root: join(home, INSTALL_FOLDER),
     binLink: join(home, BIN_FOLDER, LAUNCHER),
     desktopFile: join(home, DESKTOP_FILE),
+    lock: join(home, LOCK_FILE),
   };
 };
 
@@ -380,6 +494,60 @@ const linkedVersion = (root: string, link: string): string =>
   return existsSync(path)
     ? basename(readlinkSync(path))
     : '';
+};
+
+/**
+ * Lists everything in the install folder, as pruning and the in-use rule see it.
+ * @param {string} root The install folder.
+ * @returns {InstallEntry[]} Each thing in it.
+ */
+const entriesIn = (root: string): InstallEntry[] =>
+{
+  return readdirSync(root, { withFileTypes: true })
+    .map(entry => ({ name: entry.name, isFolder: entry.isDirectory() }));
+};
+
+/**
+ * Reads one process's executable from /proc.
+ * @param {string} id The process's id.
+ * @returns {string[]} The executable's real path, or nothing for a process that has ended since it was listed, that
+ * is part of the kernel, or that belongs to another user. The editor and everything it starts run as the same user as
+ * the installer, so none of those can be one of them.
+ */
+const executableOf = (id: string): string[] =>
+{
+  try
+  {
+    return [ readlinkSync(join(PROC, id, 'exe')) ];
+  }
+  catch
+  {
+    return [];
+  }
+};
+
+/**
+ * Reads what is running from /proc: the executable of every process, which is how a build folder is known to be in
+ * use. A single process whose executable cannot be read is passed over, but a /proc that cannot be listed says nothing
+ * about what runs, and is reported as such.
+ * @returns {RunningPrograms} What is running.
+ */
+const runningPrograms = (): RunningPrograms =>
+{
+  // the installer is running too, so a /proc that cannot name the installer's own executable, as one that is not
+  // mounted cannot, lists nothing that can be trusted.
+  try
+  {
+    readlinkSync(join(PROC, 'self', 'exe'));
+    const executables = readdirSync(PROC)
+      .filter(name => PROCESS_ID.test(name))
+      .flatMap(executableOf);
+    return { readable: true, executables };
+  }
+  catch
+  {
+    return { readable: false, executables: [] };
+  }
 };
 
 /**
@@ -513,17 +681,44 @@ const missingFromMachine = (build: string): string[] =>
 };
 
 /**
- * Tries a build before anything switches to it: it has its launcher, its API reports the version versions.json names,
- * and NW.js and every library beside it find what they load on this machine.
+ * Says why a file in a build cannot be run, or nothing when it can.
+ * @param {string} path The file.
+ * @param {string} name What a refusal calls it.
+ * @returns {string} Why it cannot be run, or empty when it can.
+ */
+const whyNotRunnable = (path: string, name: string): string =>
+{
+  try
+  {
+    accessSync(path, constants.X_OK);
+    return '';
+  }
+  catch (error)
+  {
+    return (error as NodeJS.ErrnoException).code === 'ENOENT'
+      ? `The build has no ${name}.`
+      : `The build's ${name} is not executable.`;
+  }
+};
+
+/**
+ * Tries a build before anything switches to it: its launcher and NW.js can be run, its API reports the version
+ * versions.json names, and NW.js and every library beside it find what they load on this machine.
  * @param {string} build The build's folder.
  * @param {string} version The version versions.json names.
  */
 const tryBuild = (build: string, version: string): void =>
 {
-  // the menu entry and the command line link both start the launcher, so a build without one cannot be started.
-  if (existsSync(join(build, LAUNCHER)) === false)
+  // the menu entry and the command line link both start the launcher, which starts NW.js, so a build cannot be started
+  // without both. Each has to be runnable too: one that lost its execute bit passes every check after this one, ldd's
+  // included, then fails from the menu, where there is no terminal to say why.
+  const unrunnable = [
+    whyNotRunnable(join(build, LAUNCHER), `${LAUNCHER} launcher`),
+    whyNotRunnable(join(build, NWJS), NWJS),
+  ].filter(problem => problem !== '');
+  if (unrunnable.length > 0)
   {
-    throw new Refusal(`The build has no ${LAUNCHER} launcher.`);
+    throw new Refusal(unrunnable.join('\n'));
   }
 
   // the API answers -version before it reads any configuration, so it can be asked on a machine with no project open.
@@ -550,8 +745,25 @@ const tryBuild = (build: string, version: string): void =>
 };
 
 /**
- * Copies the tarball off the share, checks it, unpacks it into the install folder off to one side, and tries the
- * build there. A refusal at any point takes away everything this made, the install folder too when this made it.
+ * Takes away what a run made to stage a build it will not switch to, so a refused build leaves nothing behind: the
+ * install folder too when the run made it, as a first install does, and otherwise the staging folder alone.
+ * @param {string} made The outermost folder the run made to hold the staging folder, or empty.
+ * @param {string} incoming The staging folder.
+ */
+const unstage = (made: string, incoming: string): void =>
+{
+  const ownFolder = made === ''
+    ? incoming
+    : made;
+  rmSync(ownFolder, { recursive: true, force: true });
+};
+
+/**
+ * Copies the tarball off the share into a staging folder of its own inside the install folder, checks it, unpacks it
+ * there, and tries the build. A refusal at any point takes away everything this made, the install folder too when this
+ * made it. Nothing is staged in the system's temporary folder, which is RAM on these machines: a run cut short by
+ * Ctrl-C or a dropped SSH session skips every clean-up, so a tarball staged there would hold that memory until the
+ * machine restarts, while a staging folder left in the install folder is one the next install prunes.
  * @param {string} buildsFolder The folder holding versions.json and the tarball.
  * @param {PublishedBuild} build The build versions.json names.
  * @param {string} root The install folder.
@@ -565,11 +777,15 @@ const stage = (buildsFolder: string, build: PublishedBuild, root: string): Stage
     throw new Refusal(`The builds folder has no ${build.file}.`);
   }
 
-  // the share is read once, and what gets checked is exactly what gets unpacked.
-  const temporary = mkdtempSync(join(tmpdir(), 'jmz-editor-install-'));
+  const made = outermostMissingFolder(root);
+  mkdirSync(root, { recursive: true });
+  const incoming = mkdtempSync(join(root, INCOMING_PREFIX));
   try
   {
-    const local = join(temporary, build.file);
+    // the share is read once, and what gets checked is exactly what gets unpacked. The copy is the long wait of an
+    // install and prints nothing of its own, so it is announced, lest it look hung.
+    const local = join(incoming, build.file);
+    console.log(`Copying jmz-editor ${build.version} and trying it. This can take a minute.`);
     copyFileSync(tarball, local);
     const digest = sha256Of(local);
     if (digest !== build.sha256)
@@ -580,33 +796,25 @@ const stage = (buildsFolder: string, build: PublishedBuild, root: string): Stage
       ].join('\n'));
     }
 
-    const made = outermostMissingFolder(root);
-    mkdirSync(root, { recursive: true });
-    const incoming = mkdtempSync(join(root, INCOMING_PREFIX));
-    try
-    {
-      const folder = unpack(local, incoming, build.version);
-      tryBuild(folder, build.version);
-      return { folder, incoming };
-    }
-    catch (error)
-    {
-      // a refused build leaves nothing behind: its folder goes, and so does every folder made to hold it.
-      const ownFolder = made === ''
-        ? incoming
-        : made;
-      rmSync(ownFolder, { recursive: true, force: true });
-      throw error;
-    }
+    // the build unpacks into a folder of its own beside the tarball, since unpacking checks it holds nothing else.
+    const unpacked = join(incoming, UNPACKED_FOLDER);
+    mkdirSync(unpacked);
+    const folder = unpack(local, unpacked, build.version);
+    tryBuild(folder, build.version);
+    return { folder, incoming, made };
   }
-  finally
+  catch (error)
   {
-    rmSync(temporary, { recursive: true, force: true });
+    unstage(made, incoming);
+    throw error;
   }
 };
 
 /**
- * Moves a tried build into place and switches to it, keeps the build it replaced as previous, and removes the rest.
+ * Moves a tried build into place and switches to it, keeps the build it replaced as previous, and removes the rest,
+ * except any build something is still running from. When what runs cannot be told, or a build of the same version is
+ * running, the switch is refused rather than made, with everything staged for it taken away again, so nothing has
+ * changed.
  * @param {InstallPlaces} places Where the install goes.
  * @param {string} version The build's version.
  * @param {StagedBuild} staged The tried build.
@@ -615,8 +823,20 @@ const stage = (buildsFolder: string, build: PublishedBuild, root: string): Stage
  */
 const switchTo = (places: InstallPlaces, version: string, staged: StagedBuild, replaced: string): string[] =>
 {
-  // a folder of the same version can only be a previous build or one an earlier run left, never the current one.
+  // what is running is read once, just before anything moves, and decides both what may be replaced and what may go.
+  const running = runningPrograms();
+  const inUse = foldersInUse(realpathSync(places.root), entriesIn(places.root), running.executables);
+
+  // a folder of the same version can only be a previous build or one an earlier run left, never the current one. A
+  // previous build can be running, started through previous to go back, and its files are never pulled out from under
+  // it.
   const destination = join(places.root, version);
+  const refusal = switchRefusal(running, inUse, version, destination);
+  if (refusal !== '')
+  {
+    unstage(staged.made, staged.incoming);
+    throw new Refusal(refusal);
+  }
   rmSync(destination, { recursive: true, force: true });
   renameSync(staged.folder, destination);
   rmSync(staged.incoming, { recursive: true, force: true });
@@ -628,17 +848,18 @@ const switchTo = (places: InstallPlaces, version: string, staged: StagedBuild, r
   }
   pointLink(join(places.root, CURRENT_LINK), version);
 
+  // a build still running stays past the two it keeps: an editor opened before this install, or a rollback started
+  // through previous. The next install to find it closed removes it.
   const kept = [ version, linkedVersion(places.root, PREVIOUS_LINK) ].filter(name => name !== '');
-  const entries = readdirSync(places.root, { withFileTypes: true })
-    .map(entry => ({ name: entry.name, isFolder: entry.isDirectory() }));
-  const removed = prunable(entries, kept);
+  const removed = prunable(entriesIn(places.root), kept, inUse);
   removed.forEach(name => rmSync(join(places.root, name), { recursive: true, force: true }));
   return removed;
 };
 
 /**
  * Writes the command line link and the app menu entry. Both go through the current link, so they follow every later
- * switch without being written again; writing them on every install puts back either one if it was deleted.
+ * switch without being written again; writing them on every run, one with nothing new to install included, puts back
+ * either one if it was deleted, or never written because a run was cut short after switching.
  * @param {InstallPlaces} places Where the install goes.
  */
 const writeMenuEntry = (places: InstallPlaces): void =>
@@ -654,11 +875,121 @@ const writeMenuEntry = (places: InstallPlaces): void =>
 };
 
 /**
- * Installs the build versions.json names, unless it is already the current one.
- * @param {string} buildsFolder The folder holding versions.json and the tarball.
- * @param {string} home The home folder to install into, absolute.
+ * Makes the lock file, holding this run's process id, but only when no lock is there: it is opened to be created and
+ * fails if it exists, so of two runs making it at once, exactly one does.
+ * @param {string} lock The lock file.
+ * @returns {boolean} True when this run made it; false when a lock was there already.
  */
-const install = (buildsFolder: string, home: string): void =>
+const tryCreateLock = (lock: string): boolean =>
+{
+  try
+  {
+    writeFileSync(lock, `${process.pid}\n`, { flag: 'wx' });
+    return true;
+  }
+  catch (error)
+  {
+    if ((error as NodeJS.ErrnoException).code === 'EEXIST')
+    {
+      return false;
+    }
+
+    throw error;
+  }
+};
+
+/**
+ * Reads a lock file.
+ * @param {string} lock The lock file.
+ * @returns {string} What it holds, or empty when it was let go before it could be read.
+ */
+const readLock = (lock: string): string =>
+{
+  try
+  {
+    return readFileSync(lock, 'utf8')
+      .trim();
+  }
+  catch
+  {
+    return '';
+  }
+};
+
+/**
+ * Reads which run holds a lock. A run still going has a folder of its own in /proc, and one that has ended, however it
+ * ended, does not, so a lock naming no running process is held by no one.
+ * @param {string} lock The lock file.
+ * @returns {string} The process id of the run holding it, or empty when no running process holds it.
+ */
+const lockHolder = (lock: string): string =>
+{
+  const holder = readLock(lock);
+  return PROCESS_ID.test(holder) && existsSync(join(PROC, holder))
+    ? holder
+    : '';
+};
+
+/**
+ * Takes the lock, or refuses when a run still going holds it. A lock whose run has ended, as one a dropped SSH session
+ * leaves behind, is taken over: removed, then taken like any lock, so a run that makes its own in that moment is found
+ * holding it.
+ * @param {string} lock The lock file.
+ */
+const acquireLock = (lock: string): void =>
+{
+  if (tryCreateLock(lock))
+  {
+    return;
+  }
+
+  const holder = lockHolder(lock);
+  if (holder !== '')
+  {
+    throw new Refusal(`Another install is already running, as process ${holder}. Let it finish, then run this again.`);
+  }
+
+  rmSync(lock, { force: true });
+  acquireLock(lock);
+};
+
+/**
+ * Takes the lock that keeps two runs from installing at once, as two SSH sessions could. Without it, whichever run
+ * finished first would prune the other's staging folder, and a refused first install would remove the install folder
+ * the other was filling. The folder the lock goes in is made when missing, as in a home folder nothing has used yet.
+ * @param {string} lock The lock file.
+ * @returns {string} The outermost folder made to hold the lock, or empty when the folder it goes in was already there.
+ */
+const takeLock = (lock: string): string =>
+{
+  const made = outermostMissingFolder(dirname(lock));
+  mkdirSync(dirname(lock), { recursive: true });
+  acquireLock(lock);
+  return made;
+};
+
+/**
+ * Lets the lock go at the end of a run, whether it installed or was refused, and takes away the folder made to hold
+ * the lock when nothing else came to be kept in it, as when a first install into an empty home folder is refused.
+ * @param {string} lock The lock file.
+ * @param {string} made The outermost folder made to hold the lock, or empty.
+ */
+const releaseLock = (lock: string, made: string): void =>
+{
+  rmSync(lock, { force: true });
+  if (made !== '' && readdirSync(made).length === 0)
+  {
+    rmdirSync(made);
+  }
+};
+
+/**
+ * Installs the build versions.json names, as install does once it holds the lock. When it is already the current one,
+ * only the menu entry and the command line link are written again, which changes nothing when both are already there.
+ * @param {string} buildsFolder The folder holding versions.json and the tarball.
+ * @param {InstallPlaces} places Where the install goes.
+ */
+const installHoldingLock = (buildsFolder: string, places: InstallPlaces): void =>
 {
   const versionsPath = join(buildsFolder, VERSIONS_FILE);
   if (existsSync(versionsPath) === false)
@@ -666,11 +997,12 @@ const install = (buildsFolder: string, home: string): void =>
     throw new Refusal(`There is no ${VERSIONS_FILE} beside this installer.`);
   }
 
-  const places = placesIn(home);
   const build = readPublishedBuild(readFileSync(versionsPath, 'utf8'));
   const replaced = linkedVersion(places.root, CURRENT_LINK);
   if (replaced === build.version)
   {
+    // a run cut short after switching never wrote these, and every later run lands here, so this is where they return.
+    writeMenuEntry(places);
     console.log(`jmz-editor ${build.version} is already installed.`);
     return;
   }
@@ -689,6 +1021,27 @@ const install = (buildsFolder: string, home: string): void =>
     console.log(`Removed ${removed.join(', ')}.`);
   }
   console.log(`Start it from the app menu, or with ${places.binLink}.`);
+};
+
+/**
+ * Installs the build versions.json names, with no other run installing at the same time: everything a run reads and
+ * writes, from which build is current to every folder pruned, is done holding the lock, and the lock is let go however
+ * the run ends, short of being killed.
+ * @param {string} buildsFolder The folder holding versions.json and the tarball.
+ * @param {string} home The home folder to install into, absolute.
+ */
+const install = (buildsFolder: string, home: string): void =>
+{
+  const places = placesIn(home);
+  const lockMade = takeLock(places.lock);
+  try
+  {
+    installHoldingLock(buildsFolder, places);
+  }
+  finally
+  {
+    releaseLock(places.lock, lockMade);
+  }
 };
 
 /**
@@ -722,5 +1075,15 @@ if (script !== undefined && pathToFileURL(script).href === import.meta.url)
   main();
 }
 
-export { desktopEntry, isSharedLibrary, missingLibraries, prunable, readPublishedBuild, Refusal };
-export type { InstallEntry, PublishedBuild };
+export {
+  desktopEntry,
+  foldersInUse,
+  install,
+  isSharedLibrary,
+  missingLibraries,
+  prunable,
+  readPublishedBuild,
+  Refusal,
+  switchRefusal,
+};
+export type { InstallEntry, PublishedBuild, RunningPrograms };

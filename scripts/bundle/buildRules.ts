@@ -190,10 +190,10 @@ const nwjsProblem = (version: string, names: string[]): string | null =>
 
 /**
  * Names a build: its UTC date and time to the minute, then the commit it was built from, then -dirty when the tree held
- * changes not committed, since such a build is not exactly that commit.
+ * changes the build could carry, since such a build is not exactly that commit.
  * @param {Date} builtAt When the build started.
  * @param {string} shortCommit The commit's short hash.
- * @param {boolean} dirty Whether the tree held changes not committed.
+ * @param {boolean} dirty Whether the build is not exactly its commit, as isDirtyTree decides.
  * @returns {string} The version, such as 20261118.2015-925c73f.
  */
 const bundleVersion = (builtAt: Date, shortCommit: string, dirty: boolean): string =>
@@ -219,10 +219,10 @@ const editorManifest = (source: Record<string, unknown>, target: Target): Record
 
 /**
  * Builds bundle.json, which tells the shell it runs from a bundle and names what the bundle is: its version, the commit
- * it came from and whether the tree was clean, when it was built, the NW.js inside it, and its default port.
+ * it came from and whether it is exactly that commit, when it was built, the NW.js inside it, and its default port.
  * @param {string} version The build's version.
  * @param {string} commit The commit's full hash.
- * @param {boolean} dirty Whether the tree held changes not committed.
+ * @param {boolean} dirty Whether the build is not exactly its commit, as isDirtyTree decides.
  * @param {Date} builtAt When the build started.
  * @returns {Record<string, unknown>} The manifest.
  */
@@ -250,6 +250,72 @@ const LAUNCHER = [
   'exec "$HERE/nwjs/nw" "$HERE/editor" "$@"',
   '',
 ].join('\n');
+
+/**
+ * What a build reads from the checkout: the folders it is built from, by their paths with the slash that keeps one from
+ * matching a file whose name only starts the same, and the root files the build command and its packages come from,
+ * the lockfile under either name Bun writes.
+ */
+const BUILD_INPUTS = [ 'app/', 'server/', 'nw-app/', 'scripts/', 'package.json', 'bun.lock', 'bun.lockb' ];
+
+/**
+ * How git status --porcelain starts the line of a file it does not track.
+ */
+const UNTRACKED_MARK = '?? ';
+
+/**
+ * Reports whether a path inside the checkout is something a build reads: inside one of its folders, or one of its root
+ * files.
+ * @param {string} path The path, from the checkout's root.
+ * @returns {boolean} True when a build reads it.
+ */
+const isBuildInput = (path: string): boolean =>
+{
+  return BUILD_INPUTS.some(input => input.endsWith('/')
+    ? path.startsWith(input)
+    : path === input);
+};
+
+/**
+ * Reads the path off a line git status --porcelain printed for a file it does not track. git quotes a path holding a
+ * space or a character outside ASCII, which only ever adds a quote before where the path starts, so dropping that quote
+ * leaves the start a build input is matched by.
+ * @param {string} line The line.
+ * @returns {string} The path, from the checkout's root.
+ */
+const untrackedPath = (line: string): string =>
+{
+  return line.slice(UNTRACKED_MARK.length)
+    .replace(/^"/u, '');
+};
+
+/**
+ * Says whether a build is not exactly its commit, from what git status --porcelain printed for the checkout. A change
+ * to a tracked file counts wherever it is, but a file git does not track counts only inside what the build reads, so a
+ * note left in docs/ does not mark every build made beside it.
+ * @param {string} status What git status --porcelain printed.
+ * @returns {boolean} True when the build is not exactly its commit.
+ */
+const isDirtyTree = (status: string): boolean =>
+{
+  return status.split('\n')
+    .filter(line => line !== '')
+    .some(line => line.startsWith(UNTRACKED_MARK) === false || isBuildInput(untrackedPath(line)));
+};
+
+/**
+ * Builds the environment the UI's pages are built in, out of the one the build was started with. It names no API base,
+ * so the pages call the origin that served them, which in a bundle is the API's own: a base baked in would tie every
+ * build to one port. And it always builds for production, whatever NODE_ENV the build inherited, since Vite takes
+ * development there as a dev build even under vite build, and a dev build's pages call the dev stack's API port.
+ * @param {Record<string, string | undefined>} inherited The environment the build was started with.
+ * @returns {Record<string, string | undefined>} The UI build's environment.
+ */
+const uiBuildEnvironment = (inherited: Record<string, string | undefined>): Record<string, string | undefined> =>
+{
+  const { VITE_JMZ_API_BASE: _devApiBase, ...environment } = inherited;
+  return { ...environment, NODE_ENV: 'production' };
+};
 
 /**
  * Names the folder a build is laid out in, which is also the one folder inside its tarball.
@@ -303,6 +369,7 @@ export {
   bundleVersion,
   DEFAULT_PUBLISH_DIR,
   editorManifest,
+  isDirtyTree,
   LAUNCHER,
   nwjsProblem,
   nwjsVersionIn,
@@ -310,6 +377,7 @@ export {
   PINNED_NWJS,
   tarballName,
   TARGETS,
+  uiBuildEnvironment,
   versionsFile,
 };
 export type { BuildOptions, Target, VersionEntry };

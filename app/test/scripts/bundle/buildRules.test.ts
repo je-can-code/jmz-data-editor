@@ -8,12 +8,14 @@ import {
   bundleManifest,
   bundleVersion,
   editorManifest,
+  isDirtyTree,
   LAUNCHER,
   nwjsProblem,
   nwjsVersionIn,
   parseBuildArguments,
   tarballName,
   TARGETS,
+  uiBuildEnvironment,
   versionsFile,
 } from '../../../../scripts/bundle/buildRules.ts';
 
@@ -21,10 +23,11 @@ import {
  * The bundle build turns the repo into one folder that runs on a machine with nothing installed, so what it decides is
  * what the laptop gets. It ships one NW.js only, the pinned version in the SDK flavor, read from the files themselves,
  * because a bundle on another runtime would play the game on something it was never tested on. It names every build by
- * when it was made and the commit it came from, marked dirty when the tree held changes, so a build on the laptop can
- * always be traced back. The bundle runs under a name of its own, so it never hands its launch to a dev shell, and its
- * launcher must find the bundle through the link the installer puts on the PATH. A mistyped flag is refused rather than
- * quietly building something other than what was asked for.
+ * when it was made and the commit it came from, marked dirty when the tree held a change the build could carry, so a
+ * build on the laptop can always be traced back, while a stray note beside the code never marks it. The bundle runs
+ * under a name of its own, so it never hands its launch to a dev shell, and its launcher must find the bundle through
+ * the link the installer puts on the PATH. A mistyped flag is refused rather than quietly building something other than
+ * what was asked for.
  */
 
 /**
@@ -219,7 +222,104 @@ describe('buildRules', () =>
     });
   });
 
-  describe('manifests', () =>
+  describe('isDirtyTree', () =>
+  {
+    it('calls a tree with nothing changed clean', () =>
+    {
+      // Arrange: git status printing nothing at all.
+      const status = '';
+
+      // Act.
+      const dirty = isDirtyTree(status);
+
+      // Assert.
+      expect(dirty)
+        .toBe(false);
+    });
+
+    it('calls a tree clean when its only untracked files are outside what the build reads', () =>
+    {
+      // Arrange: a note in docs/, one with a quoted name, and names that only start the way a build input does.
+      const status = [
+        '?? docs/notes.md',
+        '?? "docs/caf\\303\\251.md"',
+        '?? app-notes.md',
+        '?? scripts.txt',
+        '?? package.json.bak',
+        '',
+      ].join('\n');
+
+      // Act.
+      const dirty = isDirtyTree(status);
+
+      // Assert.
+      expect(dirty)
+        .toBe(false);
+    });
+
+    it('calls a tree dirty for an untracked file in anything the build reads', () =>
+    {
+      // Arrange: one untracked file under each folder the build reads, a folder git lists whole, a quoted name, the
+      // root lockfile under either name Bun writes, and one listed after a file the build does not read, so the whole
+      // status has to be read and not just its first line.
+      const statuses = [
+        '?? app/src/notes.ts',
+        '?? server/internal/extra.go',
+        '?? nw-app/extra.js',
+        '?? scripts/bundle/extra.ts',
+        '?? app/src/newBoard/',
+        '?? "app/src/a b.ts"',
+        '?? bun.lock',
+        '?? bun.lockb',
+        '?? docs/a.md\n?? app/b.ts',
+      ];
+
+      // Act.
+      const dirty = statuses.map(status => isDirtyTree(status));
+
+      // Assert.
+      expect(dirty)
+        .toStrictEqual([ true, true, true, true, true, true, true, true, true ]);
+    });
+
+    it('calls a tree dirty for any change to a tracked file, wherever it is', () =>
+    {
+      // Arrange: a doc edited, staged, deleted and renamed, none of them in what the build reads.
+      const statuses = [ ' M docs/bundle-and-play-plan.md', 'M  README.md', 'D  LICENSE', 'R  a.md -> b.md' ];
+
+      // Act.
+      const dirty = statuses.map(status => isDirtyTree(status));
+
+      // Assert.
+      expect(dirty)
+        .toStrictEqual([ true, true, true, true ]);
+    });
+  });
+
+  describe('uiBuildEnvironment', () =>
+  {
+    it('builds the pages for production with no API base, whatever the build inherited, and passes the rest on', () =>
+    {
+      // Arrange: a shell left set up for the dev stack, beside settings the UI build still needs, another Vite
+      // setting among them.
+      const inherited = {
+        PATH: '/usr/bin:/bin',
+        HOME: '/home/je',
+        NODE_ENV: 'development',
+        VITE_JMZ_API_BASE: 'http://127.0.0.1:8080',
+        VITE_JMZ_FEATURE: 'on',
+      };
+
+      // Act.
+      const environment = uiBuildEnvironment(inherited);
+
+      // Assert.
+      expect(environment)
+        .toStrictEqual({ PATH: '/usr/bin:/bin', HOME: '/home/je', NODE_ENV: 'production', VITE_JMZ_FEATURE: 'on' });
+    });
+  });
+
+  describe('editorManifest', () =>
   {
     it('keeps the dev shell\'s manifest but for the bundle\'s own name and the target\'s switches', () =>
     {
@@ -243,7 +343,10 @@ describe('buildRules', () =>
           window: { title: 'JMZ Data Editor', width: 1920 },
         });
     });
+  });
 
+  describe('TARGETS', () =>
+  {
     it('starts the Linux build with popups unblocked, for the windows the shell opens', () =>
     {
       // Arrange: nothing to set up; the targets are the build's own.
@@ -255,7 +358,10 @@ describe('buildRules', () =>
       expect(target)
         .toStrictEqual({ goos: 'linux', goarch: 'amd64', chromiumArgs: '--disable-popup-blocking --use-angle=vulkan' });
     });
+  });
 
+  describe('bundleManifest', () =>
+  {
     it('writes what the bundle is into bundle.json, with its NW.js and its default port', () =>
     {
       // Arrange.
@@ -275,26 +381,59 @@ describe('buildRules', () =>
           port: 47380,
         });
     });
+  });
 
-    it('names the folder, the tarball and versions.json\'s entry by the target and the version', () =>
+  describe('bundleFolderName', () =>
+  {
+    it('names the folder a build is laid out in by the bundle\'s name and the version', () =>
     {
       // Arrange.
       const version = '20261118.2145-925c73f';
 
       // Act.
-      const named = [
-        bundleFolderName(version),
-        tarballName('linux-x64', version),
-        versionsFile('linux-x64', version, tarballName('linux-x64', version), 'ab12'),
-      ];
+      const folder = bundleFolderName(version);
 
       // Assert.
-      expect(named)
-        .toStrictEqual([
-          'jmz-editor-20261118.2145-925c73f',
-          'jmz-editor-linux-x64-20261118.2145-925c73f.tar.gz',
-          { 'linux-x64': { version, file: 'jmz-editor-linux-x64-20261118.2145-925c73f.tar.gz', sha256: 'ab12' } },
-        ]);
+      expect(folder)
+        .toBe('jmz-editor-20261118.2145-925c73f');
+    });
+  });
+
+  describe('tarballName', () =>
+  {
+    it('names the tarball by the bundle\'s name, the target and the version', () =>
+    {
+      // Arrange.
+      const version = '20261118.2145-925c73f';
+
+      // Act.
+      const tarball = tarballName('linux-x64', version);
+
+      // Assert.
+      expect(tarball)
+        .toBe('jmz-editor-linux-x64-20261118.2145-925c73f.tar.gz');
+    });
+  });
+
+  describe('versionsFile', () =>
+  {
+    it('names the tarball, its version and its SHA-256 under the target it runs on', () =>
+    {
+      // Arrange.
+      const file = 'jmz-editor-linux-x64-20261118.2145-925c73f.tar.gz';
+
+      // Act.
+      const versions = versionsFile('linux-x64', '20261118.2145-925c73f', file, 'ab12');
+
+      // Assert.
+      expect(versions)
+        .toStrictEqual({
+          'linux-x64': {
+            version: '20261118.2145-925c73f',
+            file: 'jmz-editor-linux-x64-20261118.2145-925c73f.tar.gz',
+            sha256: 'ab12',
+          },
+        });
     });
   });
 
