@@ -644,7 +644,7 @@ async function main()
 
   startRelay(uiUrl, apiBase, { width, height }, () =>
   {
-    openWindow(`${uiUrl}${rules.bootPath(argv)}`, width, height);
+    openWindow(`${uiUrl}${rules.bootPath(argv, false)}`, width, height);
   });
 }
 

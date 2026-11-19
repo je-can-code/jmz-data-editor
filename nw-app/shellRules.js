@@ -1,8 +1,22 @@
 // The NW.js shell's decisions, kept apart from main.js so they can be tested without NW.js: reading the app's
 // flags, deciding which page boots, naming and vetting the windows pages ask for, what a page may read off the
-// clipboard, and how a project's playtest is started and judged.
+// clipboard, how a project's playtest is started and judged, and how the bundled editor finds its files, its
+// project and its address, and when its API is ready.
 const crypto = require('node:crypto');
 const path = require('node:path');
+
+/**
+ * The folder the editor keeps its own files in, inside each of the person's XDG folders: the bundle's config, its
+ * logs, and the profiles playtests run on. It matches the bundle's NW.js name, so everything the editor leaves on a
+ * machine sits under one name.
+ */
+const APP_FOLDER = 'jmz-editor';
+
+/**
+ * The page the bundled editor opens on. Which editor is the main one is not settled yet, and until it is the bundle
+ * opens on the map editor, with the data editor a click away on its bar; settling it the other way is this one line.
+ */
+const BUNDLE_HOME_PAGE = '/map.html';
 
 /**
  * Reads a flag's value from the app's arguments, in either form the shell accepts: `--name=value` or
@@ -60,13 +74,20 @@ function trimOrigin(origin)
 }
 
 /**
- * Names the page the shell opens first: the map editor under --maps, the data editor otherwise.
+ * Names the page the shell opens first: the map editor under --maps, and otherwise the bundle's home page in a bundle
+ * and the data editor in the dev stack.
  * @param {string[]} argv The app's arguments.
+ * @param {boolean} bundled Whether the shell runs from a bundle.
  * @returns {string} The page's path.
  */
-function bootPath(argv)
+function bootPath(argv, bundled)
 {
-  return hasFlag(argv, '--maps') ? '/map.html' : '/';
+  if (hasFlag(argv, '--maps'))
+  {
+    return '/map.html';
+  }
+
+  return bundled ? BUNDLE_HOME_PAGE : '/';
 }
 
 /**
@@ -229,16 +250,54 @@ function isGameFolder(listing)
 }
 
 /**
- * Finds the folder caches belong in on Linux, as the XDG base directory spec has it: XDG_CACHE_HOME when it names an
- * absolute folder, and ~/.cache otherwise. The spec says to ignore an empty or relative value, so both fall back too.
+ * Finds one of the person's XDG base folders on Linux, as the spec has it: the variable's value when it names an
+ * absolute folder, and the spec's default under the home folder otherwise. The spec says to ignore an empty or relative
+ * value, so both fall back too.
+ * @param {Record<string, string | undefined>} environment The process's environment.
+ * @param {string} variable The variable naming the folder, such as XDG_CACHE_HOME.
+ * @param {string} homeDirectory The person's home folder.
+ * @param {string} fallback The spec's default, relative to the home folder, such as .cache.
+ * @returns {string} The folder.
+ */
+function xdgDirectory(environment, variable, homeDirectory, fallback)
+{
+  const configured = environment[variable] || '';
+  return path.isAbsolute(configured) ? configured : path.join(homeDirectory, fallback);
+}
+
+/**
+ * Finds the folder caches belong in on Linux: XDG_CACHE_HOME when it names an absolute folder, and ~/.cache otherwise.
  * @param {Record<string, string | undefined>} environment The process's environment.
  * @param {string} homeDirectory The person's home folder.
  * @returns {string} The cache folder.
  */
 function cacheDirectory(environment, homeDirectory)
 {
-  const configured = environment.XDG_CACHE_HOME || '';
-  return path.isAbsolute(configured) ? configured : path.join(homeDirectory, '.cache');
+  return xdgDirectory(environment, 'XDG_CACHE_HOME', homeDirectory, '.cache');
+}
+
+/**
+ * Finds the folder settings belong in on Linux: XDG_CONFIG_HOME when it names an absolute folder, and ~/.config
+ * otherwise.
+ * @param {Record<string, string | undefined>} environment The process's environment.
+ * @param {string} homeDirectory The person's home folder.
+ * @returns {string} The config folder.
+ */
+function configDirectory(environment, homeDirectory)
+{
+  return xdgDirectory(environment, 'XDG_CONFIG_HOME', homeDirectory, '.config');
+}
+
+/**
+ * Finds the folder logs and other state belong in on Linux: XDG_STATE_HOME when it names an absolute folder, and
+ * ~/.local/state otherwise.
+ * @param {Record<string, string | undefined>} environment The process's environment.
+ * @param {string} homeDirectory The person's home folder.
+ * @returns {string} The state folder.
+ */
+function stateDirectory(environment, homeDirectory)
+{
+  return xdgDirectory(environment, 'XDG_STATE_HOME', homeDirectory, path.join('.local', 'state'));
 }
 
 /**
@@ -257,7 +316,7 @@ function playtestProfileDirectory(cacheRoot, projectRoot)
   const digest = crypto.createHash('sha1')
     .update(path.resolve(projectRoot))
     .digest('hex');
-  return path.join(cacheRoot, 'jmz-editor', 'playtest', digest);
+  return path.join(cacheRoot, APP_FOLDER, 'playtest', digest);
 }
 
 /**
@@ -346,18 +405,306 @@ function devStackArgs(projectRoot, apiBase, uiUrl)
   return [ 'run', 'dev', '--project-root', projectRoot, '--api-base', apiBase, '--ui-url', uiUrl ];
 }
 
+/**
+ * Lays out a bundle around the shell's own folder. The build puts the shell in the bundle's editor folder, so the
+ * bundle's root is the folder above it, and the manifest the build wrote, the API's binary and the UI's built pages all
+ * sit there.
+ * @param {string} shellDirectory The folder the shell runs from.
+ * @returns {{ root: string, manifest: string, api: string, ui: string }} The bundle's root, its manifest, the API's
+ * binary and the folder of the UI's pages.
+ */
+function bundleLayout(shellDirectory)
+{
+  const root = path.resolve(shellDirectory, '..');
+  return {
+    root,
+    manifest: path.join(root, 'bundle.json'),
+    api: path.join(root, 'server', 'jmz-api'),
+    ui: path.join(root, 'ui'),
+  };
+}
+
+/**
+ * Reports whether the shell runs from a bundle. The build writes bundle.json beside the shell's folder, and a checkout
+ * of the repo never has one there, so a checkout runs the dev stack exactly as it always has.
+ * @param {string} shellDirectory The folder the shell runs from.
+ * @param {(filePath: string) => boolean} exists Reports whether a file is there.
+ * @returns {boolean} True in a bundle.
+ */
+function isBundled(shellDirectory, exists)
+{
+  return exists(bundleLayout(shellDirectory).manifest);
+}
+
+/**
+ * Names the files the bundled editor keeps for the person, outside the bundle so an update leaves them alone: the
+ * config, in the XDG config folder, and the logs of the API and of the shell, in the XDG state folder. A desktop launch
+ * has no terminal, so the logs are the one place anything the API or the shell says can be read.
+ * @param {Record<string, string | undefined>} environment The process's environment.
+ * @param {string} homeDirectory The person's home folder.
+ * @returns {{ config: string, apiLog: string, shellLog: string }} The files.
+ */
+function bundleUserFiles(environment, homeDirectory)
+{
+  const state = path.join(stateDirectory(environment, homeDirectory), APP_FOLDER);
+  return {
+    config: path.join(configDirectory(environment, homeDirectory), APP_FOLDER, 'config.json'),
+    apiLog: path.join(state, 'api.log'),
+    shellLog: path.join(state, 'shell.log'),
+  };
+}
+
+/**
+ * Reports whether a value is a port the bundle can be told to use: a whole number from 1 to 65535. Port 0 would ask
+ * the system for any free port, a new one every launch, and a port that moves leaves behind everything the pages saved.
+ * @param {unknown} value The value.
+ * @returns {boolean} True for a usable port.
+ */
+function isPort(value)
+{
+  return Number.isInteger(value) && value >= 1 && value <= 65535;
+}
+
+/**
+ * Reads the bundled editor's config, which the person writes by hand: an object naming the project's folder as
+ * projectRoot and, when the bundle's own port will not do, a port. No file at all is a config with nothing set, and a
+ * key left out or set to null is unset. Keys it does not know are left alone. Text it cannot make sense of is refused
+ * rather than half read, so the person learns the file is wrong instead of being told nothing is set.
+ * @param {string | null} text The file's text, or null when there is no file.
+ * @returns {{ projectRoot: string, port: number | null } | null} The settings, with an empty folder and a null port
+ * for whichever is unset, or null when the text is not a config.
+ */
+function parseBundleConfig(text)
+{
+  if (text === null)
+  {
+    return { projectRoot: '', port: null };
+  }
+
+  let parsed;
+  try
+  {
+    parsed = JSON.parse(text);
+  }
+  catch
+  {
+    return null;
+  }
+
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed))
+  {
+    return null;
+  }
+
+  const projectRoot = parsed.projectRoot ?? '';
+  const port = parsed.port ?? null;
+  if (typeof projectRoot !== 'string' || (port !== null && isPort(port) === false))
+  {
+    return null;
+  }
+
+  return { projectRoot: projectRoot.trim(), port };
+}
+
+/**
+ * Picks the bundled editor's project by the dev stack's precedence: --project-root, then JMZ_PROJECT_ROOT, then the
+ * config. A relative folder counts from where the editor was started, and is made absolute here, so the root check,
+ * the API and Play all name the one folder.
+ * @param {string[]} argv The app's arguments.
+ * @param {Record<string, string | undefined>} environment The process's environment.
+ * @param {{ projectRoot: string }} config The config's settings.
+ * @param {string} workingDirectory The folder the editor was started from.
+ * @returns {string} The project's absolute folder, or an empty string when none is set.
+ */
+function bundleProjectRoot(argv, environment, config, workingDirectory)
+{
+  const fromEnvironment = (environment.JMZ_PROJECT_ROOT || '').trim();
+  const chosen = readFlag(argv, '--project-root') || fromEnvironment || config.projectRoot;
+  return chosen === '' ? '' : path.resolve(workingDirectory, chosen);
+}
+
+/**
+ * Picks the bundled editor's port: the config's when it sets one, and the one the bundle's manifest names otherwise.
+ * @param {{ port: number | null }} config The config's settings.
+ * @param {number} defaultPort The bundle's own port.
+ * @returns {number} The port.
+ */
+function bundlePort(config, defaultPort)
+{
+  return config.port === null ? defaultPort : config.port;
+}
+
+/**
+ * Builds the bundled editor's one origin, which serves its pages and its API alike. It stays the same from launch to
+ * launch: the pages' saved settings and the channels the windows talk over belong to an origin, so a new one each time
+ * would start the editor afresh each time. It is always the loopback address, the only one the API listens on.
+ * @param {number} port The port.
+ * @returns {string} The origin.
+ */
+function bundleOrigin(port)
+{
+  return `http://127.0.0.1:${port}`;
+}
+
+/**
+ * Builds the environment the bundled editor starts its API with: the one origin, as both the address to listen on and
+ * the one page origin allowed to call it; the project; the folder of the UI's pages, served beside the API; and the
+ * instruction to end once stdin closes, so the API never outlives the shell that started it, however the shell ends.
+ * @param {string} origin The bundle's origin.
+ * @param {string} projectRoot The project's folder.
+ * @param {string} uiDirectory The folder of the UI's built pages.
+ * @returns {Record<string, string>} The variables.
+ */
+function bundleServerEnvironment(origin, projectRoot, uiDirectory)
+{
+  return {
+    ...serverEnvironment(origin, origin),
+    JMZ_PROJECT_ROOT: projectRoot,
+    JMZ_UI_DIR: uiDirectory,
+    JMZ_EXIT_WITH_PARENT: '1',
+  };
+}
+
+/**
+ * Checks the project before the API starts on it, since the API's health check only says a project is set, never that
+ * one is there: a project must be chosen, its folder must be there, and it must be an RPG Maker MZ project, which always
+ * has data/System.json.
+ * @param {string} projectRoot The project's folder, or an empty string when none is set.
+ * @param {(filePath: string) => boolean} exists Reports whether a file or folder is there.
+ * @returns {'no-project' | 'missing-project' | 'not-a-project' | null} What is wrong, or null when nothing is.
+ */
+function projectRootProblem(projectRoot, exists)
+{
+  if (projectRoot === '')
+  {
+    return 'no-project';
+  }
+
+  if (exists(projectRoot) === false)
+  {
+    return 'missing-project';
+  }
+
+  return exists(path.join(projectRoot, 'data', 'System.json')) ? null : 'not-a-project';
+}
+
+/**
+ * Reports whether the API's answer to its health check says it is ready: a 200 whose data says ok. Any other answer is
+ * an API not ready yet, or not the editor's at all.
+ * @param {{ status: number, body: unknown }} answer The status, and the body, parsed.
+ * @returns {boolean} True when ready.
+ */
+function isApiReady(answer)
+{
+  const { status, body } = answer;
+  if (status !== 200 || body === null || typeof body !== 'object')
+  {
+    return false;
+  }
+
+  const { data } = body;
+  return data !== null && typeof data === 'object' && data.ok === true;
+}
+
+/**
+ * What the bundled editor's error window says about each thing that can stop it, in plain words, line by line, and the
+ * log that says more: the shell's, for what the shell found before starting the API, and the API's, for what became of
+ * the API. A desktop launch has no terminal, so this window is the one place the person learns what went wrong.
+ */
+const PROBLEMS = {
+  'no-project': {
+    log: 'shellLog',
+    lines: facts => [
+      'No project is chosen yet.',
+      '',
+      `Set "projectRoot" in ${facts.config} to your game's folder, then open the editor again.`,
+    ],
+  },
+  'missing-project': {
+    log: 'shellLog',
+    lines: facts => [
+      'The project folder isn\'t there:',
+      facts.projectRoot,
+      '',
+      `Set "projectRoot" in ${facts.config} to your game's folder.`,
+    ],
+  },
+  'not-a-project': {
+    log: 'shellLog',
+    lines: facts => [
+      'This folder isn\'t an RPG Maker MZ project, since it has no data/System.json:',
+      facts.projectRoot,
+      '',
+      `Set "projectRoot" in ${facts.config} to your game's folder.`,
+    ],
+  },
+  'bad-config': {
+    log: 'shellLog',
+    lines: facts => [
+      `The settings in ${facts.config} can't be read.`,
+      '',
+      'The file should hold { "projectRoot": "/path/to/your/game" }, and "port" too when the editor needs another',
+      'port: a whole number from 1 to 65535.',
+    ],
+  },
+  'port-in-use': {
+    log: 'shellLog',
+    lines: facts => [
+      `Port ${facts.port} is already in use by another program.`,
+      '',
+      `Close that program, or set "port" in ${facts.config} to a free port.`,
+    ],
+  },
+  'api-stopped': {
+    log: 'apiLog',
+    lines: () => [ 'The editor\'s server stopped.' ],
+  },
+  'api-silent': {
+    log: 'apiLog',
+    lines: () => [ 'The editor\'s server didn\'t answer in time.' ],
+  },
+  'crashed': {
+    log: 'shellLog',
+    lines: () => [ 'The editor couldn\'t start.' ],
+  },
+};
+
+/**
+ * Words what went wrong for the error window, and names the log that says more.
+ * @param {string} problem What went wrong, one of the problems above.
+ * @param {{ projectRoot: string, port: number, config: string, apiLog: string, shellLog: string }} facts The project,
+ * the port, and the config and log files, as the bundle has them.
+ * @returns {string} The window's text.
+ */
+function problemText(problem, facts)
+{
+  const { log, lines } = PROBLEMS[problem];
+  return [ ...lines(facts), '', `The log is at ${facts[log]}` ].join('\n');
+}
+
 module.exports = {
   bootPath,
+  bundleLayout,
+  bundleOrigin,
+  bundlePort,
+  bundleProjectRoot,
+  bundleServerEnvironment,
+  bundleUserFiles,
   cacheDirectory,
   clipboardAnswer,
   CLIPBOARD_KINDS,
   devStackArgs,
   hasFlag,
+  isApiReady,
+  isBundled,
   isGameFolder,
+  parseBundleConfig,
   playArguments,
   playOutcome,
   playReplyChannel,
   playtestProfileDirectory,
+  problemText,
+  projectRootProblem,
   readFlag,
   resolveWindowUrl,
   serverEnvironment,
