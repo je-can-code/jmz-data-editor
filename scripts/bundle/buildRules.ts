@@ -219,10 +219,10 @@ const editorManifest = (source: Record<string, unknown>, target: Target): Record
 
 /**
  * Builds bundle.json, which tells the shell it runs from a bundle and names what the bundle is: its version, the commit
- * it came from and whether the tree was clean, when it was built, the NW.js inside it, and its default port.
+ * it came from and whether it is exactly that commit, when it was built, the NW.js inside it, and its default port.
  * @param {string} version The build's version.
  * @param {string} commit The commit's full hash.
- * @param {boolean} dirty Whether the tree held changes not committed.
+ * @param {boolean} dirty Whether the build is not exactly its commit, as isDirtyTree decides.
  * @param {Date} builtAt When the build started.
  * @returns {Record<string, unknown>} The manifest.
  */
