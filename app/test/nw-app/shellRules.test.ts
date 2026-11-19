@@ -35,17 +35,21 @@ const rules = load('../../../nw-app/shellRules.js') as {
   playtestProfileDirectory(cacheRoot: string, projectRoot: string): string;
   playArguments(projectRoot: string, profileDirectory: string): string[];
   playOutcome(exit: { code: number | null; signal: string | null } | null): string;
+  playtestSpawnOptions(): { detached: boolean; stdio: string };
+  healthProjectRoot(answer: { status: number; body: unknown }): string;
   bundleLayout(shellDirectory: string): { root: string; manifest: string; api: string; ui: string };
   isBundled(shellDirectory: string, exists: (filePath: string) => boolean): boolean;
   bundleUserFiles(environment: Record<string, string | undefined>, homeDirectory: string): { config: string; apiLog: string; shellLog: string };
-  parseBundleConfig(text: string | null): { projectRoot: string; port: number | null } | null;
-  bundleProjectRoot(argv: string[], environment: Record<string, string | undefined>, config: { projectRoot: string }, workingDirectory: string): string;
+  parseBundleConfig(text: string | null, homeDirectory: string): { projectRoot: string; port: number | null } | null;
+  bundleProjectRoot(argv: string[], environment: Record<string, string | undefined>, config: { projectRoot: string }, workingDirectory: string): { projectRoot: string; source: string };
   bundlePort(config: { port: number | null }, defaultPort: number): number;
   bundleOrigin(port: number): string;
   bundleServerEnvironment(origin: string, projectRoot: string, uiDirectory: string): Record<string, string>;
+  apiSpawnOptions(environment: Record<string, string | undefined>, serverVariables: Record<string, string>, output: number): { env: Record<string, string | undefined>; stdio: unknown[] };
   projectRootProblem(projectRoot: string, exists: (filePath: string) => boolean): string | null;
   isApiReady(answer: { status: number; body: unknown }): boolean;
-  problemText(problem: string, facts: { projectRoot: string; port: number; config: string; apiLog: string; shellLog: string }): string;
+  problemText(problem: string, facts: { projectRoot: string; rootSource: string; port: number; config: string; apiLog: string; shellLog: string }): string;
+  relaunchAction(state: { problem: string; problemsOpening: number; problemsShown: number; editorReady: boolean }): string;
 };
 
 describe('shellRules', () =>
@@ -101,6 +105,48 @@ describe('shellRules', () =>
     });
   });
 
+  describe('hasFlag', () =>
+  {
+    it('finds a bare flag among the arguments, Chromium\'s switches included', () =>
+    {
+      // Arrange: the arguments above, which carry --attach.
+
+      // Act.
+      const found = rules.hasFlag(ARGV, '--attach');
+
+      // Assert.
+      expect(found)
+        .toBe(true);
+    });
+
+    it('finds no flag that is absent, that only starts the same way, or that carries a value', () =>
+    {
+      // Arrange: a flag the arguments lack, a shorter one that --attach starts with, and a bare flag in the joined form.
+
+      // Act.
+      const found = [ rules.hasFlag(ARGV, '--log'), rules.hasFlag(ARGV, '--att'), rules.hasFlag([ '--attach=yes' ], '--attach') ];
+
+      // Assert.
+      expect(found)
+        .toStrictEqual([ false, false, false ]);
+    });
+  });
+
+  describe('trimOrigin', () =>
+  {
+    it('trims the spaces and every trailing slash off an origin, so it joins cleanly with a path', () =>
+    {
+      // Arrange: an origin padded with spaces and ending in two slashes, and one with a path whose inner slash stays.
+
+      // Act.
+      const origins = [ rules.trimOrigin(' http://a:1// '), rules.trimOrigin('http://a:1/x/') ];
+
+      // Assert.
+      expect(origins)
+        .toStrictEqual([ 'http://a:1', 'http://a:1/x' ]);
+    });
+  });
+
   describe('bootPath', () =>
   {
     it('boots the map editor under --maps and the data editor otherwise', () =>
@@ -111,8 +157,8 @@ describe('shellRules', () =>
       const paths = [ rules.bootPath(ARGV, false), rules.bootPath([ '--attach' ], false), rules.bootPath([ '--mapsx' ], false) ];
 
       // Assert.
-      expect([ paths, rules.hasFlag(ARGV, '--attach') ])
-        .toStrictEqual([ [ '/map.html', '/', '/' ], true ]);
+      expect(paths)
+        .toStrictEqual([ '/map.html', '/', '/' ]);
     });
 
     it('boots a bundle on the map editor, with or without --maps', () =>
@@ -224,22 +270,33 @@ describe('shellRules', () =>
     });
   });
 
-  describe('dev stack', () =>
+  describe('uiPort', () =>
   {
-    it('starts the UI on its URL\'s port and hands the runner every origin', () =>
+    it('starts the UI on its URL\'s port, the scheme\'s own when the URL names none', () =>
     {
-      // Arrange: explicit ports, and the schemes' defaults.
+      // Arrange: an explicit port, and the two schemes' defaults.
 
       // Act.
       const ports = [ rules.uiPort('http://127.0.0.1:18150'), rules.uiPort('http://127.0.0.1'), rules.uiPort('https://127.0.0.1') ];
+
+      // Assert.
+      expect(ports)
+        .toStrictEqual([ 18150, 80, 443 ]);
+    });
+  });
+
+  describe('devStackArgs', () =>
+  {
+    it('hands the dev stack\'s runner the project and every origin', () =>
+    {
+      // Arrange: a project, and an API and a UI moved off their default ports.
+
+      // Act.
       const args = rules.devStackArgs('/games/chef', 'http://127.0.0.1:18151', 'http://127.0.0.1:18150');
 
       // Assert.
-      expect([ ports, args ])
-        .toStrictEqual([
-          [ 18150, 80, 443 ],
-          [ 'run', 'dev', '--project-root', '/games/chef', '--api-base', 'http://127.0.0.1:18151', '--ui-url', 'http://127.0.0.1:18150' ],
-        ]);
+      expect(args)
+        .toStrictEqual([ 'run', 'dev', '--project-root', '/games/chef', '--api-base', 'http://127.0.0.1:18151', '--ui-url', 'http://127.0.0.1:18150' ]);
     });
   });
 
@@ -253,8 +310,8 @@ describe('shellRules', () =>
       const sizes = [ rules.windowSize(960.4, 1400), rules.windowSize(10, 1400), rules.windowSize(99999, 1400), rules.windowSize(undefined, 1400), rules.windowSize(Number.NaN, 900) ];
 
       // Assert.
-      expect([ sizes, rules.trimOrigin(' http://a:1// ') ])
-        .toStrictEqual([ [ 960, 320, 7680, 1400, 900 ], 'http://a:1' ]);
+      expect(sizes)
+        .toStrictEqual([ 960, 320, 7680, 1400, 900 ]);
     });
   });
 
@@ -378,7 +435,9 @@ describe('shellRules', () =>
    * whatever runs there: RPG Maker games all share one default profile, so without one of its own Play would hand off to
    * a copy of the game started some other way. A launch that exits at once with code 0 was handed off, so its game is
    * already running; any other early ending failed; one still running is the game. Only a folder holding a game is
-   * launched at all, and the answer goes only to a reply channel the asking page opened under a random name.
+   * launched at all, and the answer goes only to a reply channel the asking page opened under a random name. The game
+   * played is the project the API's health check names, since the API knows which project is open, and an answer naming
+   * none plays nothing. The game must outlive the editor, so it is started detached and holding nothing of the editor's.
    */
   describe('playtests', () =>
   {
@@ -567,6 +626,61 @@ describe('shellRules', () =>
           .toStrictEqual([ 'failed', 'failed' ]);
       });
     });
+
+    describe('playtestSpawnOptions', () =>
+    {
+      it('starts the game detached, in a process group of its own, with no stream tied to the editor, so it outlives it', () =>
+      {
+        // Arrange: nothing to set up; every playtest starts the same way. Detached, no signal sent to the editor's group
+        // reaches the game; with its streams ignored, it holds no pipe to the editor that would end it, or stall it,
+        // once the editor is gone.
+
+        // Act.
+        const options = rules.playtestSpawnOptions();
+
+        // Assert.
+        expect(options)
+          .toStrictEqual({ detached: true, stdio: 'ignore' });
+      });
+    });
+
+    describe('healthProjectRoot', () =>
+    {
+      it('reads the project the API serves out of a 200\'s data', () =>
+      {
+        // Arrange: the health check's answer, as the API gives it.
+        const answer = { status: 200, body: { path: '/api/health', data: { ok: true, projectRoot: '/games/chef', projectRootOk: true } } };
+
+        // Act.
+        const root = rules.healthProjectRoot(answer);
+
+        // Assert.
+        expect(root)
+          .toBe('/games/chef');
+      });
+
+      it('reads no project out of any other answer', () =>
+      {
+        // Arrange: the same data under an error status, no body, a body that is text, no data, an API serving no project,
+        // which leaves the folder out, a folder outside the data, and a folder that is not text.
+        const answers = [
+          { status: 503, body: { data: { ok: true, projectRoot: '/games/chef' } } },
+          { status: 200, body: null },
+          { status: 200, body: '/games/chef' },
+          { status: 200, body: { data: null } },
+          { status: 200, body: { data: { ok: true, projectRootOk: false } } },
+          { status: 200, body: { projectRoot: '/games/chef', data: { ok: true } } },
+          { status: 200, body: { data: { ok: true, projectRoot: 42 } } },
+        ];
+
+        // Act.
+        const roots = answers.map(answer => rules.healthProjectRoot(answer));
+
+        // Assert.
+        expect(roots)
+          .toStrictEqual([ '', '', '', '', '', '', '' ]);
+      });
+    });
   });
 
   /*
@@ -576,33 +690,26 @@ describe('shellRules', () =>
    * alone: its config in the XDG config folder and its logs in the XDG state folder, under the editor's own name. It
    * serves its pages and its API from one loopback origin on a fixed port, the config's when it names a usable one,
    * since everything the pages save belongs to that origin. The config is written by hand, so text that is not a config
-   * is refused rather than half read. Before the API starts, the project must be chosen, there, and an RPG Maker MZ
-   * project, because the API's health check only says one is set; the API counts as ready only once that check answers
-   * ok; and whatever stops the editor is put in plain words that name the log saying more.
+   * is refused rather than half read, and a folder in it may start from ~ as it would in a terminal, since no shell
+   * expands the file first. Before the API starts, the project must be chosen, there, and an RPG Maker MZ project,
+   * because the API's health check only says one is set; the API counts as ready only once that check answers ok; and
+   * whatever stops the editor is put in plain words that name the log saying more.
    */
   describe('bundle mode', () =>
   {
     describe('isBundled', () =>
     {
-      it('finds a bundle by the manifest beside the shell\'s folder, and lays the bundle out around it', () =>
+      it('finds a bundle by the manifest beside the shell\'s folder', () =>
       {
         // Arrange: a bundle whose build wrote its manifest.
         const exists = (filePath: string) => filePath === '/opt/jmz-editor-1/bundle.json';
 
         // Act.
-        const found = [ rules.isBundled('/opt/jmz-editor-1/editor', exists), rules.bundleLayout('/opt/jmz-editor-1/editor') ];
+        const found = rules.isBundled('/opt/jmz-editor-1/editor', exists);
 
         // Assert.
         expect(found)
-          .toStrictEqual([
-            true,
-            {
-              root: '/opt/jmz-editor-1',
-              manifest: '/opt/jmz-editor-1/bundle.json',
-              api: '/opt/jmz-editor-1/server/jmz-api',
-              ui: '/opt/jmz-editor-1/ui',
-            },
-          ]);
+          .toBe(true);
       });
 
       it('runs a checkout as the dev stack, even beside a manifest in the shell\'s own folder', () =>
@@ -616,6 +723,26 @@ describe('shellRules', () =>
         // Assert.
         expect(found)
           .toBe(false);
+      });
+    });
+
+    describe('bundleLayout', () =>
+    {
+      it('lays a bundle out around the folder above the shell\'s: the manifest, the API\'s binary and the UI\'s pages', () =>
+      {
+        // Arrange: nothing to set up; the shell sits in the bundle's editor folder, as the build puts it.
+
+        // Act.
+        const layout = rules.bundleLayout('/opt/jmz-editor-1/editor');
+
+        // Assert.
+        expect(layout)
+          .toStrictEqual({
+            root: '/opt/jmz-editor-1',
+            manifest: '/opt/jmz-editor-1/bundle.json',
+            api: '/opt/jmz-editor-1/server/jmz-api',
+            ui: '/opt/jmz-editor-1/ui',
+          });
       });
     });
 
@@ -669,7 +796,7 @@ describe('shellRules', () =>
         const texts = [ '{ "projectRoot": " /games/chef ", "port": 47390, "theme": "dark" }', '{ "port": 1 }', '{ "port": 65535 }' ];
 
         // Act.
-        const configs = texts.map(text => rules.parseBundleConfig(text));
+        const configs = texts.map(text => rules.parseBundleConfig(text, '/home/maker'));
 
         // Assert.
         expect(configs)
@@ -682,11 +809,32 @@ describe('shellRules', () =>
         const texts = [ null, '{}', '{ "projectRoot": null, "port": null }' ];
 
         // Act.
-        const configs = texts.map(text => rules.parseBundleConfig(text));
+        const configs = texts.map(text => rules.parseBundleConfig(text, '/home/maker'));
 
         // Assert.
         expect(configs)
           .toStrictEqual([ { projectRoot: '', port: null }, { projectRoot: '', port: null }, { projectRoot: '', port: null } ]);
+      });
+
+      it('counts a folder starting with ~ from the home folder, as a terminal does, and leaves any other ~ as written', () =>
+      {
+        // Arrange: ~ alone, ~ and a folder, the same padded with spaces, then near misses: another person's home folder,
+        // a ~ inside a folder, and one at the end.
+        const texts = [
+          '{ "projectRoot": "~" }',
+          '{ "projectRoot": "~/games/chef" }',
+          '{ "projectRoot": " ~/games/chef " }',
+          '{ "projectRoot": "~maker/games/chef" }',
+          '{ "projectRoot": "/games/~/chef" }',
+          '{ "projectRoot": "games/~" }',
+        ];
+
+        // Act.
+        const roots = texts.map(text => rules.parseBundleConfig(text, '/home/maker')?.projectRoot);
+
+        // Assert.
+        expect(roots)
+          .toStrictEqual([ '/home/maker', '/home/maker/games/chef', '/home/maker/games/chef', '~maker/games/chef', '/games/~/chef', 'games/~' ]);
       });
 
       it('refuses text that is not a config, rather than reading part of it', () =>
@@ -710,7 +858,7 @@ describe('shellRules', () =>
         ];
 
         // Act.
-        const configs = texts.map(text => rules.parseBundleConfig(text));
+        const configs = texts.map(text => rules.parseBundleConfig(text, '/home/maker'));
 
         // Assert.
         expect(configs)
@@ -720,7 +868,7 @@ describe('shellRules', () =>
 
     describe('bundleProjectRoot', () =>
     {
-      it('takes --project-root first, then JMZ_PROJECT_ROOT, then the config', () =>
+      it('takes --project-root first, then JMZ_PROJECT_ROOT, then the config, and says which named the folder', () =>
       {
         // Arrange: all three set, then the flag gone, then the variable gone too.
         const config = { projectRoot: '/games/from-config' };
@@ -735,25 +883,34 @@ describe('shellRules', () =>
 
         // Assert.
         expect(roots)
-          .toStrictEqual([ '/games/from-flag', '/games/from-environment', '/games/from-config' ]);
+          .toStrictEqual([
+            { projectRoot: '/games/from-flag', source: 'flag' },
+            { projectRoot: '/games/from-environment', source: 'variable' },
+            { projectRoot: '/games/from-config', source: 'config' },
+          ]);
       });
 
-      it('makes a relative folder absolute from where the editor was started', () =>
+      it('makes a relative folder absolute from where the editor was started, wherever it came from', () =>
       {
-        // Arrange: a relative flag, and a relative config.
+        // Arrange: a relative flag, a relative variable, and a relative config.
 
         // Act.
         const roots = [
           rules.bundleProjectRoot([ '--project-root=games/chef' ], {}, { projectRoot: '' }, '/home/maker'),
+          rules.bundleProjectRoot([], { JMZ_PROJECT_ROOT: 'games/env' }, { projectRoot: '' }, '/home/maker'),
           rules.bundleProjectRoot([], {}, { projectRoot: './chef/' }, '/home/maker'),
         ];
 
         // Assert.
         expect(roots)
-          .toStrictEqual([ '/home/maker/games/chef', '/home/maker/chef' ]);
+          .toStrictEqual([
+            { projectRoot: '/home/maker/games/chef', source: 'flag' },
+            { projectRoot: '/home/maker/games/env', source: 'variable' },
+            { projectRoot: '/home/maker/chef', source: 'config' },
+          ]);
       });
 
-      it('answers an empty folder when none is set, a blank variable included', () =>
+      it('answers an empty folder when none is set, a blank variable included, and the config as the place to set one', () =>
       {
         // Arrange: no flag, a variable of spaces, and an empty config.
 
@@ -762,11 +919,23 @@ describe('shellRules', () =>
 
         // Assert.
         expect(root)
-          .toBe('');
+          .toStrictEqual({ projectRoot: '', source: 'config' });
+      });
+
+      it('passes over a blank variable to the config\'s folder', () =>
+      {
+        // Arrange: no flag, a variable of spaces, and a config naming a folder.
+
+        // Act.
+        const root = rules.bundleProjectRoot([], { JMZ_PROJECT_ROOT: '   ' }, { projectRoot: '/games/from-config' }, '/home/maker');
+
+        // Assert.
+        expect(root)
+          .toStrictEqual({ projectRoot: '/games/from-config', source: 'config' });
       });
     });
 
-    describe('origin and environment', () =>
+    describe('bundlePort', () =>
     {
       it('uses the config\'s port when it sets one, and the bundle\'s own otherwise', () =>
       {
@@ -779,8 +948,11 @@ describe('shellRules', () =>
         expect(ports)
           .toStrictEqual([ 47390, 47380 ]);
       });
+    });
 
-      it('serves the pages and the API from one loopback origin on that port', () =>
+    describe('bundleOrigin', () =>
+    {
+      it('serves the pages and the API from one loopback origin on the port', () =>
       {
         // Arrange: the bundle's own port.
 
@@ -791,8 +963,11 @@ describe('shellRules', () =>
         expect(origin)
           .toBe('http://127.0.0.1:47380');
       });
+    });
 
-      it('starts the API on that origin, allowing it alone, on the project, serving the pages, and ending with the shell', () =>
+    describe('bundleServerEnvironment', () =>
+    {
+      it('starts the API on the bundle\'s origin, allowing it alone, on the project, serving the pages, and ending with the shell', () =>
       {
         // Arrange: a project folder with a space in it.
 
@@ -805,6 +980,44 @@ describe('shellRules', () =>
             JMZ_API_ADDRESS: '127.0.0.1:47380',
             JMZ_UI_ORIGINS: 'http://127.0.0.1:47380',
             JMZ_PROJECT_ROOT: '/games/chef adventure',
+            JMZ_UI_DIR: '/opt/jmz-editor-1/ui',
+            JMZ_EXIT_WITH_PARENT: '1',
+          });
+      });
+    });
+
+    describe('apiSpawnOptions', () =>
+    {
+      it('gives the API a stdin the shell holds open, since it ends once that closes, and its log for both its outputs', () =>
+      {
+        // Arrange: the API's log, opened as descriptor 7. The API ends the moment its stdin closes, which is how it ends
+        // with the shell however the shell ends; a stdin ignored would end it the moment it started.
+
+        // Act.
+        const { stdio } = rules.apiSpawnOptions({}, {}, 7);
+
+        // Assert.
+        expect(stdio)
+          .toStrictEqual([ 'pipe', 7, 7 ]);
+      });
+
+      it('runs the API on the shell\'s environment, with the bundle\'s variables over any the environment already sets', () =>
+      {
+        // Arrange: an environment carrying a variable the API needs from it, and stale values of two the bundle sets,
+        // one of which would keep the API running after the shell is gone.
+        const environment = { PATH: '/usr/bin:/bin', JMZ_PROJECT_ROOT: '/games/elsewhere', JMZ_EXIT_WITH_PARENT: '0' };
+        const variables = rules.bundleServerEnvironment('http://127.0.0.1:47380', '/games/chef', '/opt/jmz-editor-1/ui');
+
+        // Act.
+        const { env } = rules.apiSpawnOptions(environment, variables, 7);
+
+        // Assert.
+        expect(env)
+          .toStrictEqual({
+            PATH: '/usr/bin:/bin',
+            JMZ_API_ADDRESS: '127.0.0.1:47380',
+            JMZ_UI_ORIGINS: 'http://127.0.0.1:47380',
+            JMZ_PROJECT_ROOT: '/games/chef',
             JMZ_UI_DIR: '/opt/jmz-editor-1/ui',
             JMZ_EXIT_WITH_PARENT: '1',
           });
@@ -887,17 +1100,20 @@ describe('shellRules', () =>
       });
     });
 
+    // what the shell knows when something stops the bundled editor, and every problem it can report.
+    const FACTS = {
+      projectRoot: '/games/gone',
+      rootSource: 'config',
+      port: 47380,
+      config: '/home/maker/.config/jmz-editor/config.json',
+      apiLog: '/home/maker/.local/state/jmz-editor/api.log',
+      shellLog: '/home/maker/.local/state/jmz-editor/shell.log',
+    };
+    const PROBLEMS = [ 'no-project', 'missing-project', 'not-a-project', 'bad-config', 'port-in-use', 'api-start-failed', 'api-stopped', 'api-silent', 'crashed' ];
+
     describe('problemText', () =>
     {
-      const FACTS = {
-        projectRoot: '/games/gone',
-        port: 47380,
-        config: '/home/maker/.config/jmz-editor/config.json',
-        apiLog: '/home/maker/.local/state/jmz-editor/api.log',
-        shellLog: '/home/maker/.local/state/jmz-editor/shell.log',
-      };
-
-      it('says a port is taken in plain words, how to free it, and where the log is', () =>
+      it('says a port is taken in plain words, how to free it, how to start afresh, and where the log is', () =>
       {
         // Arrange: the facts above.
 
@@ -910,18 +1126,134 @@ describe('shellRules', () =>
             'Port 47380 is already in use by another program.',
             '',
             'Close that program, or set "port" in /home/maker/.config/jmz-editor/config.json to a free port.',
+            'Then close this window and open the editor again.',
             '',
             'The log is at /home/maker/.local/state/jmz-editor/shell.log',
           ].join('\n'));
       });
 
-      it('names the shell\'s log for what the shell found, and the API\'s for what became of the API', () =>
+      it('points the fix for a folder that is not there at the config, when the config named it', () =>
       {
-        // Arrange: every problem the shell can report.
-        const problems = [ 'no-project', 'missing-project', 'not-a-project', 'bad-config', 'port-in-use', 'api-stopped', 'api-silent', 'crashed' ];
+        // Arrange: the facts above, whose folder came from the config.
 
         // Act.
-        const lastLines = problems.map(problem => rules.problemText(problem, FACTS)
+        const text = rules.problemText('missing-project', FACTS);
+
+        // Assert.
+        expect(text)
+          .toBe([
+            'The project folder isn\'t there:',
+            '/games/gone',
+            '',
+            'Set "projectRoot" in /home/maker/.config/jmz-editor/config.json to your game\'s folder.',
+            'Then close this window and open the editor again.',
+            '',
+            'The log is at /home/maker/.local/state/jmz-editor/shell.log',
+          ].join('\n'));
+      });
+
+      it('names JMZ_PROJECT_ROOT as where the folder came from, since it wins over the config, and points the fix at it', () =>
+      {
+        // Arrange: the folder named by the variable, which a fix made in the config would never reach.
+        const facts = { ...FACTS, rootSource: 'variable' };
+
+        // Act.
+        const text = rules.problemText('missing-project', facts);
+
+        // Assert.
+        expect(text)
+          .toBe([
+            'The project folder isn\'t there:',
+            '/games/gone',
+            '',
+            'This folder comes from JMZ_PROJECT_ROOT, which wins over the config.',
+            'Set it to your game\'s folder, or remove it to use "projectRoot" in /home/maker/.config/jmz-editor/config.json.',
+            'Then close this window and open the editor again.',
+            '',
+            'The log is at /home/maker/.local/state/jmz-editor/shell.log',
+          ].join('\n'));
+      });
+
+      it('names --project-root as where the folder came from, since it wins over the config, and points the fix at it', () =>
+      {
+        // Arrange: the folder named by the flag the editor was started with.
+        const facts = { ...FACTS, rootSource: 'flag' };
+
+        // Act.
+        const text = rules.problemText('missing-project', facts);
+
+        // Assert.
+        expect(text)
+          .toBe([
+            'The project folder isn\'t there:',
+            '/games/gone',
+            '',
+            'This folder comes from the --project-root the editor was started with, which wins over the config.',
+            'Use your game\'s folder there, or leave the flag out to use "projectRoot" in /home/maker/.config/jmz-editor/config.json.',
+            'Then close this window and open the editor again.',
+            '',
+            'The log is at /home/maker/.local/state/jmz-editor/shell.log',
+          ].join('\n'));
+      });
+
+      it('points the fix for a folder that is not a project at where the folder came from, as for one not there', () =>
+      {
+        // Arrange: a folder that is not a project, named by each of the three.
+        const sources = [ 'config', 'variable', 'flag' ];
+
+        // Act.
+        const fixes = sources.map(rootSource => rules.problemText('not-a-project', { ...FACTS, rootSource })
+          .split('\n')[3]);
+
+        // Assert.
+        expect(fixes)
+          .toStrictEqual([
+            'Set "projectRoot" in /home/maker/.config/jmz-editor/config.json to your game\'s folder.',
+            'This folder comes from JMZ_PROJECT_ROOT, which wins over the config.',
+            'This folder comes from the --project-root the editor was started with, which wins over the config.',
+          ]);
+      });
+
+      it('says the config cannot be read, what to make it hold, how to start afresh, and where the log is', () =>
+      {
+        // Arrange: the facts above.
+
+        // Act.
+        const text = rules.problemText('bad-config', FACTS);
+
+        // Assert.
+        expect(text)
+          .toBe([
+            'The settings in /home/maker/.config/jmz-editor/config.json can\'t be read.',
+            '',
+            'Make it hold { "projectRoot": "/path/to/your/game" }, and "port" too when the editor needs another port:',
+            'a whole number from 1 to 65535.',
+            'Then close this window and open the editor again.',
+            '',
+            'The log is at /home/maker/.local/state/jmz-editor/shell.log',
+          ].join('\n'));
+      });
+
+      it('asks the person to close this window before opening the editor again wherever they have something to put right', () =>
+      {
+        // Arrange: every problem above: first the ones the person fixes in the config or by closing another program,
+        // then the ones they cannot fix, where there is nothing to start afresh for.
+
+        // Act.
+        const asked = PROBLEMS.map(problem => rules.problemText(problem, FACTS)
+          .includes('close this window and open the editor again.'));
+
+        // Assert.
+        expect(asked)
+          .toStrictEqual([ true, true, true, true, true, false, false, false, false ]);
+      });
+
+      it('names the API\'s log where the API ran and could have written to it, and the shell\'s everywhere else', () =>
+      {
+        // Arrange: every problem above.
+
+        // Act.
+        const lastLines = PROBLEMS.map(problem => rules.problemText(problem, FACTS)
           .split('\n')
           .at(-1));
 
@@ -933,10 +1265,27 @@ describe('shellRules', () =>
             'The log is at /home/maker/.local/state/jmz-editor/shell.log',
             'The log is at /home/maker/.local/state/jmz-editor/shell.log',
             'The log is at /home/maker/.local/state/jmz-editor/shell.log',
+            'The log is at /home/maker/.local/state/jmz-editor/shell.log',
             'The log is at /home/maker/.local/state/jmz-editor/api.log',
             'The log is at /home/maker/.local/state/jmz-editor/api.log',
             'The log is at /home/maker/.local/state/jmz-editor/shell.log',
           ]);
+      });
+
+      it('says the server could not start, apart from its stopping, and names the shell\'s log, the one holding the reason', () =>
+      {
+        // Arrange: the facts above, for a server that never ran, so never wrote a word to its own log.
+
+        // Act.
+        const text = rules.problemText('api-start-failed', FACTS);
+
+        // Assert.
+        expect(text)
+          .toBe([
+            'The editor\'s server couldn\'t start.',
+            '',
+            'The log is at /home/maker/.local/state/jmz-editor/shell.log',
+          ].join('\n'));
       });
 
       it('names the folder and the config wherever the person has a project to fix', () =>
@@ -954,6 +1303,118 @@ describe('shellRules', () =>
         // Assert.
         expect(named)
           .toStrictEqual([ [ false, true ], [ true, true ], [ true, true ], [ false, true ] ]);
+      });
+    });
+
+    /*
+     * A second launch hands itself over to the copy already running, which decides what to do with it. When a problem
+     * the person can put right stopped the start, they have likely just put it right, so the start runs again; the very
+     * problems whose window asks for a fresh start are the ones that run again, so the window never promises a fresh
+     * start a relaunch would not give. The start runs again only once its error window is on screen to be replaced, since
+     * one still opening could not be closed, and would stay up. Otherwise an error window comes forward, since it says
+     * what is wrong; then the editor's window, opened again when it was closed; and before the windows can open, nothing,
+     * since the first one is on its way already.
+     */
+    describe('relaunchAction', () =>
+    {
+      // nothing stopped the start, no error window is up or opening, and the windows cannot open yet.
+      const STATE = { problem: '', problemsOpening: 0, problemsShown: 0, editorReady: false };
+
+      it('runs the start again when a problem the person can put right stopped it and its window is on screen', () =>
+      {
+        // Arrange: a project folder that was not there, its window up.
+        const state = { ...STATE, problem: 'missing-project', problemsShown: 1 };
+
+        // Act.
+        const action = rules.relaunchAction(state);
+
+        // Assert.
+        expect(action)
+          .toBe('run-again');
+      });
+
+      it('runs the start again for exactly the problems whose window asks for a fresh start', () =>
+      {
+        // Arrange: every problem above, each with its window up.
+
+        // Act.
+        const runsAgain = PROBLEMS.map(problem => rules.relaunchAction({ ...STATE, problem, problemsShown: 1 }) === 'run-again');
+        const asksForFreshStart = PROBLEMS.map(problem => rules.problemText(problem, FACTS)
+          .includes('close this window and open the editor again.'));
+
+        // Assert.
+        expect([ runsAgain, asksForFreshStart ])
+          .toStrictEqual([
+            [ true, true, true, true, true, false, false, false, false ],
+            [ true, true, true, true, true, false, false, false, false ],
+          ]);
+      });
+
+      it('brings the error window forward for a problem a fresh start would not put right', () =>
+      {
+        // Arrange: a server that never answered, its window up.
+        const state = { ...STATE, problem: 'api-silent', problemsShown: 1 };
+
+        // Act.
+        const action = rules.relaunchAction(state);
+
+        // Assert.
+        expect(action)
+          .toBe('focus-problem');
+      });
+
+      it('runs nothing again while the error window is still opening, bringing forward one already up', () =>
+      {
+        // Arrange: a problem that runs again, its window still opening, alone and beside one already up.
+        const states = [
+          { ...STATE, problem: 'missing-project', problemsOpening: 1 },
+          { ...STATE, problem: 'missing-project', problemsOpening: 1, problemsShown: 1 },
+        ];
+
+        // Act.
+        const actions = states.map(state => rules.relaunchAction(state));
+
+        // Assert.
+        expect(actions)
+          .toStrictEqual([ 'wait', 'focus-problem' ]);
+      });
+
+      it('brings an error window forward while nothing has stopped the start, as while it runs again', () =>
+      {
+        // Arrange: the start running again, the window it will replace still up, and the windows able to open.
+        const state = { ...STATE, problemsShown: 1, editorReady: true };
+
+        // Act.
+        const action = rules.relaunchAction(state);
+
+        // Assert.
+        expect(action)
+          .toBe('focus-problem');
+      });
+
+      it('opens the editor\'s window again, or brings it forward, once the windows can open', () =>
+      {
+        // Arrange: the editor running, no error window up.
+        const state = { ...STATE, editorReady: true };
+
+        // Act.
+        const action = rules.relaunchAction(state);
+
+        // Assert.
+        expect(action)
+          .toBe('open-editor');
+      });
+
+      it('does nothing before the windows can open, since the first one is on its way already', () =>
+      {
+        // Arrange: nothing to set up; the state above is a start still on its way.
+
+        // Act.
+        const action = rules.relaunchAction(STATE);
+
+        // Assert.
+        expect(action)
+          .toBe('wait');
       });
     });
   });

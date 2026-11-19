@@ -19,7 +19,8 @@ type ProjectPathValue = {
    */
   projectReloadGeneration: number;
   /**
-   * Re-reads {@code .config/config.yaml} (when present), updates {@link projectRoot}, then refreshes system data and all resource providers.
+   * Reads the project afresh from disk: bumps {@link projectReloadGeneration}, which has the system data and every
+   * resource provider fetch again. The root stays as it is.
    */
   reloadProjectFromDisk: () => Promise<void>;
 };
@@ -52,23 +53,14 @@ export function ProjectPathProvider({ initialProjectRoot, children }: ProjectPat
     [ projectRoot ]
   );
 
-  useEffect(() =>
-  {
-    // no-op.
-  }, []);
-
   const reloadProjectFromDisk = useCallback(async () =>
   {
     setProjectReloadGeneration((n) => n + 1);
   }, []);
 
+  // the root is never empty: the backend gate starts the editor only on a health check naming one.
   useEffect(() =>
   {
-    if (!projectRoot)
-    {
-      return;
-    }
-
     SystemService.loadSystemData(rmmzDataPath)
       .then(() =>
       {

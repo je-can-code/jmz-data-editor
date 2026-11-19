@@ -1,7 +1,7 @@
 // The NW.js shell's decisions, kept apart from main.js so they can be tested without NW.js: reading the app's
 // flags, deciding which page boots, naming and vetting the windows pages ask for, what a page may read off the
-// clipboard, how a project's playtest is started and judged, and how the bundled editor finds its files, its
-// project and its address, and when its API is ready.
+// clipboard, how a project's playtest is started and judged, what the API's health check says, and how the bundled
+// editor finds its files, its project and its address, and starts its API.
 const crypto = require('node:crypto');
 const path = require('node:path');
 
@@ -352,6 +352,18 @@ function playOutcome(exit)
 }
 
 /**
+ * Builds the options a playtest starts with, so the game outlives the editor as a game started from a terminal does,
+ * and closing the editor never ends a playtest. It is detached, the leader of a process group of its own, so no signal
+ * sent to the editor's group reaches it; and its streams are ignored, so it holds no pipe to the editor, which would
+ * end the game, or stall it, once the editor is gone. The shell still lets go of the process itself once it starts.
+ * @returns {{ detached: true, stdio: 'ignore' }} The options.
+ */
+function playtestSpawnOptions()
+{
+  return { detached: true, stdio: 'ignore' };
+}
+
+/**
  * Builds the environment the Go API reads its configuration from, out of the same origins that tell the UI
  * where everything is: the address to listen on, from the API base, and the one page origin allowed to call it,
  * from the UI's URL. A UI moved off port 3000 is then allowed, and the default origins are not.
@@ -466,15 +478,36 @@ function isPort(value)
 }
 
 /**
+ * Expands the ~ a folder written by hand may start with into the person's home folder, as a terminal would: ~ alone, or
+ * ~ and a slash before the rest. A ~ anywhere else is part of a folder's name, and ~name, which a terminal reads as
+ * another person's home folder, is left as written.
+ * @param {string} folder The folder, as written.
+ * @param {string} homeDirectory The person's home folder.
+ * @returns {string} The folder, its leading ~ expanded.
+ */
+function expandHome(folder, homeDirectory)
+{
+  if (folder === '~')
+  {
+    return homeDirectory;
+  }
+
+  return folder.startsWith('~/') ? path.join(homeDirectory, folder.slice(2)) : folder;
+}
+
+/**
  * Reads the bundled editor's config, which the person writes by hand: an object naming the project's folder as
  * projectRoot and, when the bundle's own port will not do, a port. No file at all is a config with nothing set, and a
  * key left out or set to null is unset. Keys it does not know are left alone. Text it cannot make sense of is refused
- * rather than half read, so the person learns the file is wrong instead of being told nothing is set.
+ * rather than half read, so the person learns the file is wrong instead of being told nothing is set. A folder written
+ * from ~ counts from the person's home folder, as it would in a terminal: no shell reads this file to expand it first,
+ * as one does a folder given on the command line.
  * @param {string | null} text The file's text, or null when there is no file.
+ * @param {string} homeDirectory The person's home folder.
  * @returns {{ projectRoot: string, port: number | null } | null} The settings, with an empty folder and a null port
  * for whichever is unset, or null when the text is not a config.
  */
-function parseBundleConfig(text)
+function parseBundleConfig(text, homeDirectory)
 {
   if (text === null)
   {
@@ -503,24 +536,39 @@ function parseBundleConfig(text)
     return null;
   }
 
-  return { projectRoot: projectRoot.trim(), port };
+  return { projectRoot: expandHome(projectRoot.trim(), homeDirectory), port };
 }
 
 /**
  * Picks the bundled editor's project by the dev stack's precedence: --project-root, then JMZ_PROJECT_ROOT, then the
- * config. A relative folder counts from where the editor was started, and is made absolute here, so the root check,
- * the API and Play all name the one folder.
+ * config, and says which of them named it. The flag and the variable each win over the config, so a fix for a wrong
+ * folder belongs wherever the folder came from; with none set, the config is the place to set one. A relative folder
+ * counts from where the editor was started, and is made absolute here, so the root check, the API and Play all name the
+ * one folder.
  * @param {string[]} argv The app's arguments.
  * @param {Record<string, string | undefined>} environment The process's environment.
  * @param {{ projectRoot: string }} config The config's settings.
  * @param {string} workingDirectory The folder the editor was started from.
- * @returns {string} The project's absolute folder, or an empty string when none is set.
+ * @returns {{ projectRoot: string, source: 'flag' | 'variable' | 'config' }} The project's absolute folder, or an
+ * empty string when none is set, and where it came from.
  */
 function bundleProjectRoot(argv, environment, config, workingDirectory)
 {
+  const fromFlag = readFlag(argv, '--project-root');
+  if (fromFlag !== null)
+  {
+    return { projectRoot: path.resolve(workingDirectory, fromFlag), source: 'flag' };
+  }
+
+  // a variable of spaces names no folder, so it leaves the choice to the config.
   const fromEnvironment = (environment.JMZ_PROJECT_ROOT || '').trim();
-  const chosen = readFlag(argv, '--project-root') || fromEnvironment || config.projectRoot;
-  return chosen === '' ? '' : path.resolve(workingDirectory, chosen);
+  if (fromEnvironment !== '')
+  {
+    return { projectRoot: path.resolve(workingDirectory, fromEnvironment), source: 'variable' };
+  }
+
+  const fromConfig = config.projectRoot;
+  return { projectRoot: fromConfig === '' ? '' : path.resolve(workingDirectory, fromConfig), source: 'config' };
 }
 
 /**
@@ -566,6 +614,26 @@ function bundleServerEnvironment(origin, projectRoot, uiDirectory)
 }
 
 /**
+ * Builds the options the bundle's API starts with. Its stdin is a pipe the shell holds for the life of the app: the API
+ * ends the moment its stdin closes, which is how it ends with the shell however the shell ends, so with its stdin
+ * ignored it would end the moment it started. Both of its outputs go to its log, the one place anything it says can be
+ * read after a desktop launch. It runs on the shell's own environment with the bundle's variables over it, so a value
+ * the environment happens to carry never moves the API off the bundle's origin, project or pages, nor keeps it running
+ * once the shell is gone.
+ * @param {Record<string, string | undefined>} environment The shell's own environment.
+ * @param {Record<string, string>} serverVariables The variables the API reads its configuration from.
+ * @param {number} output The API's log, open for appending.
+ * @returns {{ env: Record<string, string | undefined>, stdio: [ 'pipe', number, number ] }} The options.
+ */
+function apiSpawnOptions(environment, serverVariables, output)
+{
+  return {
+    env: { ...environment, ...serverVariables },
+    stdio: [ 'pipe', output, output ],
+  };
+}
+
+/**
  * Checks the project before the API starts on it, since the API's health check only says a project is set, never that
  * one is there: a project must be chosen, its folder must be there, and it must be an RPG Maker MZ project, which always
  * has data/System.json.
@@ -589,6 +657,25 @@ function projectRootProblem(projectRoot, exists)
 }
 
 /**
+ * Reads the data out of the API's answer to its health check: what a 200 carries in its envelope's data. Any other
+ * answer, an error, a body that is not JSON, or one that is not the API's envelope, carries none.
+ * @param {{ status: number, body: unknown }} answer The status, and the body, parsed.
+ * @returns {Record<string, unknown>} The data, or an empty object for an answer carrying none, which says neither that
+ * the API is ready nor which project it serves.
+ */
+function healthData(answer)
+{
+  const { status, body } = answer;
+  if (status !== 200 || body === null || typeof body !== 'object')
+  {
+    return {};
+  }
+
+  const { data } = body;
+  return data !== null && typeof data === 'object' ? data : {};
+}
+
+/**
  * Reports whether the API's answer to its health check says it is ready: a 200 whose data says ok. Any other answer is
  * an API not ready yet, or not the editor's at all.
  * @param {{ status: number, body: unknown }} answer The status, and the body, parsed.
@@ -596,93 +683,179 @@ function projectRootProblem(projectRoot, exists)
  */
 function isApiReady(answer)
 {
-  const { status, body } = answer;
-  if (status !== 200 || body === null || typeof body !== 'object')
-  {
-    return false;
-  }
-
-  const { data } = body;
-  return data !== null && typeof data === 'object' && data.ok === true;
+  return healthData(answer).ok === true;
 }
 
 /**
+ * Reads which project the API serves out of its answer to the health check: the folder a 200's data names. The API is
+ * the one place that knows which project is open, whether the shell started it or attached to one already running. Any
+ * other answer names none, and neither does an API serving no project, which leaves the folder out.
+ * @param {{ status: number, body: unknown }} answer The status, and the body, parsed.
+ * @returns {string} The project's folder, or an empty string when the answer names none.
+ */
+function healthProjectRoot(answer)
+{
+  const { projectRoot } = healthData(answer);
+  return typeof projectRoot === 'string' ? projectRoot : '';
+}
+
+/**
+ * How the person points the editor at their game, by where the editor took the project from: the flag it was started
+ * with, JMZ_PROJECT_ROOT, or the config. The flag and the variable each win over the config, so while either names a
+ * folder, a fix made in the config changes nothing, and neither does a relaunch, which runs on the first launch's own
+ * flags and environment. Each says where the folder came from, and how to fall back to the config instead.
+ */
+const ROOT_FIXES = {
+  flag: facts => [
+    'This folder comes from the --project-root the editor was started with, which wins over the config.',
+    `Use your game's folder there, or leave the flag out to use "projectRoot" in ${facts.config}.`,
+  ],
+  variable: facts => [
+    'This folder comes from JMZ_PROJECT_ROOT, which wins over the config.',
+    `Set it to your game's folder, or remove it to use "projectRoot" in ${facts.config}.`,
+  ],
+  config: facts => [
+    `Set "projectRoot" in ${facts.config} to your game's folder.`,
+  ],
+};
+
+/**
  * What the bundled editor's error window says about each thing that can stop it, in plain words, line by line, and the
- * log that says more: the shell's, for what the shell found before starting the API, and the API's, for what became of
- * the API. A desktop launch has no terminal, so this window is the one place the person learns what went wrong.
+ * log that says more: the API's, where the API ran and could have written why it stopped, and the shell's everywhere
+ * else, both for what the shell found before starting the API and for an API that could not start at all, which never
+ * wrote a word of its own. A desktop launch has no terminal, so this window is the one place the person learns what
+ * went wrong.
+ *
+ * Whatever the person can put right themselves reruns on a relaunch, and that one setting decides two things: the
+ * window ends by asking them to close it and open the editor again, so the editor starts afresh and runs every check
+ * again, and a second launch while the window is still up runs the start again in this copy (see relaunchAction). The
+ * two can never part, so the window never promises a fresh start that a relaunch would not give.
  */
 const PROBLEMS = {
   'no-project': {
     log: 'shellLog',
+    rerunsOnRelaunch: true,
     lines: facts => [
       'No project is chosen yet.',
       '',
-      `Set "projectRoot" in ${facts.config} to your game's folder, then open the editor again.`,
+      ...ROOT_FIXES.config(facts),
     ],
   },
   'missing-project': {
     log: 'shellLog',
+    rerunsOnRelaunch: true,
     lines: facts => [
       'The project folder isn\'t there:',
       facts.projectRoot,
       '',
-      `Set "projectRoot" in ${facts.config} to your game's folder.`,
+      ...ROOT_FIXES[facts.rootSource](facts),
     ],
   },
   'not-a-project': {
     log: 'shellLog',
+    rerunsOnRelaunch: true,
     lines: facts => [
       'This folder isn\'t an RPG Maker MZ project, since it has no data/System.json:',
       facts.projectRoot,
       '',
-      `Set "projectRoot" in ${facts.config} to your game's folder.`,
+      ...ROOT_FIXES[facts.rootSource](facts),
     ],
   },
   'bad-config': {
     log: 'shellLog',
+    rerunsOnRelaunch: true,
     lines: facts => [
       `The settings in ${facts.config} can't be read.`,
       '',
-      'The file should hold { "projectRoot": "/path/to/your/game" }, and "port" too when the editor needs another',
-      'port: a whole number from 1 to 65535.',
+      'Make it hold { "projectRoot": "/path/to/your/game" }, and "port" too when the editor needs another port:',
+      'a whole number from 1 to 65535.',
     ],
   },
   'port-in-use': {
     log: 'shellLog',
+    rerunsOnRelaunch: true,
     lines: facts => [
       `Port ${facts.port} is already in use by another program.`,
       '',
       `Close that program, or set "port" in ${facts.config} to a free port.`,
     ],
   },
+  'api-start-failed': {
+    log: 'shellLog',
+    rerunsOnRelaunch: false,
+    lines: () => [ 'The editor\'s server couldn\'t start.' ],
+  },
   'api-stopped': {
     log: 'apiLog',
+    rerunsOnRelaunch: false,
     lines: () => [ 'The editor\'s server stopped.' ],
   },
   'api-silent': {
     log: 'apiLog',
+    rerunsOnRelaunch: false,
     lines: () => [ 'The editor\'s server didn\'t answer in time.' ],
   },
   'crashed': {
     log: 'shellLog',
+    rerunsOnRelaunch: false,
     lines: () => [ 'The editor couldn\'t start.' ],
   },
 };
 
 /**
- * Words what went wrong for the error window, and names the log that says more.
+ * How every window for a problem that reruns on a relaunch ends, once the person knows what to put right.
+ */
+const START_AFRESH = 'Then close this window and open the editor again.';
+
+/**
+ * Words what went wrong for the error window, and names the log that says more. A problem the person can put right
+ * ends by asking for a fresh start, which a relaunch gives as well.
  * @param {string} problem What went wrong, one of the problems above.
- * @param {{ projectRoot: string, port: number, config: string, apiLog: string, shellLog: string }} facts The project,
- * the port, and the config and log files, as the bundle has them.
+ * @param {{ projectRoot: string, rootSource: 'flag' | 'variable' | 'config', port: number, config: string,
+ * apiLog: string, shellLog: string }} facts The project and where it came from, the port, and the config and log
+ * files, as the bundle has them.
  * @returns {string} The window's text.
  */
 function problemText(problem, facts)
 {
-  const { log, lines } = PROBLEMS[problem];
-  return [ ...lines(facts), '', `The log is at ${facts[log]}` ].join('\n');
+  const { log, rerunsOnRelaunch, lines } = PROBLEMS[problem];
+  const startAfresh = rerunsOnRelaunch ? [ START_AFRESH ] : [];
+  return [ ...lines(facts), ...startAfresh, '', `The log is at ${facts[log]}` ].join('\n');
+}
+
+/**
+ * Decides what a second launch of the bundled editor does in the copy already running, which the second launch hands
+ * itself over to. When a problem the person can put right stopped the start, they have likely just put it right, so
+ * the start runs again; but only once its error window is on screen to be replaced, since one still opening could not
+ * be closed, and would stay up. Otherwise an error window comes forward, since it says what is wrong; then the editor's
+ * window, opened again when it was closed; and before the windows can open, nothing, since the first one is on its way
+ * already.
+ * @param {{ problem: string, problemsOpening: number, problemsShown: number, editorReady: boolean }} state What stopped
+ * the start or the editor, one of the problems above, or an empty string while nothing has; how many error windows are
+ * still opening, and how many are on screen; and whether the editor's window can open.
+ * @returns {'run-again' | 'focus-problem' | 'open-editor' | 'wait'} What the relaunch does.
+ */
+function relaunchAction(state)
+{
+  const { problem, problemsOpening, problemsShown, editorReady } = state;
+
+  // the problem says whether a fresh start would put it right, and its window must be up to be replaced.
+  if (problem !== '' && PROBLEMS[problem].rerunsOnRelaunch && problemsOpening === 0)
+  {
+    return 'run-again';
+  }
+
+  // an error window says what is wrong, so it comes before the editor.
+  if (problemsShown > 0)
+  {
+    return 'focus-problem';
+  }
+
+  return editorReady ? 'open-editor' : 'wait';
 }
 
 module.exports = {
+  apiSpawnOptions,
   bootPath,
   bundleLayout,
   bundleOrigin,
@@ -695,6 +868,7 @@ module.exports = {
   CLIPBOARD_KINDS,
   devStackArgs,
   hasFlag,
+  healthProjectRoot,
   isApiReady,
   isBundled,
   isGameFolder,
@@ -703,9 +877,11 @@ module.exports = {
   playOutcome,
   playReplyChannel,
   playtestProfileDirectory,
+  playtestSpawnOptions,
   problemText,
   projectRootProblem,
   readFlag,
+  relaunchAction,
   resolveWindowUrl,
   serverEnvironment,
   trimOrigin,

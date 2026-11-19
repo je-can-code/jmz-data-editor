@@ -30,7 +30,8 @@
 // stops it on the way goes in a small error window naming the log that says more, since a desktop launch has no
 // terminal. The API's output is appended to a log of its own, and the API ends with the shell however the shell ends:
 // it reads its stdin, a pipe the shell holds open for the life of the app. A second launch hands itself over to the
-// first, which brings its window forward.
+// first, which brings its window forward, or, when a problem the person can put right stopped it, runs its start again:
+// they have likely just put right what its error window named.
 //
 // Flags, read from nw.App.argv (under NW.js, process.argv holds only the binary's path):
 //   --project-root <path>   the RMMZ project, handed to the Go API
@@ -314,6 +315,24 @@ let problemsOpening = 0;
 // the first page's window, once the windows can open: a second launch of a bundle brings it forward.
 let bootWindow = null;
 
+// what stopped a bundle's start, or the editor once it ran: one of the problems the rules word, or an empty string while
+// nothing has. A second launch asks the rules what to do with it, which may be to run the start again.
+let stoppedBy = '';
+
+// the error windows a stopped start left on screen, which the next start replaces: each closes once the window taking
+// its place holds the app open, since closing the last window quits the app. One the person closes first is forgotten.
+const replacedProblems = new Set();
+
+// set while a relaunch runs the start again, until the window taking the old error windows' place is on its way. The
+// person may well close the old ones meanwhile, as their words ask, and the shell must not take that for the last window
+// closing: quitting halfway through a start would end the API it has just started.
+let rerunning = false;
+
+// a hidden window held open while a relaunch runs the start again, or null while none does. NW.js ends the app by itself
+// the moment its last window closes, whatever the shell decides, and until the new start's relay window opens, which
+// waits on its API, the old error windows are the app's only ones, which the person may well close.
+let rerunKeeper = null;
+
 // held for the life of the app, so the channel is never collected.
 let shellChannel = null;
 
@@ -321,11 +340,12 @@ let shellChannel = null;
 const playtests = new Map();
 
 /**
- * Quits once the last visible window has closed, an error window included; the hidden relay window does not count.
+ * Quits once the last visible window has closed, an error window included, unless a relaunch is running the start
+ * again, whose own window is still to come; the hidden relay window does not count.
  */
 function quitWhenLastWindowCloses()
 {
-  if (openWindows.size > 0 || opening.size > 0 || problemWindows.size > 0 || problemsOpening > 0)
+  if (rerunning || openWindows.size > 0 || opening.size > 0 || problemWindows.size > 0 || problemsOpening > 0)
   {
     return;
   }
@@ -421,13 +441,12 @@ async function openProjectRoot(apiBase)
 {
   try
   {
-    const { status, body } = await httpGetJson(`${apiBase}/api/health`, PLAY_HEALTH_TIMEOUT_MS);
-    const data = status === 200 && body !== null && typeof body === 'object' ? body.data : null;
-    const root = data !== null && typeof data === 'object' ? data.projectRoot : '';
-    return typeof root === 'string' ? root : '';
+    const answer = await httpGetJson(`${apiBase}/api/health`, PLAY_HEALTH_TIMEOUT_MS);
+    return rules.healthProjectRoot(answer);
   }
   catch
   {
+    // no answer at all names no project either.
     return '';
   }
 }
@@ -469,7 +488,9 @@ function launchPlaytest(projectRoot)
   }
 
   const args = rules.playArguments(projectRoot, profile);
-  const game = spawn(process.execPath, args, { detached: true, stdio: 'ignore' });
+  const game = spawn(process.execPath, args, rules.playtestSpawnOptions());
+
+  // the shell lets go of the game too, so the shell's own exit never waits on it.
   game.unref();
 
   // the game counts as running from its launch, so a second Play during the watch never launches another; it is
@@ -621,8 +642,9 @@ function startRelay(uiUrl, apiBase, fallbackSize, ready)
 }
 
 /**
- * Opens a small window saying what went wrong, since a desktop launch has no terminal to say it in. It keeps the app
- * open as an editor window does, so the app quits once it closes, unless editor windows are still open.
+ * Opens a small window saying what went wrong, since a desktop launch has no terminal to say it in, and brings it to
+ * the front once its words are in. It keeps the app open as an editor window does, so the app quits once it closes,
+ * unless editor windows are still open.
  * @param {string} text What went wrong, in plain words.
  */
 function showProblem(text)
@@ -632,6 +654,10 @@ function showProblem(text)
   {
     problemsOpening -= 1;
     problemWindows.add(win);
+
+    // the window taking the place of a stopped start's ones is open now, so they can go without the app ever being
+    // left with no window at all.
+    closeReplacedProblems();
     win.on('loaded', () =>
     {
       const { document } = win.window;
@@ -648,13 +674,38 @@ function showProblem(text)
       document.body.style.padding = '16px';
       document.body.style.overflowWrap = 'anywhere';
       document.body.innerText = text;
+
+      // a window replacing one after a relaunch would otherwise open behind whatever the person just fixed the config
+      // in, and look as though nothing had happened.
+      win.focus();
     });
     win.on('closed', () =>
     {
       problemWindows.delete(win);
+      replacedProblems.delete(win);
       quitWhenLastWindowCloses();
     });
   });
+}
+
+/**
+ * Closes the error windows a new start replaces, and the keeper that held the app open while it ran, once the window
+ * taking their place keeps the app open in their stead: a fresh error window once it is open, or the editor's on its
+ * way beside the relay window. From then on, closing the last window quits the app again.
+ */
+function closeReplacedProblems()
+{
+  const replaced = [ ...replacedProblems ];
+  replacedProblems.clear();
+  rerunning = false;
+  replaced.forEach(win => win.close(true));
+
+  // a rerun's keeper goes last, its work done.
+  if (rerunKeeper !== null)
+  {
+    rerunKeeper.close(true);
+    rerunKeeper = null;
+  }
 }
 
 /**
@@ -709,6 +760,9 @@ function openFirstWindow(uiUrl, apiBase)
   {
     bootWindow = { url: `${uiUrl}${rules.bootPath(argv, bundled)}`, ...size };
     openWindow(bootWindow.url, size.width, size.height);
+
+    // the first page's window is on its way, so the error windows of a start that stopped before it can go.
+    closeReplacedProblems();
   });
 }
 
@@ -744,17 +798,16 @@ function isPortTaken(port)
  * @param {string} version The bundle's version.
  * @param {string} origin The bundle's origin.
  * @param {string} projectRoot The project's folder.
- * @returns {Promise<void>} Settles once the API has stopped, or could not start at all.
+ * @returns {Promise<'exited' | 'unstartable'>} Settles once the API has stopped, as 'exited', or as 'unstartable' when
+ * it could not start at all.
  */
 function startApi(layout, version, origin, projectRoot)
 {
   const output = fs.openSync(userFiles.apiLog, 'a');
   fs.writeSync(output, `\n--- ${new Date().toISOString()} jmz-api ${version} on ${origin} for ${projectRoot}\n`);
 
-  const api = spawn(layout.api, [], {
-    env: { ...process.env, ...rules.bundleServerEnvironment(origin, projectRoot, layout.ui) },
-    stdio: [ 'pipe', output, output ],
-  });
+  const variables = rules.bundleServerEnvironment(origin, projectRoot, layout.ui);
+  const api = spawn(layout.api, [], rules.apiSpawnOptions(process.env, variables, output));
 
   // the API writes the log through its own copy of it, so the shell lets go of this one.
   fs.closeSync(output);
@@ -766,14 +819,15 @@ function startApi(layout, version, origin, projectRoot)
     api.once('exit', (code, signal) =>
     {
       log('api-exit', { code, signal });
-      resolve();
+      resolve('exited');
     });
 
-    // a binary that cannot run at all never exits; it failed to start.
+    // a binary that cannot run at all, being missing or not executable, never exits; it failed to start, and the
+    // reason is in this log line alone, since the API never ran to write its own.
     api.once('error', (error) =>
     {
       log('api-error', { error: String(error) });
-      resolve();
+      resolve('unstartable');
     });
   });
 }
@@ -782,7 +836,8 @@ function startApi(layout, version, origin, projectRoot)
  * Asks the API's health check every quarter second until it answers ready, or the asking is called off.
  * @param {string} origin The bundle's origin.
  * @param {() => boolean} asking Whether to keep asking.
- * @returns {Promise<'ready' | 'silent'>} 'ready' once the API answered so, and 'silent' when the asking was called off.
+ * @returns {Promise<'ready' | 'api-silent'>} 'ready' once the API answered so, and 'api-silent' when the asking was
+ * called off.
  */
 async function pollHealth(origin, asking)
 {
@@ -804,22 +859,24 @@ async function pollHealth(origin, asking)
     await sleep(250);
   }
 
-  return 'silent';
+  return 'api-silent';
 }
 
 /**
- * Waits for the bundle's API to say it is ready, for it to stop, or for the wait to run out, whichever comes first.
+ * Waits for the bundle's API to say it is ready, for it to stop or fail to start, or for the wait to run out, whichever
+ * comes first.
  * @param {string} origin The bundle's origin.
- * @param {Promise<void>} ended Settles once the API has stopped.
- * @returns {Promise<'ready' | 'stopped' | 'silent'>} Which came first.
+ * @param {Promise<'exited' | 'unstartable'>} ended Settles once the API has stopped, or could not start at all.
+ * @returns {Promise<'ready' | 'api-start-failed' | 'api-stopped' | 'api-silent'>} 'ready' when that came first, and
+ * otherwise the problem that did.
  */
 async function waitForApi(origin, ended)
 {
   let asking = true;
   const outcome = await Promise.race([
     pollHealth(origin, () => asking),
-    ended.then(() => 'stopped'),
-    sleep(API_READY_TIMEOUT_MS).then(() => 'silent'),
+    ended.then(ending => (ending === 'unstartable' ? 'api-start-failed' : 'api-stopped')),
+    sleep(API_READY_TIMEOUT_MS).then(() => 'api-silent'),
   ]);
 
   asking = false;
@@ -827,45 +884,80 @@ async function waitForApi(origin, ended)
 }
 
 /**
- * Logs what stopped the bundled editor, and shows it in the error window.
+ * Logs what stopped the bundled editor, keeps it for a second launch to answer, and shows it in the error window.
  * @param {string} problem What stopped it, one of the problems the rules word.
- * @param {{ projectRoot: string, port: number }} found The project and the port, as far as the shell got.
+ * @param {{ projectRoot: string, rootSource: string, port: number }} found The project and where it came from, and the
+ * port, as far as the shell got.
  */
 function reportProblem(problem, found)
 {
   log('problem', { problem });
+  stoppedBy = problem;
   const files = { config: userFiles.config, apiLog: userFiles.apiLog, shellLog: logPath };
   showProblem(rules.problemText(problem, { ...found, ...files }));
 }
 
 /**
- * Brings the bundled editor forward when it is launched again. The second launch finds this one holding the profile,
- * hands over its command line and exits, and the person expects the editor already open to come to the front: an error
- * window first, since it says what is wrong, and otherwise the first page's window, opened again when it was closed.
- * Before the windows can open, the first one is on its way already. What the second launch asked for is only logged:
- * this copy stays on its own project.
+ * Runs the bundled editor's start again, for a relaunch after a problem the person can put right stopped it, on this
+ * copy's own flags and environment, and the config as it reads now. The error windows on screen stay up until the
+ * window taking their place holds the app open, the editor's or a fresh error window, and closing them meanwhile never
+ * quits the app: a hidden keeper holds it open until then.
+ */
+function runAgain()
+{
+  stoppedBy = '';
+  rerunning = true;
+  problemWindows.forEach(win => replacedProblems.add(win));
+
+  // the keeper is open before the start runs again, so no moment of the rerun leaves the old windows as the only ones.
+  nw.Window.open('about:blank', { show: false, width: 200, height: 100 }, (win) =>
+  {
+    rerunKeeper = win;
+    runBundle().catch(crashed);
+  });
+}
+
+/**
+ * Answers the bundled editor being launched again. The second launch finds this one holding the profile, hands over
+ * its command line and exits, and the person expects the editor already open to come to the front, or, after a problem
+ * they can put right stopped it, to start again now that they have. The rules decide which (relaunchAction): run the
+ * start again, bring the error window forward, or open the first page's window again, or bring it forward. What the
+ * second launch asked for is only logged: this copy stays on its own flags.
  * @param {string | string[]} commandLine The second launch's command line, as NW.js hands it over (0.118 wraps it in
  * an array).
  */
 function bringForward(commandLine)
 {
-  log('relaunch', { commandLine });
-  const [ problem ] = problemWindows;
-  if (problem !== undefined)
+  const action = rules.relaunchAction({
+    problem: stoppedBy,
+    problemsOpening,
+    problemsShown: problemWindows.size,
+    editorReady: bootWindow !== null,
+  });
+  log('relaunch', { commandLine, action });
+
+  if (action === 'run-again')
   {
+    runAgain();
+    return;
+  }
+
+  if (action === 'focus-problem')
+  {
+    const [ problem ] = problemWindows;
     problem.focus();
     return;
   }
 
-  if (bootWindow !== null)
+  // before the windows can open there is nothing to do: the first one is on its way already.
+  if (action === 'open-editor')
   {
     openWindow(bootWindow.url, bootWindow.width, bootWindow.height);
   }
 }
 
 /**
- * Starts the bundled editor: reads the person's config, checks the project and the port, starts the bundle's API,
- * waits for it to be ready, and opens the first window. Whatever stops it on the way is shown in the error window.
+ * Starts the bundled editor: listens for a second launch, makes the folders its logs live in, and runs its start.
  * @returns {Promise<void>} Settles once the first window is on its way, or an error window is.
  */
 async function startBundle()
@@ -877,18 +969,31 @@ async function startBundle()
   fs.mkdirSync(path.dirname(userFiles.apiLog), { recursive: true });
   fs.mkdirSync(path.dirname(logPath), { recursive: true });
 
+  await runBundle();
+}
+
+/**
+ * Runs the bundled editor's start: reads the person's config, checks the project and the port, starts the bundle's
+ * API, waits for it to be ready, and opens the first window. Whatever stops it on the way is shown in the error window,
+ * and a relaunch runs it again when the problem is one the person can put right.
+ * @returns {Promise<void>} Settles once the first window is on its way, or an error window is.
+ */
+async function runBundle()
+{
   const layout = rules.bundleLayout(__dirname);
   const manifest = JSON.parse(fs.readFileSync(layout.manifest, 'utf-8'));
-  const config = rules.parseBundleConfig(readConfigText(userFiles.config));
+  const config = rules.parseBundleConfig(readConfigText(userFiles.config), os.homedir());
 
   // a config that cannot be read sets nothing, and the window below says the file is wrong.
   const settings = config === null ? { projectRoot: '', port: null } : config;
-  const projectRoot = rules.bundleProjectRoot(argv, process.env, settings, process.cwd());
+  const { projectRoot, source } = rules.bundleProjectRoot(argv, process.env, settings, process.cwd());
   const port = rules.bundlePort(settings, manifest.port);
   const origin = rules.bundleOrigin(port);
-  const found = { projectRoot, port };
+
+  // where the folder came from goes with it, so a problem with the folder points the fix at the place that named it.
+  const found = { projectRoot, rootSource: source, port };
   const { version } = manifest;
-  log('boot', { argv, execPath: process.execPath, version, config: userFiles.config, origin, projectRoot });
+  log('boot', { argv, execPath: process.execPath, version, config: userFiles.config, origin, projectRoot, rootSource: source });
 
   if (config === null)
   {
@@ -919,7 +1024,7 @@ async function startBundle()
   {
     // an API that never answered is ended, so it holds nothing against the next launch.
     shutdown();
-    reportProblem(outcome === 'stopped' ? 'api-stopped' : 'api-silent', found);
+    reportProblem(outcome, found);
     return;
   }
 
@@ -1021,17 +1126,23 @@ async function main()
   await startDev();
 }
 
-main().catch((error) =>
+/**
+ * Ends what a start that crashed had started. A bundle has no terminal, so its crash is shown in the error window
+ * rather than the app quitting without a word; the dev stack quits.
+ * @param {unknown} error What the start threw.
+ */
+function crashed(error)
 {
   log('crash', { error: String(error) });
   shutdown();
 
-  // a bundle has no terminal, so its crash is shown rather than the app quitting without a word.
   if (bundled)
   {
-    reportProblem('crashed', { projectRoot: '', port: 0 });
+    reportProblem('crashed', { projectRoot: '', rootSource: 'config', port: 0 });
     return;
   }
 
   nw.App.quit();
-});
+}
+
+main().catch(crashed);
