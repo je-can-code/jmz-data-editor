@@ -40,6 +40,22 @@ describe('getJmzHttpApiBase', () =>
       .toBe('http://127.0.0.1:18082');
   });
 
+  it('uses a base set at build time in dev too, over the dev stack\'s API port', () =>
+  {
+    // Arrange- dev, on a page from Vite's server, so neither fallback can produce this answer. The dev stack always
+    // hands the UI its API's base this way, so in dev this is the answer every page actually gets.
+    vi.stubEnv('VITE_JMZ_API_BASE', 'http://127.0.0.1:18083');
+    vi.stubEnv('DEV', true);
+    servePageFrom('http://127.0.0.1:3000');
+
+    // Act.
+    const apiBase = getJmzHttpApiBase();
+
+    // Assert.
+    expect(apiBase)
+      .toBe('http://127.0.0.1:18083');
+  });
+
   it('falls back to the dev stack\'s API port in dev, not to the page\'s origin', () =>
   {
     // Arrange- the page comes from Vite's server, which is not the API.
