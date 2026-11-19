@@ -8,15 +8,17 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 // The bundled editor has no Vite server: the API serves the UI's built pages itself, from the folder
 // JMZ_UI_DIR names, on the one origin the pages and the API share. That makes the API a web server for
 // everything outside /api, and it owes the editor four things there. It serves the UI's files and
-// nothing outside their folder, however the path is encoded. Pages are asked about again on every
-// load, so an update is never masked by a cached page, while the files Vite names after their content
-// may be kept. The same access policy guards the pages as guards the API. And every /api route answers
-// exactly as it does with no UI at all.
+// nothing outside their folder, however the path is encoded. Pages are never kept by the browser and
+// never answered from a copy it holds, because every installed build shares the one origin and the one
+// profile: going back to the previous build must run that build's own pages, not the newer pages the
+// browser kept, while the files Vite names after their content may be kept. The same access policy
+// guards the pages as guards the API. And every /api route answers exactly as it does with no UI at all.
 
 // bundleOrigin is the bundled editor's one origin, for the pages and the API alike.
 const bundleOrigin = "http://127.0.0.1:47380"
@@ -137,22 +139,24 @@ func TestTheUiIsNotServedWithoutAFolder(t *testing.T) {
 	}
 }
 
-// TestTheUisPagesAreAskedForAgainAndItsBuiltFilesKept covers caching: every page is revalidated on
-// every load, so an update to the editor is never hidden behind a page the browser kept, and so is
-// every file public/ copies in under the same name each build. Only what Vite named after its content
-// may be kept for good, since a change to it always arrives under a new name.
-func TestTheUisPagesAreAskedForAgainAndItsBuiltFilesKept(t *testing.T) {
+// TestTheUisPagesAreNeverKeptAndItsBuiltFilesAre covers caching: no page is ever stored, so the page a
+// build runs is always its own and never one another build left in the browser, and neither is any
+// file public/ copies in under the same name each build. None of them carries a Last-Modified either,
+// since a browser holding that time could ask by it and be answered 304. Only what Vite named after
+// its content may be kept for good, with its time, since a change to it always arrives under a new name.
+func TestTheUisPagesAreNeverKeptAndItsBuiltFilesAre(t *testing.T) {
 	cases := []struct {
-		target   string
-		expected string
+		target       string
+		expected     string
+		lastModified bool
 	}{
-		{target: "/", expected: "no-cache"},
-		{target: "/index.html", expected: "no-cache"},
-		{target: "/map.html", expected: "no-cache"},
-		{target: "/shell.html", expected: "no-cache"},
-		{target: "/favicon.ico", expected: "no-cache"},
-		{target: "/assets/images/vite.png", expected: "no-cache"},
-		{target: "/assets/main-DzIJpNIu.js", expected: immutable},
+		{target: "/", expected: "no-store", lastModified: false},
+		{target: "/index.html", expected: "no-store", lastModified: false},
+		{target: "/map.html", expected: "no-store", lastModified: false},
+		{target: "/shell.html", expected: "no-store", lastModified: false},
+		{target: "/favicon.ico", expected: "no-store", lastModified: false},
+		{target: "/assets/images/vite.png", expected: "no-store", lastModified: false},
+		{target: "/assets/main-DzIJpNIu.js", expected: immutable, lastModified: true},
 	}
 
 	for _, testCase := range cases {
@@ -167,6 +171,53 @@ func TestTheUisPagesAreAskedForAgainAndItsBuiltFilesKept(t *testing.T) {
 			assertStatus(t, response, http.StatusOK)
 			if cacheControl := response.Header().Get("Cache-Control"); cacheControl != testCase.expected {
 				t.Errorf("sent Cache-Control %q, expected %q", cacheControl, testCase.expected)
+			}
+			if lastModified := response.Header().Get("Last-Modified"); (lastModified != "") != testCase.lastModified {
+				t.Errorf("sent Last-Modified %q, expected one: %v", lastModified, testCase.lastModified)
+			}
+		})
+	}
+}
+
+// TestTheUisPagesAreServedWholeToABrowserHoldingANewerCopy covers going back to the previous build.
+// Each build's files carry the time the build was made, and every installed build serves the same
+// origin into the same profile, so a browser that ran the newer build asks for the older build's
+// pages with the newer, later time. Every page, and every file public/ copies in, must still arrive
+// whole, or the newer build's copy would run against the older API. Only what Vite named after its
+// content may be answered from the browser's copy, since its name already says what it holds.
+func TestTheUisPagesAreServedWholeToABrowserHoldingANewerCopy(t *testing.T) {
+	cases := []struct {
+		target   string
+		file     string
+		expected int
+	}{
+		{target: "/", file: "index.html", expected: http.StatusOK},
+		{target: "/map.html", file: "map.html", expected: http.StatusOK},
+		{target: "/shell.html", file: "shell.html", expected: http.StatusOK},
+		{target: "/favicon.ico", file: "favicon.ico", expected: http.StatusOK},
+		{target: "/assets/images/vite.png", file: "assets/images/vite.png", expected: http.StatusOK},
+		{target: "/assets/main-DzIJpNIu.js", file: "assets/main-DzIJpNIu.js", expected: http.StatusNotModified},
+	}
+
+	for _, testCase := range cases {
+		t.Run(testCase.target, func(t *testing.T) {
+			// Arrange- the older build's files, made before the newer build whose copies the browser kept.
+			current, ui := newBundledProject(t)
+			olderBuild := time.Date(2026, 11, 18, 21, 45, 0, 0, time.UTC)
+			for file := range uiFixture {
+				if err := os.Chtimes(filepath.Join(ui, filepath.FromSlash(file)), olderBuild, olderBuild); err != nil {
+					t.Fatal(err)
+				}
+			}
+			newerBuild := time.Date(2026, 11, 19, 1, 0, 0, 0, time.UTC).Format(http.TimeFormat)
+
+			// Act.
+			response := current.call(t, http.MethodGet, testCase.target, "", "If-Modified-Since", newerBuild)
+
+			// Assert.
+			assertStatus(t, response, testCase.expected)
+			if testCase.expected == http.StatusOK && response.Body.String() != uiFixture[testCase.file] {
+				t.Errorf("served %q", response.Body.String())
 			}
 		})
 	}

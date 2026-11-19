@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"path"
 	"strings"
+	"time"
 )
 
 // ServeUI serves the UI's built pages from folder, for a server that is also the UI's own, as the API
@@ -38,20 +39,28 @@ func ServeUI(folder string) http.HandlerFunc {
 		}
 		defer file.Close()
 
-		responseWriter.Header().Set("Cache-Control", uiCacheControl(relativePath))
-		http.ServeContent(responseWriter, httpRequest, info.Name(), info.ModTime(), file)
+		cacheControl, modTime := uiCaching(relativePath, info.ModTime())
+		responseWriter.Header().Set("Cache-Control", cacheControl)
+		http.ServeContent(responseWriter, httpRequest, info.Name(), modTime, file)
 	}
 }
 
-// uiCacheControl says how long a browser may keep one of the UI's files. Vite writes what it builds
-// straight into assets/, each file named after a hash of its content, so a changed file always arrives
-// under a new name and the old one may be kept for good. Everything else is asked about again on every
-// use, so an update is never masked by a copy the browser kept: the pages above all, and the files
-// public/ copies in under the same names every build, one folder down in assets/ included.
-func uiCacheControl(relativePath string) string {
+// uiCaching says how a browser may keep one of the UI's files, and which modification time to hand
+// ServeContent for it: the time that becomes Last-Modified, and that a conditional request is answered
+// 304 by. Vite writes what it builds straight into assets/, each file named after a hash of its
+// content, so a changed file always arrives under a new name and the old one may be kept for good.
+//
+// Everything else is never stored, and is served with no time at all, which ServeContent takes to mean
+// that every request gets the whole file: the pages above all, and the files public/ copies in under
+// the same names every build, one folder down in assets/ included. A file's time cannot order builds.
+// It is when its build was made, and every installed build serves this one origin into one shared
+// profile, so going back to the previous build serves pages older than the copies the browser kept from
+// the newer one. Answered by time, those would be 304s, and the newer build's pages would run against
+// the older build's API.
+func uiCaching(relativePath string, modTime time.Time) (string, time.Time) {
 	if path.Dir(relativePath) == "assets" {
-		return "public, max-age=31536000, immutable"
+		return "public, max-age=31536000, immutable", modTime
 	}
 
-	return "no-cache"
+	return "no-store", time.Time{}
 }
