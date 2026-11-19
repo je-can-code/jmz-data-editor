@@ -105,6 +105,48 @@ describe('shellRules', () =>
     });
   });
 
+  describe('hasFlag', () =>
+  {
+    it('finds a bare flag among the arguments, Chromium\'s switches included', () =>
+    {
+      // Arrange: the arguments above, which carry --attach.
+
+      // Act.
+      const found = rules.hasFlag(ARGV, '--attach');
+
+      // Assert.
+      expect(found)
+        .toBe(true);
+    });
+
+    it('finds no flag that is absent, that only starts the same way, or that carries a value', () =>
+    {
+      // Arrange: a flag the arguments lack, a shorter one that --attach starts with, and a bare flag in the joined form.
+
+      // Act.
+      const found = [ rules.hasFlag(ARGV, '--log'), rules.hasFlag(ARGV, '--att'), rules.hasFlag([ '--attach=yes' ], '--attach') ];
+
+      // Assert.
+      expect(found)
+        .toStrictEqual([ false, false, false ]);
+    });
+  });
+
+  describe('trimOrigin', () =>
+  {
+    it('trims the spaces and every trailing slash off an origin, so it joins cleanly with a path', () =>
+    {
+      // Arrange: an origin padded with spaces and ending in two slashes, and one with a path whose inner slash stays.
+
+      // Act.
+      const origins = [ rules.trimOrigin(' http://a:1// '), rules.trimOrigin('http://a:1/x/') ];
+
+      // Assert.
+      expect(origins)
+        .toStrictEqual([ 'http://a:1', 'http://a:1/x' ]);
+    });
+  });
+
   describe('bootPath', () =>
   {
     it('boots the map editor under --maps and the data editor otherwise', () =>
@@ -115,8 +157,8 @@ describe('shellRules', () =>
       const paths = [ rules.bootPath(ARGV, false), rules.bootPath([ '--attach' ], false), rules.bootPath([ '--mapsx' ], false) ];
 
       // Assert.
-      expect([ paths, rules.hasFlag(ARGV, '--attach') ])
-        .toStrictEqual([ [ '/map.html', '/', '/' ], true ]);
+      expect(paths)
+        .toStrictEqual([ '/map.html', '/', '/' ]);
     });
 
     it('boots a bundle on the map editor, with or without --maps', () =>
@@ -228,22 +270,33 @@ describe('shellRules', () =>
     });
   });
 
-  describe('dev stack', () =>
+  describe('uiPort', () =>
   {
-    it('starts the UI on its URL\'s port and hands the runner every origin', () =>
+    it('starts the UI on its URL\'s port, the scheme\'s own when the URL names none', () =>
     {
-      // Arrange: explicit ports, and the schemes' defaults.
+      // Arrange: an explicit port, and the two schemes' defaults.
 
       // Act.
       const ports = [ rules.uiPort('http://127.0.0.1:18150'), rules.uiPort('http://127.0.0.1'), rules.uiPort('https://127.0.0.1') ];
+
+      // Assert.
+      expect(ports)
+        .toStrictEqual([ 18150, 80, 443 ]);
+    });
+  });
+
+  describe('devStackArgs', () =>
+  {
+    it('hands the dev stack\'s runner the project and every origin', () =>
+    {
+      // Arrange: a project, and an API and a UI moved off their default ports.
+
+      // Act.
       const args = rules.devStackArgs('/games/chef', 'http://127.0.0.1:18151', 'http://127.0.0.1:18150');
 
       // Assert.
-      expect([ ports, args ])
-        .toStrictEqual([
-          [ 18150, 80, 443 ],
-          [ 'run', 'dev', '--project-root', '/games/chef', '--api-base', 'http://127.0.0.1:18151', '--ui-url', 'http://127.0.0.1:18150' ],
-        ]);
+      expect(args)
+        .toStrictEqual([ 'run', 'dev', '--project-root', '/games/chef', '--api-base', 'http://127.0.0.1:18151', '--ui-url', 'http://127.0.0.1:18150' ]);
     });
   });
 
@@ -257,8 +310,8 @@ describe('shellRules', () =>
       const sizes = [ rules.windowSize(960.4, 1400), rules.windowSize(10, 1400), rules.windowSize(99999, 1400), rules.windowSize(undefined, 1400), rules.windowSize(Number.NaN, 900) ];
 
       // Assert.
-      expect([ sizes, rules.trimOrigin(' http://a:1// ') ])
-        .toStrictEqual([ [ 960, 320, 7680, 1400, 900 ], 'http://a:1' ]);
+      expect(sizes)
+        .toStrictEqual([ 960, 320, 7680, 1400, 900 ]);
     });
   });
 
