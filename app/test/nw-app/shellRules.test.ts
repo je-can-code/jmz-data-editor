@@ -38,7 +38,7 @@ const rules = load('../../../nw-app/shellRules.js') as {
   bundleLayout(shellDirectory: string): { root: string; manifest: string; api: string; ui: string };
   isBundled(shellDirectory: string, exists: (filePath: string) => boolean): boolean;
   bundleUserFiles(environment: Record<string, string | undefined>, homeDirectory: string): { config: string; apiLog: string; shellLog: string };
-  parseBundleConfig(text: string | null): { projectRoot: string; port: number | null } | null;
+  parseBundleConfig(text: string | null, homeDirectory: string): { projectRoot: string; port: number | null } | null;
   bundleProjectRoot(argv: string[], environment: Record<string, string | undefined>, config: { projectRoot: string }, workingDirectory: string): string;
   bundlePort(config: { port: number | null }, defaultPort: number): number;
   bundleOrigin(port: number): string;
@@ -576,9 +576,10 @@ describe('shellRules', () =>
    * alone: its config in the XDG config folder and its logs in the XDG state folder, under the editor's own name. It
    * serves its pages and its API from one loopback origin on a fixed port, the config's when it names a usable one,
    * since everything the pages save belongs to that origin. The config is written by hand, so text that is not a config
-   * is refused rather than half read. Before the API starts, the project must be chosen, there, and an RPG Maker MZ
-   * project, because the API's health check only says one is set; the API counts as ready only once that check answers
-   * ok; and whatever stops the editor is put in plain words that name the log saying more.
+   * is refused rather than half read, and a folder in it may start from ~ as it would in a terminal, since no shell
+   * expands the file first. Before the API starts, the project must be chosen, there, and an RPG Maker MZ project,
+   * because the API's health check only says one is set; the API counts as ready only once that check answers ok; and
+   * whatever stops the editor is put in plain words that name the log saying more.
    */
   describe('bundle mode', () =>
   {
@@ -669,7 +670,7 @@ describe('shellRules', () =>
         const texts = [ '{ "projectRoot": " /games/chef ", "port": 47390, "theme": "dark" }', '{ "port": 1 }', '{ "port": 65535 }' ];
 
         // Act.
-        const configs = texts.map(text => rules.parseBundleConfig(text));
+        const configs = texts.map(text => rules.parseBundleConfig(text, '/home/maker'));
 
         // Assert.
         expect(configs)
@@ -682,11 +683,32 @@ describe('shellRules', () =>
         const texts = [ null, '{}', '{ "projectRoot": null, "port": null }' ];
 
         // Act.
-        const configs = texts.map(text => rules.parseBundleConfig(text));
+        const configs = texts.map(text => rules.parseBundleConfig(text, '/home/maker'));
 
         // Assert.
         expect(configs)
           .toStrictEqual([ { projectRoot: '', port: null }, { projectRoot: '', port: null }, { projectRoot: '', port: null } ]);
+      });
+
+      it('counts a folder starting with ~ from the home folder, as a terminal does, and leaves any other ~ as written', () =>
+      {
+        // Arrange: ~ alone, ~ and a folder, the same padded with spaces, then near misses: another person's home folder,
+        // a ~ inside a folder, and one at the end.
+        const texts = [
+          '{ "projectRoot": "~" }',
+          '{ "projectRoot": "~/games/chef" }',
+          '{ "projectRoot": " ~/games/chef " }',
+          '{ "projectRoot": "~maker/games/chef" }',
+          '{ "projectRoot": "/games/~/chef" }',
+          '{ "projectRoot": "games/~" }',
+        ];
+
+        // Act.
+        const roots = texts.map(text => rules.parseBundleConfig(text, '/home/maker')?.projectRoot);
+
+        // Assert.
+        expect(roots)
+          .toStrictEqual([ '/home/maker', '/home/maker/games/chef', '/home/maker/games/chef', '~maker/games/chef', '/games/~/chef', 'games/~' ]);
       });
 
       it('refuses text that is not a config, rather than reading part of it', () =>
@@ -710,7 +732,7 @@ describe('shellRules', () =>
         ];
 
         // Act.
-        const configs = texts.map(text => rules.parseBundleConfig(text));
+        const configs = texts.map(text => rules.parseBundleConfig(text, '/home/maker'));
 
         // Assert.
         expect(configs)

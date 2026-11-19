@@ -466,15 +466,36 @@ function isPort(value)
 }
 
 /**
+ * Expands the ~ a folder written by hand may start with into the person's home folder, as a terminal would: ~ alone, or
+ * ~ and a slash before the rest. A ~ anywhere else is part of a folder's name, and ~name, which a terminal reads as
+ * another person's home folder, is left as written.
+ * @param {string} folder The folder, as written.
+ * @param {string} homeDirectory The person's home folder.
+ * @returns {string} The folder, its leading ~ expanded.
+ */
+function expandHome(folder, homeDirectory)
+{
+  if (folder === '~')
+  {
+    return homeDirectory;
+  }
+
+  return folder.startsWith('~/') ? path.join(homeDirectory, folder.slice(2)) : folder;
+}
+
+/**
  * Reads the bundled editor's config, which the person writes by hand: an object naming the project's folder as
  * projectRoot and, when the bundle's own port will not do, a port. No file at all is a config with nothing set, and a
  * key left out or set to null is unset. Keys it does not know are left alone. Text it cannot make sense of is refused
- * rather than half read, so the person learns the file is wrong instead of being told nothing is set.
+ * rather than half read, so the person learns the file is wrong instead of being told nothing is set. A folder written
+ * from ~ counts from the person's home folder, as it would in a terminal: no shell reads this file to expand it first,
+ * as one does a folder given on the command line.
  * @param {string | null} text The file's text, or null when there is no file.
+ * @param {string} homeDirectory The person's home folder.
  * @returns {{ projectRoot: string, port: number | null } | null} The settings, with an empty folder and a null port
  * for whichever is unset, or null when the text is not a config.
  */
-function parseBundleConfig(text)
+function parseBundleConfig(text, homeDirectory)
 {
   if (text === null)
   {
@@ -503,7 +524,7 @@ function parseBundleConfig(text)
     return null;
   }
 
-  return { projectRoot: projectRoot.trim(), port };
+  return { projectRoot: expandHome(projectRoot.trim(), homeDirectory), port };
 }
 
 /**

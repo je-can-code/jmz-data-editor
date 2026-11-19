@@ -879,7 +879,7 @@ async function startBundle()
 
   const layout = rules.bundleLayout(__dirname);
   const manifest = JSON.parse(fs.readFileSync(layout.manifest, 'utf-8'));
-  const config = rules.parseBundleConfig(readConfigText(userFiles.config));
+  const config = rules.parseBundleConfig(readConfigText(userFiles.config), os.homedir());
 
   // a config that cannot be read sets nothing, and the window below says the file is wrong.
   const settings = config === null ? { projectRoot: '', port: null } : config;
