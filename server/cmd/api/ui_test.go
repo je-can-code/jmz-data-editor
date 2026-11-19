@@ -114,28 +114,36 @@ func TestTheUisFilesAreServedFromItsFolder(t *testing.T) {
 }
 
 // TestTheUiIsNotServedWithoutAFolder covers the dev stack's server, which Vite stands beside: with no
-// JMZ_UI_DIR, nothing outside /api is served, while the API itself answers as ever.
+// JMZ_UI_DIR, nothing outside /api is served, while the API itself answers as ever. A path outside /api
+// never reaches the UI's handler at all: it gets the router's own answer for a path no route knows, never
+// the handler's not found, which a handler with no folder would also give for every page, and never the
+// handler's refusal of a write.
 func TestTheUiIsNotServedWithoutAFolder(t *testing.T) {
 	cases := []struct {
+		method   string
 		target   string
 		expected int
 	}{
-		{target: "/", expected: http.StatusNotFound},
-		{target: "/index.html", expected: http.StatusNotFound},
-		{target: "/map.html", expected: http.StatusNotFound},
-		{target: "/api/mapinfos", expected: http.StatusOK},
+		{method: http.MethodGet, target: "/", expected: http.StatusNotFound},
+		{method: http.MethodGet, target: "/index.html", expected: http.StatusNotFound},
+		{method: http.MethodGet, target: "/map.html", expected: http.StatusNotFound},
+		{method: http.MethodPost, target: "/index.html", expected: http.StatusNotFound},
+		{method: http.MethodGet, target: "/api/mapinfos", expected: http.StatusOK},
 	}
 
 	for _, testCase := range cases {
-		t.Run(testCase.target, func(t *testing.T) {
+		t.Run(testCase.method+" "+testCase.target, func(t *testing.T) {
 			// Arrange.
 			current := newProject(t)
 
 			// Act.
-			response := current.call(t, http.MethodGet, testCase.target, "")
+			response := current.call(t, testCase.method, testCase.target, "")
 
-			// Assert.
+			// Assert- the router words its not found as no handler of this API does.
 			assertStatus(t, response, testCase.expected)
+			if testCase.expected == http.StatusNotFound && response.Body.String() != "404 page not found\n" {
+				t.Errorf("answered %q, rather than the router's own not found", response.Body.String())
+			}
 		})
 	}
 }
