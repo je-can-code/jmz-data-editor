@@ -37,6 +37,13 @@ import {
  * ~/.local/bin, and with no terminal. And pruning only ever removes build folders other than the current and previous
  * ones and those something is running from, never a link, so neither the build in use, the one to go back to, nor one
  * still open from before is ever pulled out from under the person using it.
+ *
+ * Installing itself is run over SSH, where a session can drop at any moment, so every way it ends has to leave an
+ * editor that opens. A refused build takes away exactly what its run made and nothing else. A build already current
+ * changes nothing in the install folder, though its menu entry and link are written again. A newer build keeps the one
+ * it replaces as previous. A run stopped between moving previous and moving current leaves both naming the old build,
+ * still whole. And nothing is staged in the system's temporary folder, which is RAM there, since a run cut short never
+ * cleans up after itself; it stages in the install folder, where the next install prunes what it left.
  */
 
 /**
@@ -54,6 +61,7 @@ const DIGEST = 'a'.repeat(64);
  */
 const FIRST = '20261118.2200-aaa1111';
 const SECOND = '20261119.0100-bbb2222';
+const THIRD = '20261119.1400-ccc3333';
 
 /**
  * A real program that ldd can read and that runs until it is stopped, standing in for NW.js in every build the tests
@@ -186,6 +194,17 @@ const startFrom = async (executable: string): Promise<ChildProcess> =>
   programs.push(program);
   await once(program, 'spawn');
   return program;
+};
+
+/**
+ * Starts the editor the way the menu entry does, through the command line link, and reports how it went.
+ * @param {Laptop} machine The laptop.
+ * @returns {[ number | null, string ]} The exit code, and what the launcher printed: the folder of the build it started.
+ */
+const startEditor = (machine: Laptop): [ number | null, string ] =>
+{
+  const started = spawnSync(join(machine.home, '.local', 'bin', 'jmz-editor'), { encoding: 'utf8' });
+  return [ started.status, started.stdout ];
 };
 
 /**
@@ -566,6 +585,172 @@ describe('install', () =>
       // the installer says what it did on the console; these tests read what it did from the folders instead.
       vi.spyOn(console, 'log')
         .mockImplementation(() => undefined);
+    });
+
+    it('installs a first build as current, with a link and a menu entry that start it, and nothing left over', () =>
+    {
+      // Arrange- an empty home folder, and a build published.
+      const machine = laptop();
+      publishBuild(machine, FIRST);
+      const binLink = join(machine.home, '.local', 'bin', 'jmz-editor');
+      const desktopFile = join(machine.home, '.local', 'share', 'applications', 'jmz-editor.desktop');
+
+      // Act
+      install(machine.builds, machine.home);
+
+      // Assert
+      expect([
+        readdirSync(machine.root)
+          .sort(),
+        readlinkSync(join(machine.root, 'current')),
+        readlinkSync(binLink),
+        readFileSync(desktopFile, 'utf8')
+          .split('\n'),
+        startEditor(machine),
+      ])
+        .toEqual([
+          [ FIRST, 'current' ],
+          FIRST,
+          join(machine.root, 'current', 'jmz-editor'),
+          [
+            '[Desktop Entry]',
+            'Type=Application',
+            'Name=JMZ Editor',
+            'Comment=Edit and playtest an RPG Maker MZ project',
+            `Exec=${binLink}`,
+            `Icon=${join(machine.root, 'current', 'ui', 'favicon.ico')}`,
+            'Terminal=false',
+            'Categories=Development;',
+            '',
+          ],
+          [ 0, `${join(realpathSync(machine.root), FIRST)}\n` ],
+        ]);
+    });
+
+    it('changes nothing in the install folder when the build is already the current one', () =>
+    {
+      // Arrange- a build installed, and nothing new published.
+      const machine = laptop();
+      publishBuild(machine, FIRST);
+      install(machine.builds, machine.home);
+      const before = listing(machine.root);
+      vi.mocked(console.log)
+        .mockClear();
+
+      // Act
+      install(machine.builds, machine.home);
+
+      // Assert
+      expect([ listing(machine.root), vi.mocked(console.log).mock.calls ])
+        .toEqual([ before, [ [ `jmz-editor ${FIRST} is already installed.` ] ] ]);
+    });
+
+    it('keeps the build a newer one replaces as previous, and removes the one before it', () =>
+    {
+      // Arrange- two builds installed in turn, and a third published.
+      const machine = laptop();
+      publishBuild(machine, FIRST);
+      install(machine.builds, machine.home);
+      publishBuild(machine, SECOND);
+      install(machine.builds, machine.home);
+      publishBuild(machine, THIRD);
+      vi.mocked(console.log)
+        .mockClear();
+
+      // Act
+      install(machine.builds, machine.home);
+
+      // Assert
+      expect([
+        readdirSync(machine.root)
+          .sort(),
+        readlinkSync(join(machine.root, 'current')),
+        readlinkSync(join(machine.root, 'previous')),
+        vi.mocked(console.log).mock.calls,
+      ])
+        .toEqual([
+          [ SECOND, THIRD, 'current', 'previous' ],
+          THIRD,
+          SECOND,
+          [
+            [ `Installed jmz-editor ${THIRD}.` ],
+            [ `Kept ${SECOND} as the previous build.` ],
+            [ `Removed ${FIRST}.` ],
+            [ `Start it from the app menu, or with ${join(machine.home, '.local', 'bin', 'jmz-editor')}.` ],
+          ],
+        ]);
+    });
+
+    it('keeps a build the editor is still running from when two newer builds have been installed since', async () =>
+    {
+      // Arrange- the editor started on the first build, then two newer builds installed while it stays open.
+      const machine = laptop();
+      publishBuild(machine, FIRST);
+      install(machine.builds, machine.home);
+      const editor = await startFrom(join(machine.root, 'current', 'nwjs', 'nw'));
+      publishBuild(machine, SECOND);
+      install(machine.builds, machine.home);
+      publishBuild(machine, THIRD);
+
+      // Act
+      install(machine.builds, machine.home);
+
+      // Assert- the running editor's own file is still there, rather than deleted from under it.
+      expect([
+        readdirSync(machine.root)
+          .sort(),
+        readlinkSync(join(machine.root, 'current')),
+        readlinkSync(join(machine.root, 'previous')),
+        readlinkSync(`/proc/${editor.pid}/exe`),
+      ])
+        .toEqual([
+          [ FIRST, SECOND, THIRD, 'current', 'previous' ],
+          THIRD,
+          SECOND,
+          join(realpathSync(machine.root), FIRST, 'nwjs', 'nw'),
+        ]);
+    });
+
+    it('leaves the old build starting from the menu when a run stops between switching previous and current', () =>
+    {
+      // Arrange- a build installed, a newer one published, and a folder where current's next link is made, so the
+      // run stops right after previous has moved, as a run cut short between the two switches does.
+      const machine = laptop();
+      publishBuild(machine, FIRST);
+      install(machine.builds, machine.home);
+      publishBuild(machine, SECOND);
+      mkdirSync(join(machine.root, 'current.next', 'in-the-way'), { recursive: true });
+
+      // Act
+      const outcome = refusalFrom(() => install(machine.builds, machine.home));
+
+      // Assert- both links name the old build, which still starts.
+      expect([
+        outcome.startsWith('not a refusal'),
+        readlinkSync(join(machine.root, 'current')),
+        readlinkSync(join(machine.root, 'previous')),
+        startEditor(machine),
+      ])
+        .toEqual([ true, FIRST, FIRST, [ 0, `${join(realpathSync(machine.root), FIRST)}\n` ] ]);
+    });
+
+    it('takes away the install folder it made for a first build that is refused, and nothing that was there', () =>
+    {
+      // Arrange- a home folder holding another app's menu entry but no install folder yet, and a build whose API
+      // reports another version than the one published.
+      const machine = laptop();
+      const otherApp = join(machine.home, '.local', 'share', 'applications', 'other-app.desktop');
+      mkdirSync(join(otherApp, '..'), { recursive: true });
+      writeFileSync(otherApp, '[Desktop Entry]\nName=Other App\n');
+      publishBuild(machine, FIRST, build => writeFileSync(join(build, 'server', 'jmz-api'), '#!/bin/sh\necho 0.0.1\n'));
+      const before = listing(machine.home);
+
+      // Act
+      const message = refusalFrom(() => install(machine.builds, machine.home));
+
+      // Assert
+      expect([ message, listing(machine.home) ])
+        .toEqual([ `server/jmz-api reports version 0.0.1, but versions.json names ${FIRST}.`, before ]);
     });
 
     it('refuses to replace a build of its own version while something runs from it, and changes nothing', async () =>
